@@ -1,0 +1,26 @@
+{
+  "metadata": [
+    {
+      "src": [
+        {
+          "files": [ "../Orivy/Orivy.csproj" ]
+        }
+      ],
+      "dest": "api",
+      "properties": {
+        "TargetFramework": "net8.0"
+      }
+    }
+  ],
+  "build": {
+    "content": [
+      { "files": ["**/*.md"] },
+      { "files": ["api/**.yml", "api/**.json"], "src": "api" }
+    ],
+    "resource": [ { "files": [ "images/**" ] } ],
+    "dest": "_site",
+    "globalMetadata": {
+      "_appTitle": "Orivy Documentation"
+    }
+  }
+}
