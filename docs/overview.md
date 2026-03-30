@@ -22,5 +22,7 @@ Where to start in the code
 - The element base and control lifecycle: [Orivy/Controls/ElementBase.cs](Orivy/Controls/ElementBase.cs)
 - Common controls: [Orivy/Controls](Orivy/Controls)
 - Layout engine: [Orivy/Layout](Orivy/Layout)
+- Styling engine: [Orivy/Layout](Orivy/Styling)
+- Animation engine: [Orivy/Layout](Orivy/Animation)
 - Rendering helpers and GPU path: [Orivy/Rendering](Orivy/Rendering)
 

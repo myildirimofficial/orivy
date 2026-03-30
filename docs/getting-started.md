@@ -13,7 +13,7 @@ Prerequisites
 Clone and build
 
 ```powershell
-git clone <repo-url>
+git clone https://github.com/myildirimofficial/orivy.git
 cd sdui
 dotnet build Orivy.sln -c Debug
 ```

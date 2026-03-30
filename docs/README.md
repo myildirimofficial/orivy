@@ -11,6 +11,7 @@ Primary pages
 - [Controls and Custom Control Guide](controls.md) — control lifecycle, styling, and examples
 - [Binding System](binding.md) — DataContext, Link API, collection binding
 - [Animation System](animation.md) — AnimationManager, patterns, performance
+- [Visual System](visual.md) — Element visual system, motions, styling, patterns
 - [Rendering Notes](rendering.md) — Skia usage, GPU vs CPU path, paints & fonts
 
 Examples and walkthroughs

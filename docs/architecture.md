@@ -100,5 +100,7 @@ This architecture reference explains how Orivy is composed into consistent layer
 - `Orivy/Layout/*`
 - `Orivy/Rendering/*`
 - `Orivy/Animation/*`
+- `Orivy/Styling/*`
 - `Orivy/Binding/*`
+- `Orivy/Validations/*`
 - `Orivy/Collections/ElementCollection.cs`
