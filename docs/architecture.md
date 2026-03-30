@@ -80,11 +80,21 @@ This architecture reference explains how Orivy is composed into consistent layer
 - `ValueProvider<T>` controls low-level value interpolation and easing.
 - `ValueFactories` and `EasingMethods` compose physical animation semantics.
 
-## 8. Styling subset
+## 8. Styling and visual layer
 
-- `ElementBase.VisualStyles` manages visual state snapshots and transitions.
-- `ElementBase.MotionEffects` provides reusable motion effect rendering.
-- `Styling` classes centralize style keys and interpolations.
+- `ColorScheme` (`Orivy/ColorScheme.cs`)
+  - Central palette and theme manager for surfaces, accents, outlines, status colors, and dark/light mode.
+  - Raises `ThemeChanged` so controls can recompute theme-dependent visuals.
+
+- `ElementBase.VisualStyles` and `Orivy.Styling`
+  - Manage visual state snapshots, style rules, interpolated transitions, and predicate-based style matching.
+  - Expose the fluent `ConfigureVisualStyles(...)` builder used by controls such as `Button`, `ComboBox`, and `ColorPicker`.
+
+- `ElementBase.MotionEffects`
+  - Provides reusable decorative motion rendering that complements, but does not replace, the styling system.
+
+- `WindowThemeType` and `WindowBase`
+  - Bridge Orivy theme colors into native host effects such as `Mica`, `Acrylic`, and `Tabbed` window styling when supported.
 
 ## 9. Performance and robustness
 

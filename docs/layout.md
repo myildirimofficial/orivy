@@ -20,7 +20,7 @@ Key design principles:
 
 The layout contract is defined by `IArrangedElement`.
 
-- File: [Orivy/Layout/IArrangedElement.cs](Orivy/Layout/IArrangedElement.cs)
+- File: `Orivy/Layout/IArrangedElement.cs`
 
 Important members (summary):
 
@@ -49,8 +49,8 @@ Notes:
 
 Layout engines implement the measurement/arrangement strategy. The default engine is `DefaultLayout`.
 
-- File: [Orivy/Layout/LayoutEngine.cs](Orivy/Layout/LayoutEngine.cs)
-- File: [Orivy/Layout/DefaultLayout.cs](Orivy/Layout/DefaultLayout.cs)
+- File: `Orivy/Layout/LayoutEngine.cs`
+- File: `Orivy/Layout/DefaultLayout.cs`
 
 The engine is responsible for:
 - Iterating children in z-order
@@ -68,7 +68,7 @@ The engine is responsible for:
 - `AutoSize` controls contribute to preferred-size calculations. Growth mode (GrowOnly or GrowAndShrink) is honored when computing parent preferred size.
 - The engine stages bounds changes in a cached-bounds store during measurement and applies them during arrange via `ApplyCachedBounds`.
 
-See implementation for details: [Orivy/Layout/DefaultLayout.cs](Orivy/Layout/DefaultLayout.cs)
+See implementation for details: `Orivy/Layout/DefaultLayout.cs`
 
 ### Docking
 
@@ -98,13 +98,13 @@ content.Dock = DockStyle.Fill;
 
 To keep layout performant, Orivy caches preferred-size results and uses light-weight MRU caches for text measurement.
 
-- Preferred-size caches live in the `PropertyStore` attached to elements. See [Orivy/Layout/CommonProperties.cs](Orivy/Layout/CommonProperties.cs) and `PropertyStore` for implementation details.
+- Preferred-size caches live in the `PropertyStore` attached to elements. See `Orivy/Layout/CommonProperties.cs` and `PropertyStore` for implementation details.
 - Text measurement uses `LayoutUtils.MeasureTextCache` to avoid repeated heavy text layout work; it keeps a small MRU ring buffer.
 
 Files:
-- [Orivy/Layout/CommonProperties.cs](Orivy/Layout/CommonProperties.cs)
-- [Orivy/Layout/PropertyStore.cs](Orivy/Layout/PropertyStore.cs)
-- [Orivy/Layout/LayoutUtils.MeasureTextCache.cs](Orivy/Layout/LayoutUtils.MeasureTextCache.cs)
+- `Orivy/Layout/CommonProperties.cs`
+- `Orivy/Layout/PropertyStore.cs`
+- `Orivy/Layout/LayoutUtils.MeasureTextCache.cs`
 
 ### MeasureTextCache (summary)
 
@@ -142,7 +142,7 @@ This approach avoids partial state exposure: `GetPreferredSize` can simulate lay
 
 To batch updates and avoid layout thrashing, use `LayoutTransaction`.
 
-- File: [Orivy/Layout/LayoutTransaction.cs](Orivy/Layout/LayoutTransaction.cs)
+- File: `Orivy/Layout/LayoutTransaction.cs`
 
 `LayoutTransaction` clears preferred-size caches and suspends layout while you make multiple changes. Example pattern:
 
@@ -210,7 +210,7 @@ myButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
 
 ## Edge cases & compatibility notes
 
-- Anchor V2: `DefaultLayout` contains an improved anchor computation path (`ComputeAnchoredBoundsV2`) — this can change sizing in complex scenarios. If you depend on legacy anchor behavior, consult the compatibility code paths in [Orivy/Layout/DefaultLayout.cs](Orivy/Layout/DefaultLayout.cs).
+- Anchor V2: `DefaultLayout` contains an improved anchor computation path (`ComputeAnchoredBoundsV2`) - this can change sizing in complex scenarios. If you depend on legacy anchor behavior, consult the compatibility code paths in `Orivy/Layout/DefaultLayout.cs`.
 - Dock ordering: dock uses children z-order. Reordering child insertion affects layout.
 
 ## Implementation reference (files)

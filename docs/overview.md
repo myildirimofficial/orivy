@@ -18,11 +18,11 @@ Key concepts
 - Animation: `AnimationManager` provides an easy-to-use, timer-driven animation helper that integrates with control invalidation.
 
 Where to start in the code
-- Application entrypoint and window loop: [Orivy/Application.cs](Orivy/Application.cs)
-- The element base and control lifecycle: [Orivy/Controls/ElementBase.cs](Orivy/Controls/ElementBase.cs)
-- Common controls: [Orivy/Controls](Orivy/Controls)
-- Layout engine: [Orivy/Layout](Orivy/Layout)
-- Styling engine: [Orivy/Layout](Orivy/Styling)
-- Animation engine: [Orivy/Layout](Orivy/Animation)
-- Rendering helpers and GPU path: [Orivy/Rendering](Orivy/Rendering)
+- Application entrypoint and window loop: `Orivy/Application.cs`
+- The element base and control lifecycle: `Orivy/Controls/ElementBase.cs`
+- Common controls: `Orivy/Controls`
+- Layout engine: `Orivy/Layout`
+- Styling engine: `Orivy/Styling`
+- Animation engine: `Orivy/Animation`
+- Rendering helpers and GPU path: `Orivy/Rendering`
 

@@ -9,6 +9,8 @@ The new ElementBase visual layer adds two opt-in systems:
 
 Both systems are retained-mode and integrate directly into ElementBase. Nothing is enabled implicitly. A control stays on the old behavior path until it explicitly configures visual styles or motion effects.
 
+For the broader styling model around `ColorScheme`, theme transitions, elevation, and native window theme integration, see [Styling](styling.md).
+
 ## Visual Styles
 
 Visual styles are snapshot-based. ElementBase keeps a base snapshot from its normal properties and resolves state rules on top of that snapshot.

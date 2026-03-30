@@ -1,0 +1,38 @@
+- name: Documentation Hub
+  href: index.md
+- name: Getting Started
+  href: getting-started.md
+- name: Overview
+  href: overview.md
+- name: Architecture
+  href: architecture.md
+- name: Core Systems
+  items:
+    - name: Layout
+      href: layout.md
+    - name: Controls
+      href: controls.md
+    - name: Binding
+      href: binding.md
+    - name: Animation
+      href: animation.md
+- name: Styling, Visual and Rendering
+  items:
+    - name: Styling
+      href: styling.md
+    - name: Visual
+      href: visual.md
+    - name: Rendering
+      href: rendering.md
+- name: Examples
+  items:
+    - name: Simple Window
+      href: examples/simple-window.md
+    - name: Controls Samples
+      href: examples/controls-samples.md
+    - name: Binding Sample
+      href: examples/binding-sample.md
+    - name: Animation Sample
+      href: examples/animation-sample.md
+- name: API Reference Workflow
+  href: api.md

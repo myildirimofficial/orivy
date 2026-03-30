@@ -203,4 +203,3 @@ public class ToggleSwitch : ElementBase
 
 ---
 
-Next: I will mark the `Controls` deep-dive done and start the `Binding` deep-dive. I will update the todo list accordingly.
