@@ -80,7 +80,7 @@ public class Button : ElementBase
             measurementConstraints.Height = short.MaxValue;
 
         var textSize = TextRenderer.MeasureText(
-            ProcessedText,
+            Text,
             font,
             measurementConstraints,
             new TextRenderOptions

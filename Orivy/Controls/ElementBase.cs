@@ -841,42 +841,6 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
     private string _text = string.Empty;
-    private string _processedText = string.Empty;
-    private bool _processEscapes = false;
-
-    /// <summary>
-    /// Gets or sets whether escape sequences (\n, \t, \uXXXX) should be processed in the Text property.
-    /// When enabled, text processing happens once during property set, not during rendering.
-    /// Default: false (for performance)
-    /// </summary>
-    [Category("Behavior")]
-    [DefaultValue(false)]
-    public bool ProcessEscapeSequences
-    {
-        get => _processEscapes;
-        set
-        {
-            if (_processEscapes == value)
-                return;
-
-            _processEscapes = value;
-
-            // Reprocess current text with new setting
-            if (!string.IsNullOrEmpty(_text))
-            {
-                _processedText = _processEscapes
-                    ? TextRenderer.ProcessEscapeSequences(_text)
-                    : _text;
-                Invalidate();
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gets the text with escape sequences processed (if ProcessEscapeSequences is enabled).
-    /// Use this property in rendering code instead of Text.
-    /// </summary>
-    protected string ProcessedText => _processedText;
 
     public virtual string Text
     {
@@ -886,12 +850,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             if (_text == value)
                 return;
 
-            _text = value;
-
-            // Process escape sequences once here, not during render
-            _processedText = _processEscapes && !string.IsNullOrEmpty(value)
-                ? TextRenderer.ProcessEscapeSequences(value)
-                : value ?? string.Empty;
+            _text = string.IsNullOrEmpty(value)
+                ? string.Empty
+                : TextRenderer.ProcessEscapeSequences(value);
 
             OnTextChanged(EventArgs.Empty);
             InvalidateMeasure();
@@ -2159,7 +2120,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
                 using var font = CreateRenderFont(Font);
 
-                DrawControlText(targetCanvas, ProcessedText, DisplayRectangle, paint, font, TextAlign, AutoEllipsis, UseMnemonic);
+                TextRenderer.DrawText(targetCanvas, Text, DisplayRectangle, paint, font, TextAlign, AutoEllipsis, UseMnemonic);
             }
 
             // ── Children ──
@@ -2190,75 +2151,6 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
-    /// <summary>
-    /// Helper to draw control text inside a bounding rect with ContentAlignment, ellipsis and mnemonic handling.
-    /// Uses centralized <see cref="Orivy.Helpers.TextRenderer"/> for proper fallback-font handling.
-    /// </summary>
-    public void DrawControlText(SKCanvas canvas, string text, SKRect bounds, SKPaint paint, SKFont font,
-        ContentAlignment alignment, bool autoEllipsis = false, bool useMnemonic = false)
-    {
-        if (string.IsNullOrEmpty(text)) return;
-
-        var options = new Orivy.Helpers.TextRenderOptions
-        {
-            UseMnemonic = useMnemonic,
-            Trimming = autoEllipsis ? TextTrimming.CharacterEllipsis : TextTrimming.None,
-            MaxWidth = bounds.Width,
-            MaxHeight = bounds.Height,
-            Subpixel = font.Subpixel,
-            Edging = font.Edging,
-            Hinting = font.Hinting
-        };
-
-        var skAlignment = alignment switch
-        {
-            ContentAlignment.TopLeft or ContentAlignment.MiddleLeft or ContentAlignment.BottomLeft => SKTextAlign.Left,
-            ContentAlignment.TopRight or ContentAlignment.MiddleRight or ContentAlignment.BottomRight => SKTextAlign.Right,
-            _ => SKTextAlign.Center
-        };
-
-        // Calculate X (tam sayıya yuvarla)
-        var x = skAlignment switch
-        {
-            SKTextAlign.Center => (float)Math.Round(bounds.MidX),
-            SKTextAlign.Right => (float)Math.Round(bounds.Right),
-            _ => (float)Math.Round(bounds.Left)
-        };
-
-        // Calculate Y (Vertical Center, tam sayıya yuvarla)
-        var normalizedText = text.Replace("\r\n", "\n").Replace('\r', '\n');
-        var hasExplicitLineBreaks = normalizedText.IndexOf('\n') >= 0;
-
-        var measuredText = TextRenderer.MeasureTextWithOptions(normalizedText, font, bounds.Size, options);
-        var contentHeight = measuredText.Height;
-        var contentTop = (float)Math.Round(bounds.Top + (bounds.Height - contentHeight) / 2f);
-
-        // Adjust for Top/Bottom (tam sayıya yuvarla)
-        if (alignment == ContentAlignment.TopLeft || alignment == ContentAlignment.TopCenter ||
-            alignment == ContentAlignment.TopRight)
-            contentTop = (float)Math.Round(bounds.Top + 4);
-        else if (alignment == ContentAlignment.BottomLeft || alignment == ContentAlignment.BottomCenter ||
-                 alignment == ContentAlignment.BottomRight)
-            contentTop = (float)Math.Round(bounds.Bottom - contentHeight - 4);
-
-        if (hasExplicitLineBreaks)
-        {
-            var lines = normalizedText.Split('\n');
-            var lineHeight = (font.Metrics.Descent - font.Metrics.Ascent) * options.LineSpacing;
-            var baselineY = (float)Math.Round(contentTop - font.Metrics.Ascent);
-
-            for (var i = 0; i < lines.Length; i++)
-            {
-                var lineY = baselineY + (i * lineHeight);
-                TextRenderer.DrawText(canvas, lines[i], x, lineY, skAlignment, font, paint, options);
-            }
-
-            return;
-        }
-
-        var y = (float)Math.Round(contentTop - font.Metrics.Ascent);
-        TextRenderer.DrawText(canvas, normalizedText, x, y, skAlignment, font, paint, options);
-    }
 
     internal void HandleDefaultFontChanged()
     {

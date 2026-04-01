@@ -1,4 +1,5 @@
 using Orivy.Animation;
+using Orivy.Helpers;
 using SkiaSharp;
 using System;
 using System.ComponentModel;
@@ -360,7 +361,7 @@ public sealed partial class ColorPicker : ElementBase
 
         // Sağ tarafa yaslanmış, barın yanındaki boşlukta.
         var textBounds = SKRect.Create(textX, rect.Top, Scale(54f, ScaleFactor, 36f), rect.Height);
-        DrawControlText(canvas, alphaText, textBounds, _textPaint, detailFont, ContentAlignment.MiddleLeft, false, false);
+        TextRenderer.DrawText(canvas, alphaText, textBounds, _textPaint, detailFont, ContentAlignment.MiddleLeft, false, false);
     }
 
     private void DrawFooter(SKCanvas canvas, PickerLayout layout)
@@ -383,9 +384,9 @@ public sealed partial class ColorPicker : ElementBase
         _captionPaint!.Color = ForeColor.WithAlpha(156);
         _textPaint!.Color = ForeColor;
 
-        DrawControlText(canvas, "Selected color", line1, _captionPaint, captionFont, ContentAlignment.MiddleLeft, false, false);
-        DrawControlText(canvas, HexValue, line2, _textPaint, detailFont, ContentAlignment.MiddleLeft, false, false);
-        DrawControlText(canvas, FormatColorMetadata(), line3, _captionPaint, captionFont, ContentAlignment.MiddleLeft, false, false);
+        TextRenderer.DrawText(canvas, "Selected color", line1, _captionPaint, captionFont, ContentAlignment.MiddleLeft, false, false);
+        TextRenderer.DrawText(canvas, HexValue, line2, _textPaint, detailFont, ContentAlignment.MiddleLeft, false, false);
+        TextRenderer.DrawText(canvas, FormatColorMetadata(), line3, _captionPaint, captionFont, ContentAlignment.MiddleLeft, false, false);
     }
 
     /// <summary>Draws a color swatch with a checkerboard background and a rounded border.</summary>

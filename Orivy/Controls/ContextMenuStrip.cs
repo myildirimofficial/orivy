@@ -1577,7 +1577,7 @@ public class ContextMenuStrip : MenuStrip
             }
 
             var textBounds = SkiaSharp.SKRect.Create(textX, itemRect.Top, textWidth, itemRect.Height);
-            DrawControlText(canvas, item.Text, textBounds, _textPaint, font, ContentAlignment.MiddleLeft, false, true);
+            TextRenderer.DrawText(canvas, item.Text, textBounds, _textPaint, font, ContentAlignment.MiddleLeft, false, true);
 
             if (shortcutText.Length > 0)
             {
@@ -1592,7 +1592,7 @@ public class ContextMenuStrip : MenuStrip
                     itemRect.Height);
 
                 _textPaint.Color = textColor.WithAlpha((byte)(fadeAlpha * contentAlphaScale * 120 / 255f));
-                DrawControlText(canvas, shortcutText, shortcutBounds, _textPaint, shortcutFont, ContentAlignment.MiddleRight, false, true);
+                TextRenderer.DrawText(canvas, shortcutText, shortcutBounds, _textPaint, shortcutFont, ContentAlignment.MiddleRight, false, true);
                 _textPaint.Color = textColor.WithAlpha((byte)(fadeAlpha * contentAlphaScale));
             }
 

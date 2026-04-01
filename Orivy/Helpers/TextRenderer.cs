@@ -1,6 +1,7 @@
 using SkiaSharp;
 using System;
 using System.Collections.Generic;
+using System.Text;
 using Orivy;
 
 namespace Orivy.Helpers;
@@ -49,6 +50,58 @@ public static class TextRenderer
     public static void DrawText(SKCanvas canvas, string? text, float x, float y, SKTextAlign alignment, SKFont? font, SKPaint paint)
     {
         DrawText(canvas, text, x, y, alignment, font, paint, new TextRenderOptions());
+    }
+
+    public static void DrawText(
+        SKCanvas canvas,
+        string? text,
+        SKRect bounds,
+        SKPaint paint,
+        SKFont font,
+        ContentAlignment alignment,
+        bool autoEllipsis = false,
+        bool useMnemonic = false)
+    {
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        var options = new TextRenderOptions
+        {
+            UseMnemonic = useMnemonic,
+            Trimming = autoEllipsis ? TextTrimming.CharacterEllipsis : TextTrimming.None,
+            MaxWidth = bounds.Width,
+            MaxHeight = bounds.Height,
+            Subpixel = font.Subpixel,
+            Edging = font.Edging,
+            Hinting = font.Hinting
+        };
+
+        var skAlignment = alignment switch
+        {
+            ContentAlignment.TopLeft or ContentAlignment.MiddleLeft or ContentAlignment.BottomLeft => SKTextAlign.Left,
+            ContentAlignment.TopRight or ContentAlignment.MiddleRight or ContentAlignment.BottomRight => SKTextAlign.Right,
+            _ => SKTextAlign.Center
+        };
+
+        var x = skAlignment switch
+        {
+            SKTextAlign.Center => (float)Math.Round(bounds.MidX),
+            SKTextAlign.Right => (float)Math.Round(bounds.Right),
+            _ => (float)Math.Round(bounds.Left)
+        };
+
+        var normalizedText = NormalizeLineBreaks(text);
+        var measuredText = MeasureTextWithOptions(normalizedText, font, bounds.Size, options);
+        var contentHeight = Math.Max(measuredText.Height, GetBaseLineHeight(font));
+        var contentTop = (float)Math.Round(bounds.Top + (bounds.Height - contentHeight) / 2f);
+
+        if (alignment == ContentAlignment.TopLeft || alignment == ContentAlignment.TopCenter || alignment == ContentAlignment.TopRight)
+            contentTop = (float)Math.Round(bounds.Top + 4f);
+        else if (alignment == ContentAlignment.BottomLeft || alignment == ContentAlignment.BottomCenter || alignment == ContentAlignment.BottomRight)
+            contentTop = (float)Math.Round(bounds.Bottom - contentHeight - 4f);
+
+        var y = (float)Math.Round(contentTop - font.Metrics.Ascent);
+        DrawText(canvas, normalizedText, x, y, skAlignment, font, paint, options);
     }
 
     public static void DrawText(
@@ -278,11 +331,122 @@ public static class TextRenderer
         if (string.IsNullOrEmpty(text))
             return text;
 
-        // Quick check - avoid processing if no backslash
         if (!text.Contains('\\'))
             return text;
 
-        return TextEscapeProcessor.ProcessEscapeSequences(text);
+        var result = new StringBuilder(text.Length);
+        var i = 0;
+
+        while (i < text.Length)
+        {
+            if (text[i] == '\\' && i + 1 < text.Length)
+            {
+                switch (text[i + 1])
+                {
+                    case 'n':
+                        result.Append('\n');
+                        i += 2;
+                        continue;
+                    case 't':
+                        result.Append('\t');
+                        i += 2;
+                        continue;
+                    case 'r':
+                        result.Append('\r');
+                        i += 2;
+                        continue;
+                    case '\\':
+                        result.Append('\\');
+                        i += 2;
+                        continue;
+                    case '"':
+                        result.Append('"');
+                        i += 2;
+                        continue;
+                    case '\'':
+                        result.Append('\'');
+                        i += 2;
+                        continue;
+                    case 'b':
+                        result.Append('\b');
+                        i += 2;
+                        continue;
+                    case 'f':
+                        result.Append('\f');
+                        i += 2;
+                        continue;
+                    case 'v':
+                        result.Append('\v');
+                        i += 2;
+                        continue;
+                    case '0':
+                        result.Append('\0');
+                        i += 2;
+                        continue;
+                    case 'u':
+                        if (TryParseUnicodeEscape(text, i, out var unicodeChar, out var unicodeLength))
+                        {
+                            result.Append(unicodeChar);
+                            i += unicodeLength;
+                            continue;
+                        }
+                        break;
+                    case 'x':
+                        if (TryParseHexEscape(text, i, out var hexChar, out var hexLength))
+                        {
+                            result.Append(hexChar);
+                            i += hexLength;
+                            continue;
+                        }
+                        break;
+                }
+            }
+
+            result.Append(text[i]);
+            i++;
+        }
+
+        return result.ToString();
+    }
+
+    private static bool TryParseUnicodeEscape(string text, int startIndex, out char result, out int length)
+    {
+        result = '\0';
+        length = 0;
+
+        if (startIndex + 5 >= text.Length)
+            return false;
+
+        var hexValue = text.Substring(startIndex + 2, 4);
+        if (!int.TryParse(hexValue, System.Globalization.NumberStyles.HexNumber, null, out var codePoint))
+            return false;
+
+        result = (char)codePoint;
+        length = 6;
+        return true;
+    }
+
+    private static bool TryParseHexEscape(string text, int startIndex, out char result, out int length)
+    {
+        result = '\0';
+        length = 0;
+
+        var maxHexDigits = Math.Min(4, text.Length - (startIndex + 2));
+        if (maxHexDigits <= 0)
+            return false;
+
+        for (var digits = maxHexDigits; digits >= 1; digits--)
+        {
+            var hexValue = text.Substring(startIndex + 2, digits);
+            if (!int.TryParse(hexValue, System.Globalization.NumberStyles.HexNumber, null, out var codePoint))
+                continue;
+
+            result = (char)codePoint;
+            length = 2 + digits;
+            return true;
+        }
+
+        return false;
     }
 
     private static void DrawWrappedText(

@@ -1,4 +1,5 @@
 using Orivy.Animation;
+using Orivy.Helpers;
 using SkiaSharp;
 using System;
 using System.Collections.Generic;
@@ -1363,7 +1364,7 @@ public class GridList : ElementBase
             }
 
             _textPaint.Color = HeaderForeColor;
-            DrawControlText(canvas, column.HeaderText, contentRect, _textPaint, font, column.HeaderTextAlign, false, true);
+            TextRenderer.DrawText(canvas, column.HeaderText, contentRect, _textPaint, font, column.HeaderTextAlign, false, true);
 
             if (_sortColumnIndex == layout.ColumnIndex && _sortDirection != GridListSortDirection.None)
                 DrawSortGlyph(canvas, cellRect, _sortDirection);
@@ -1457,7 +1458,7 @@ public class GridList : ElementBase
 
         var textRect = new SKRect(accentRect.Right + CellPadding, bounds.Top, bounds.Right - CellPadding, bounds.Bottom);
         _textPaint.Color = ForeColor;
-        DrawControlText(canvas, text, textRect, _textPaint, font, ContentAlignment.MiddleLeft, false, true);
+        TextRenderer.DrawText(canvas, text, textRect, _textPaint, font, ContentAlignment.MiddleLeft, false, true);
 
         if (ShowGridLines)
         {
@@ -1528,7 +1529,7 @@ public class GridList : ElementBase
             {
                 var foreColor = cell != null && cell.ForeColor != SKColor.Empty ? cell.ForeColor : (item.Enabled ? ForeColor : ForeColor.WithAlpha(140));
                 _textPaint.Color = WithOpacity(foreColor, revealProgress);
-                DrawControlText(canvas, text, contentRect, _textPaint, font, column.CellTextAlign, true, false);
+                TextRenderer.DrawText(canvas, text, contentRect, _textPaint, font, column.CellTextAlign, true, false);
             }
 
             if (ShowGridLines)

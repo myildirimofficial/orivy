@@ -734,7 +734,7 @@ public class MenuStrip : ElementBase
             bounds.Top,
             Math.Max(tx, bounds.Right - contentRightInset),
             bounds.Bottom);
-        DrawControlText(c, item.Text, drawBounds, _textPaint, font, ContentAlignment.MiddleLeft, false, true);
+        TextRenderer.DrawText(c, item.Text, drawBounds, _textPaint, font, ContentAlignment.MiddleLeft, false, true);
 
         if (shouldDrawShortcut)
         {
@@ -750,7 +750,7 @@ public class MenuStrip : ElementBase
                 bounds.Bottom);
 
             _textPaint.Color = textColor.WithAlpha(148);
-            DrawControlText(c, shortcutText, shortcutBounds, _textPaint, shortcutFont, ContentAlignment.MiddleRight, false, true);
+            TextRenderer.DrawText(c, shortcutText, shortcutBounds, _textPaint, shortcutFont, ContentAlignment.MiddleRight, false, true);
             _textPaint.Color = textColor;
         }
 

@@ -14,8 +14,4 @@ public class Container : ElementBase
 
 public class TextBox : ElementBase
 {
-    public TextBox()
-    {
-        ProcessEscapeSequences = true;
-    }
 }
