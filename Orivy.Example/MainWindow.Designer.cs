@@ -802,10 +802,8 @@ internal partial class MainWindow
             Height = 320,
             Padding = new(18),
             Margin = new(0, 0, 0, 16),
-            BackColor = ColorScheme.SurfaceContainerHigh,
-            ForeColor = ColorScheme.ForeColor,
             Radius = new(18),
-            Border = new(1),
+            Border = new(5),
             BorderColor = ColorScheme.Warning.WithAlpha(110),
             TextAlign = ContentAlignment.MiddleLeft
         };
