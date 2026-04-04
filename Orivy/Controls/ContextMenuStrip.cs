@@ -98,7 +98,7 @@ public class ContextMenuStrip : MenuStrip
 
     protected override float GetMouseWheelScrollStep(ScrollBar scrollBar)
     {
-        return Math.Max(1f, (float)Math.Round(scrollBar.SmallChange));
+        return Math.Max(1f, scrollBar.SmallChange);
     }
 
     public ContextMenuStrip()
@@ -118,8 +118,6 @@ public class ContextMenuStrip : MenuStrip
         {
             _vScrollBar.Dock = DockStyle.None;
             _vScrollBar.Visible = false;
-            _vScrollBar.MinimumSize = new SKSize(8, 0);
-            _vScrollBar.MaximumSize = new SKSize(8, 0);
             _vScrollBar.AutoHide = false;
             _vScrollBar.ScrollAnimationIncrement = 1.0;
             _vScrollBar.ScrollAnimationType = AnimationType.Linear;
@@ -314,6 +312,7 @@ public class ContextMenuStrip : MenuStrip
         SourceElement = element;
         _ownerWindow = owner;
         _accordionCenterTarget = null;
+        ResetAccordionState();
         ApplyDpiMetrics(_ownerWindow.DeviceDpi > 0 ? _ownerWindow.DeviceDpi : DeviceDpi);
 
         if (!_ownerWindow.Controls.Contains(this))
@@ -389,6 +388,8 @@ public class ContextMenuStrip : MenuStrip
             return;
         }
 
+        ResetAccordionState();
+
         // Close any open submenus before hiding
         CloseSubmenu();
 
@@ -415,7 +416,7 @@ public class ContextMenuStrip : MenuStrip
         SourceElement = null;
         ParentDropDown = null;
         ResetElementAnchor();
-        _accordionCenterTarget = null;
+        ResetAccordionState();
         Opacity = _openingTargetOpacity;
     }
 
@@ -726,8 +727,8 @@ public class ContextMenuStrip : MenuStrip
         ItemPadding = BaseItemPadding * scale;
         SeparatorMargin = BaseSeparatorMargin * scale;
         ImageScalingSize = new SKSize(
-            (float)Math.Round(20f * scale),
-            (float)Math.Round(20f * scale));
+            20f * scale,
+            20f * scale);
 
         if (_vScrollBar != null)
         {
@@ -881,9 +882,9 @@ public class ContextMenuStrip : MenuStrip
             var scrollBarWidth = GetScrollBarWidth();
             var overlayInset = MathF.Max(2f, 4f * ScaleFactor);
             var edgeInset = Math.Max(1f, Border.Right) + overlayInset;
-            var scrollBarHeight = Math.Max(1f, (float)Math.Round(Height - edgeInset * 2f));
-            var scrollBarLeft = (float)Math.Round(Width - edgeInset - scrollBarWidth);
-            var scrollBarTop = (float)Math.Round(edgeInset);
+            var scrollBarHeight = Math.Max(1f, Height - edgeInset * 2f);
+            var scrollBarLeft = Width - edgeInset - scrollBarWidth;
+            var scrollBarTop = edgeInset;
 
             _vScrollBar.Location = new SKPoint(scrollBarLeft, scrollBarTop);
             _vScrollBar.Size = new SKSize(scrollBarWidth, scrollBarHeight);
@@ -915,8 +916,8 @@ public class ContextMenuStrip : MenuStrip
         var entries = new List<VisibleItemEntry>(Items.Count);
         var verticalGap = GetVerticalItemGap();
         var y = ItemPadding - scrollOffset;
-        var x = (float)Math.Round(ItemPadding);
-        var width = Math.Max(1f, (float)Math.Round(_viewportWidth));
+        var x = ItemPadding;
+        var width = Math.Max(1f, _viewportWidth);
         var rootClipTop = -Math.Max(ItemHeight, _scrollOffset + ItemPadding);
         var rootClipHeight = Math.Max(
             _contentHeight + ItemPadding * 2f + ItemHeight * 2f,
@@ -941,7 +942,7 @@ public class ContextMenuStrip : MenuStrip
 
             if (item.IsSeparator)
             {
-                var sepHeight = (float)Math.Round(SeparatorMargin * 2 + 1);
+                var sepHeight = SeparatorMargin * 2 + 1;
                 var separatorRect = SKRect.Create(x, y, width, sepHeight);
                 var separatorVisibleRect = IntersectRect(separatorRect, clipRect);
                 if (!separatorVisibleRect.IsEmpty)
@@ -951,7 +952,7 @@ public class ContextMenuStrip : MenuStrip
                 continue;
             }
 
-            var itemHeight = (float)Math.Round(ItemHeight);
+            var itemHeight = ItemHeight;
             var rect = SKRect.Create(x, y, width, itemHeight);
             var visibleRect = IntersectRect(rect, clipRect);
             if (!visibleRect.IsEmpty)
@@ -1237,6 +1238,18 @@ public class ContextMenuStrip : MenuStrip
         _stableAccordionPopupSize = SKSize.Empty;
         base.OnDpiChanged(newDpi, oldDpi);
         UpdateScrollState();
+    }
+
+    internal override void OnMouseWheel(MouseEventArgs e)
+    {
+        base.OnMouseWheel(e);
+
+        // After scroll offset changes, recalculate hover target so hover state stays anchored to cursor.
+        if (!Enabled || !Visible)
+            return;
+
+        // Keep the same event parameters to evaluate which item is now under the cursor.
+        OnMouseMove(new MouseEventArgs(e.Button, e.Clicks, e.X, e.Y, e.Delta, e.IsHorizontalWheel));
     }
 
     internal override void OnMouseMove(MouseEventArgs e)
@@ -1709,6 +1722,15 @@ public class ContextMenuStrip : MenuStrip
         return new SKPoint(
             Math.Clamp(x, inset, Math.Max(inset, width - inset)),
             Math.Clamp(y, inset, Math.Max(inset, height - inset)));
+    }
+
+    private void ResetAccordionState()
+    {
+        _expandedItems.Clear();
+        foreach (var anim in _accordionAnims.Values)
+            anim.SetProgress(0);
+        _accordionCenterTarget = null;
+        UpdateScrollState();
     }
 
     private float GetAccordionProgress(MenuItem item)

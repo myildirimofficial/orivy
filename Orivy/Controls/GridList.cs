@@ -108,32 +108,10 @@ public class GridList : ElementBase
         Items = new GridListItemCollection(this);
 
         if (_vScrollBar != null)
-        {
-            _vScrollBar.Dock = DockStyle.None;
-            _vScrollBar.Visible = false;
-            _vScrollBar.AutoHide = true;
-            _vScrollBar.Thickness = Math.Max(6, (int)Math.Round(8f * ScaleFactor));
-            _vScrollBar.ScrollAnimationIncrement = 1.0;
-            _vScrollBar.ScrollAnimationType = AnimationType.Linear;
-            _vScrollBar.DisplayValueChanged += (_, _) =>
-            {
-                _verticalOffset = _vScrollBar.DisplayValue;
-            };
-        }
-
-        if (_hScrollBar != null)
-        {
-            _hScrollBar.Dock = DockStyle.None;
-            _hScrollBar.Visible = false;
-            _hScrollBar.AutoHide = true;
-            _hScrollBar.Thickness = Math.Max(6, (int)Math.Round(8f * ScaleFactor));
-            _hScrollBar.ScrollAnimationIncrement = 1.0;
-            _hScrollBar.ScrollAnimationType = AnimationType.Linear;
-            _hScrollBar.DisplayValueChanged += (_, _) =>
-            {
-                _horizontalOffset = _hScrollBar.DisplayValue;
-            };
-        }
+            _vScrollBar.DisplayValueChanged += (_, _) => _verticalOffset = _vScrollBar.DisplayValue;
+        
+        if(_hScrollBar != null)
+            _hScrollBar.DisplayValueChanged += (_, _) =>_horizontalOffset = _hScrollBar.DisplayValue;
 
         ColorScheme.ThemeChanged += OnThemeChanged;
     }
@@ -371,6 +349,40 @@ public class GridList : ElementBase
             _geometryDirty = true;
 
         Invalidate();
+    }
+
+    internal override void OnDpiChanged(float newDpi, float oldDpi)
+    {
+        var safeOldDpi = oldDpi <= 0 ? 96f : oldDpi;
+        var scale = newDpi <= 0 ? 1f : newDpi / safeOldDpi;
+
+        if (Math.Abs(scale - 1f) > 0.001f)
+        {
+            HeaderHeight = Math.Max(24f, HeaderHeight * scale);
+            RowHeight = Math.Max(22f, RowHeight * scale);
+            GroupHeaderHeight = Math.Max(20f, GroupHeaderHeight * scale);
+            CellPadding = Math.Max(2f, CellPadding * scale);
+
+            for (var i = 0; i < Columns.Count; i++)
+            {
+                var column = Columns[i];
+                column.MinWidth = Math.Max(24f, column.MinWidth * scale);
+                column.MaxWidth = Math.Max(column.MinWidth, column.MaxWidth * scale);
+
+                if (column.SizeMode == GridListColumnSizeMode.Fixed)
+                    column.Width = Math.Clamp(column.Width * scale, column.MinWidth, column.MaxWidth);
+            }
+
+            for (var i = 0; i < Items.Count; i++)
+            {
+                if (Items[i].Height > 0.001f)
+                    Items[i].Height = Math.Max(22f, Items[i].Height * scale);
+            }
+
+            _geometryDirty = true;
+        }
+
+        base.OnDpiChanged(newDpi, oldDpi);
     }
 
     protected override bool HandlesMouseWheelScroll =>
@@ -712,7 +724,6 @@ public class GridList : ElementBase
         var saveCount = canvas.Save();
         canvas.ClipRect(bodyViewport);
 
-        // Offsetleri tam sayıya yuvarla
         var roundedHorizontalOffset = (float)Math.Round(_horizontalOffset);
         var roundedVerticalOffset = (float)Math.Round(_verticalOffset);
 
@@ -1117,7 +1128,7 @@ public class GridList : ElementBase
             if (needsVScroll)
             {
                 _vScrollBar.Location = new SKPoint(Math.Max(0f, outer.Right - _vScrollBar.Thickness - overlayInset), showStickyHeader ? outer.Top + HeaderHeight + overlayInset : outer.Top + overlayInset);
-                _vScrollBar.Size = new SKSize(_vScrollBar.Thickness, Math.Max(1f, availableHeight - overlayInset * 2 - (needsHScroll ? _hScrollBar.Thickness : 0) ));
+                _vScrollBar.Size = new SKSize(_vScrollBar.Thickness, Math.Max(1f, availableHeight - overlayInset * 2 - (needsHScroll ? _hScrollBar.Thickness : 0)));
                 _vScrollBar.Minimum = 0;
                 _vScrollBar.Maximum = Math.Max(0, _contentHeight - availableHeight);
                 _vScrollBar.SmallChange = Math.Max(8f, RowHeight);
@@ -1447,14 +1458,18 @@ public class GridList : ElementBase
         _fillPaint.Color = isHovered ? GroupHeaderBackColor.Brightness(0.04f) : GroupHeaderBackColor;
         canvas.DrawRect(bounds, _fillPaint);
 
+        var scale = ScaleFactor;
         using var accentPaint = new SKPaint { Color = GroupHeaderBackColor.Brightness(0.12f).WithAlpha(180), IsAntialias = true, Style = SKPaintStyle.Fill };
-        using var accentBorder = new SKPaint { Color = ForeColor.WithAlpha(28), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1f };
-        var accentRect = new SKRect(bounds.Left + CellPadding, bounds.Top + 5f, bounds.Left + CellPadding + 22f, bounds.Bottom - 5f);
-        canvas.DrawRoundRect(accentRect, 10f, 10f, accentPaint);
-        canvas.DrawRoundRect(accentRect, 10f, 10f, accentBorder);
+        using var accentBorder = new SKPaint { Color = ForeColor.WithAlpha(28), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = Math.Max(1f, scale) };
+        var accentInsetY = Math.Max(3f, 5f * scale);
+        var accentWidth = Math.Max(18f, 22f * scale);
+        var accentRect = new SKRect(bounds.Left + CellPadding, bounds.Top + accentInsetY, bounds.Left + CellPadding + accentWidth, bounds.Bottom - accentInsetY);
+        var accentRadius = Math.Min(accentRect.Width, accentRect.Height) * 0.5f;
+        canvas.DrawRoundRect(accentRect, accentRadius, accentRadius, accentPaint);
+        canvas.DrawRoundRect(accentRect, accentRadius, accentRadius, accentBorder);
 
         var chevronCenter = new SKPoint(accentRect.MidX, accentRect.MidY);
-        DrawChevronGlyph(canvas, chevronCenter, ForeColor.WithAlpha(220), 1.8f, 3.6f, -90f + expansion * 90f);
+        DrawChevronGlyph(canvas, chevronCenter, ForeColor.WithAlpha(220), Math.Max(1.2f, 1.8f * scale), Math.Max(2.8f, 3.6f * scale), -90f + expansion * 90f);
 
         var textRect = new SKRect(accentRect.Right + CellPadding, bounds.Top, bounds.Right - CellPadding, bounds.Bottom);
         _textPaint.Color = ForeColor;

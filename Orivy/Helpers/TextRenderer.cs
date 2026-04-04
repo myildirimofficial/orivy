@@ -85,22 +85,46 @@ public static class TextRenderer
 
         var x = skAlignment switch
         {
-            SKTextAlign.Center => (float)Math.Round(bounds.MidX),
-            SKTextAlign.Right => (float)Math.Round(bounds.Right),
-            _ => (float)Math.Round(bounds.Left)
+            SKTextAlign.Center => bounds.MidX,
+            SKTextAlign.Right => bounds.Right,
+            _ => bounds.Left
         };
 
         var normalizedText = NormalizeLineBreaks(text);
-        var measuredText = MeasureTextWithOptions(normalizedText, font, bounds.Size, options);
-        var contentHeight = Math.Max(measuredText.Height, GetBaseLineHeight(font));
-        var contentTop = (float)Math.Round(bounds.Top + (bounds.Height - contentHeight) / 2f);
+        var hasLineBreaks = ContainsLineBreaks(normalizedText);
+        float y;
 
-        if (alignment == ContentAlignment.TopLeft || alignment == ContentAlignment.TopCenter || alignment == ContentAlignment.TopRight)
-            contentTop = (float)Math.Round(bounds.Top + 4f);
-        else if (alignment == ContentAlignment.BottomLeft || alignment == ContentAlignment.BottomCenter || alignment == ContentAlignment.BottomRight)
-            contentTop = (float)Math.Round(bounds.Bottom - contentHeight - 4f);
+        if (!hasLineBreaks && options.Wrap == TextWrap.None)
+        {
+            var layoutText = options.UseMnemonic ? RemoveMnemonicMarkers(normalizedText) : normalizedText;
+            if (options.Trimming != TextTrimming.None && options.MaxWidth < float.MaxValue)
+                layoutText = TextTruncator.TruncateText(layoutText, font, options.MaxWidth, options.Trimming);
 
-        var y = (float)Math.Round(contentTop - font.Metrics.Ascent);
+            font.MeasureText(layoutText, out var textBounds);
+
+            y = alignment switch
+            {
+                ContentAlignment.TopLeft or ContentAlignment.TopCenter or ContentAlignment.TopRight =>
+                    bounds.Top + 4f - textBounds.Top,
+                ContentAlignment.BottomLeft or ContentAlignment.BottomCenter or ContentAlignment.BottomRight =>
+                    bounds.Bottom - 4f - textBounds.Bottom,
+                _ => bounds.MidY - textBounds.MidY
+            };
+        }
+        else
+        {
+            var measuredText = MeasureTextWithOptions(normalizedText, font, bounds.Size, options);
+            var contentHeight = Math.Max(measuredText.Height, GetBaseLineHeight(font));
+            var contentTop = bounds.Top + (bounds.Height - contentHeight) / 2f;
+
+            if (alignment == ContentAlignment.TopLeft || alignment == ContentAlignment.TopCenter || alignment == ContentAlignment.TopRight)
+                contentTop = bounds.Top + 4f;
+            else if (alignment == ContentAlignment.BottomLeft || alignment == ContentAlignment.BottomCenter || alignment == ContentAlignment.BottomRight)
+                contentTop = bounds.Bottom - contentHeight - 4f;
+
+            y = contentTop - font.Metrics.Ascent;
+        }
+
         DrawText(canvas, normalizedText, x, y, skAlignment, font, paint, options);
     }
 
@@ -774,6 +798,31 @@ public static class TextRenderer
     private static bool ContainsLineBreaks(string text)
     {
         return text.IndexOf('\n') >= 0 || text.IndexOf('\r') >= 0;
+    }
+
+    private static string RemoveMnemonicMarkers(string text)
+    {
+        if (string.IsNullOrEmpty(text) || !text.Contains('&'))
+            return text;
+
+        var builder = new StringBuilder(text.Length);
+
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (text[i] != '&')
+            {
+                builder.Append(text[i]);
+                continue;
+            }
+
+            if (i + 1 < text.Length && text[i + 1] == '&')
+            {
+                builder.Append('&');
+                i++;
+            }
+        }
+
+        return builder.ToString();
     }
 
     private static string NormalizeLineBreaks(string text)

@@ -46,6 +46,7 @@ public class ScrollBar : ElementBase
     private float _scrollAnimationStartValue;
     private float _smallChange = 1;
     private float _targetValue;
+    private float _logicalThickness = 2f;
     private int _thickness = 2;
     private SKRect _thumbRect;
     private SKRect _trackRect;
@@ -169,12 +170,12 @@ public class ScrollBar : ElementBase
         get => _thickness;
         set
         {
-            value = Math.Clamp(value, 2, 32);
-            if (_thickness == value) return;
-            _thickness = value;
-            ApplyOrientationSize();
-            UpdateThumbRect();
-            Invalidate();
+            var clamped = Math.Clamp(value, 2, 32);
+            if (Math.Abs(_logicalThickness - clamped) < 0.001f)
+                return;
+
+            _logicalThickness = clamped;
+            ApplyScaledThickness();
         }
     }
 
@@ -336,7 +337,7 @@ public class ScrollBar : ElementBase
     // Internal API (consumed by the host ScrollPanel / ScrollViewer)
     // =========================================================================
 
-    internal float DisplayValue => (float)Math.Round(_animatedValue + _visualOverflowValue);
+    internal float DisplayValue => Convert.ToSingle(_animatedValue) + _visualOverflowValue;
 
     internal event EventHandler? DisplayValueChanged;
     public event EventHandler? ValueChanged;
@@ -382,6 +383,24 @@ public class ScrollBar : ElementBase
         Size = IsVertical
             ? new SKSize(_thickness, Math.Max(Height, 100))
             : new SKSize(Math.Max(Width, 100), _thickness);
+    }
+
+    private void ApplyScaledThickness()
+    {
+        var scaledThickness = Math.Clamp((int)Math.Round(_logicalThickness * ScaleFactor), 2, 32);
+        if (_thickness == scaledThickness)
+            return;
+
+        _thickness = scaledThickness;
+        ApplyOrientationSize();
+        UpdateThumbRect();
+        Invalidate();
+    }
+
+    internal override void OnDpiChanged(float newDpi, float oldDpi)
+    {
+        base.OnDpiChanged(newDpi, oldDpi);
+        ApplyScaledThickness();
     }
 
     private void UpdateThumbRect()

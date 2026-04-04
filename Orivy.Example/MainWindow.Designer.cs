@@ -1194,7 +1194,7 @@ internal partial class MainWindow
         this.Height = 650;
         this.DwmMargin = 1000;
         this.Padding = new(10);
-        this.WindowThemeType = WindowThemeType.Tabbed;
+        this.WindowThemeType = WindowThemeType.Mica;
         this.ContextMenuStrip = this.extendMenu;
         this.WindowPageControl = windowPageControl;
         this.FormStartPosition = Orivy.FormStartPosition.CenterScreen;

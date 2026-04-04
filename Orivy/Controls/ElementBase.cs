@@ -700,7 +700,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     /// the content size is smaller than this value, scroll bars will not appear. Changing this property may trigger a
     /// layout update to recalculate scroll bar visibility.</remarks>
     [Category("Layout")]
-    [DefaultValue(typeof(SKSizeI), "0, 0")]
+    [DefaultValue(typeof(SKSize), "0, 0")]
     private SKSize _autoScrollMinSize;
     public virtual SKSize AutoScrollMinSize
     {
@@ -752,11 +752,11 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
-    private SKColor _backColor = SKColors.Empty;
+    private SKColor _backColor = SKColors.Transparent;
 
     public virtual SKColor BackColor
     {
-        get => _backColor == SKColors.Empty ? ColorScheme.BackColor : _backColor;
+        get => _backColor;
         set
         {
             if (_backColor == value)
@@ -1626,8 +1626,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             if (UseChildScaleForInput && !IsScrollBar(control) && Math.Abs(scale - 1f) > 0.001f)
             {
                 candidatePoint = new SKPoint(
-                    (int)Math.Round(candidatePoint.X / scale),
-                    (int)Math.Round(candidatePoint.Y / scale));
+                    candidatePoint.X / scale,
+                    candidatePoint.Y / scale);
             }
 
             if (!control.Bounds.Contains(candidatePoint))
@@ -1985,7 +1985,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         try
         {
             var saved = targetCanvas.Save();
-            targetCanvas.Translate((float)Math.Round(Location.X), (float)Math.Round(Location.Y));
+            targetCanvas.Translate(Location.X, Location.Y);
 
             int layerSaveCount = -1;
             SKPaint? layerPaint = null;
@@ -2059,9 +2059,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                     var maxStroke = Math.Max(
                         Math.Max(_border.Left, _border.Top),
                         Math.Max(_border.Right, _border.Bottom));
-                    borderPaint.StrokeWidth = (float)Math.Round((double)maxStroke);
-                    var inset = (float)Math.Round((double)(maxStroke / 2f));
-                    var borderRect = new SKRect(inset, inset, (float)Math.Round((double)(Width - inset)), (float)Math.Round((double)(Height - inset)));
+                    borderPaint.StrokeWidth = maxStroke;
+                    var inset = maxStroke / 2f;
+                    var borderRect = new SKRect(inset, inset, Width - inset, Height - inset);
                     var borderRRect = _radius.ToRoundRect(borderRect);
                     targetCanvas.DrawRoundRect(borderRRect, borderPaint);
                 }
@@ -2069,27 +2069,27 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                 {
                     if (_border.Top > 0)
                     {
-                        borderPaint.StrokeWidth = (float)Math.Round((double)_border.Top);
-                            var y = (float)Math.Round((double)(_border.Top / 2f));
-                            targetCanvas.DrawLine(0, y, (float)Math.Round((double)Width), y, borderPaint);
+                        borderPaint.StrokeWidth = _border.Top;
+                            var y = _border.Top / 2f;
+                            targetCanvas.DrawLine(0, y, Width, y, borderPaint);
                     }
                     if (_border.Bottom > 0)
                     {
-                        borderPaint.StrokeWidth = (float)Math.Round((double)_border.Bottom);
-                            var y = (float)Math.Round((double)(Height - _border.Bottom / 2f));
-                            targetCanvas.DrawLine(0, y, (float)Math.Round((double)Width), y, borderPaint);
+                        borderPaint.StrokeWidth = _border.Bottom;
+                            var y = Height - _border.Bottom / 2f;
+                            targetCanvas.DrawLine(0, y, Width, y, borderPaint);
                     }
                     if (_border.Left > 0)
                     {
-                        borderPaint.StrokeWidth = (float)Math.Round((double)_border.Left);
-                            var x = (float)Math.Round((double)(_border.Left / 2f));
-                            targetCanvas.DrawLine(x, 0, x, (float)Math.Round((double)Height), borderPaint);
+                        borderPaint.StrokeWidth = _border.Left;
+                            var x = _border.Left / 2f;
+                            targetCanvas.DrawLine(x, 0, x, Height, borderPaint);
                     }
                     if (_border.Right > 0)
                     {
-                        borderPaint.StrokeWidth = (float)Math.Round((double)_border.Right);
-                            var x = (float)Math.Round((double)(Width - _border.Right / 2f));
-                            targetCanvas.DrawLine(x, 0, x, (float)Math.Round((double)Height), borderPaint);
+                        borderPaint.StrokeWidth = _border.Right;
+                            var x = Width - _border.Right / 2f;
+                            targetCanvas.DrawLine(x, 0, x, Height, borderPaint);
                     }
                 }
             }
@@ -2465,7 +2465,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         if (this is ScrollBar)
             return;
 
-        var overlayThickness = Math.Max(6, (int)Math.Round(8f * ScaleFactor));
+        var overlayThickness = 8;
 
         _vScrollBar = new ScrollBar
         {
@@ -2564,8 +2564,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
         if (needsVScroll)
         {
-            _vScrollBar.Maximum = Math.Max(0, (int)contentHeight - Height);
-            _vScrollBar.SmallChange = Math.Max(8f, (float)Math.Round(14f * ScaleFactor));
+            _vScrollBar.Maximum = Math.Max(0, contentHeight - Height);
+            _vScrollBar.SmallChange = Math.Max(8f, 14f * ScaleFactor);
             _vScrollBar.LargeChange = Math.Max(1, Height / 2);
             if (_vScrollBar.Value > _vScrollBar.Maximum)
                 _vScrollBar.Value = _vScrollBar.Maximum;
@@ -2573,8 +2573,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
         if (needsHScroll)
         {
-            _hScrollBar.Maximum = Math.Max(0, (int)contentWidth - Width);
-            _hScrollBar.SmallChange = Math.Max(8f, (float)Math.Round(14f * ScaleFactor));
+            _hScrollBar.Maximum = Math.Max(0, contentWidth - Width);
+            _hScrollBar.SmallChange = Math.Max(8f, 14f * ScaleFactor);
             _hScrollBar.LargeChange = Math.Max(1, Width / 2);
             if (_hScrollBar.Value > _hScrollBar.Maximum)
                 _hScrollBar.Value = _hScrollBar.Maximum;
@@ -3152,8 +3152,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             if (!AutoSize && ShouldScaleSizeOnDpiChange(newDpi, oldDpi))
             {
                 var scaledSize = new SKSize(
-                    Math.Max(1, (int)Math.Round(previousSize.Width * scaleFactor)),
-                    Math.Max(1, (int)Math.Round(previousSize.Height * scaleFactor)));
+                    Math.Max(1, previousSize.Width * scaleFactor),
+                    Math.Max(1, previousSize.Height * scaleFactor));
 
                 if (scaledSize != previousSize) Size = scaledSize;
             }

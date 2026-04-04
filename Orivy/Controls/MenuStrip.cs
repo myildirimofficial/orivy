@@ -18,6 +18,8 @@ public enum MenuHoverTransitionMode
 public class MenuStrip : ElementBase
 {
     private const Keys ShortcutModifierMask = Keys.Shift | Keys.Control | Keys.Alt;
+    private const float BaseItemHeight = 28f;
+    private const float BaseItemPadding = 6f;
 
     private readonly Dictionary<MenuItem, AnimationManager> _itemHoverAnims = new();
 
@@ -54,8 +56,8 @@ public class MenuStrip : ElementBase
     private SKSize _imageScalingSize = new(20, 20);
     private SKPaint? _imgPaint;
     private bool _isAnimating;
-    private float _itemHeight = 28f;
-    private float _itemPadding = 6f;
+    private float _itemHeight = BaseItemHeight;
+    private float _itemPadding = BaseItemPadding;
     private MenuItem? _openedItem;
     private Orientation _orientation = Orientation.Horizontal;
     private bool _roundedCorners = true;
@@ -77,9 +79,15 @@ public class MenuStrip : ElementBase
 
     public MenuStrip()
     {
-        Padding = new Thickness(8, 2, 8, 2);
+        Padding = new Thickness(
+            (int)Math.Round(6f * ScaleFactor),
+            (int)Math.Round(2f * ScaleFactor),
+            (int)Math.Round(6f * ScaleFactor),
+            (int)Math.Round(2f * ScaleFactor));
+        _itemHeight = BaseItemHeight * ScaleFactor;
+        _itemPadding = BaseItemPadding * ScaleFactor;
         UpdateMenuStripHeight();
-        BackColor = ColorScheme.Surface;
+        BackColor = SKColors.Transparent;
         ForeColor = ColorScheme.ForeColor;
         InitializeAnimationTimer();
         ColorScheme.ThemeChanged += OnThemeChanged;
@@ -538,10 +546,29 @@ public class MenuStrip : ElementBase
 
     private void OnThemeChanged(object? sender, EventArgs e)
     {
-        BackColor = ColorScheme.Surface;
         ForeColor = ColorScheme.ForeColor;
         SyncDropDownAppearance();
         Invalidate();
+    }
+
+    internal override void OnDpiChanged(float newDpi, float oldDpi)
+    {
+        if (this is ContextMenuStrip)
+        {
+            base.OnDpiChanged(newDpi, oldDpi);
+            return;
+        }
+
+        var safeOldDpi = oldDpi <= 0 ? 96f : oldDpi;
+        var scale = newDpi <= 0 ? 1f : newDpi / safeOldDpi;
+
+        if (Math.Abs(scale - 1f) > 0.001f)
+        {
+            ItemHeight = Math.Max(BaseItemHeight, ItemHeight * scale);
+            ItemPadding = Math.Max(2f, ItemPadding * scale);
+        }
+
+        base.OnDpiChanged(newDpi, oldDpi);
     }
 
     internal override void OnSizeChanged(EventArgs e)
@@ -1113,7 +1140,7 @@ public class MenuStrip : ElementBase
         _activeDropDown.SeparatorMargin = Math.Max(SeparatorMargin, _activeDropDown.ItemPadding * 0.5f);
         _activeDropDown.RoundedCorners = RoundedCorners;
         _activeDropDown.Radius = RoundedCorners
-            ? new Radius((int)Math.Round(10f * _activeDropDown.ScaleFactor))
+            ? new Radius((int)Math.Round(8f * _activeDropDown.ScaleFactor))
             : new Radius(0);
         _activeDropDown.ItemPadding = Math.Max(ItemPadding, 6f);
         _activeDropDown.Orientation = Orientation.Vertical;
