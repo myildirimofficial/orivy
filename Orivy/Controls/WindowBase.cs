@@ -27,6 +27,7 @@ public partial class WindowBase : ElementBase
     public IntPtr Handle => _hWnd;
 
     private FocusManager _focusManager;
+    private NotificationManager? _notifications;
     private bool _mouseInClient;
     protected bool enableFullDraggable;
 
@@ -194,6 +195,15 @@ public partial class WindowBase : ElementBase
             }
 
             return _focusManager;
+        }
+    }
+
+    public NotificationManager Notifications
+    {
+        get
+        {
+            _notifications ??= new NotificationManager(this);
+            return _notifications;
         }
     }
 
@@ -1448,6 +1458,12 @@ public partial class WindowBase : ElementBase
 
     protected override void Dispose(bool disposing)
     {
+        if (disposing)
+        {
+            _notifications?.Dispose();
+            _notifications = null;
+        }
+
         base.Dispose(disposing);
 
         if (!_disposed)

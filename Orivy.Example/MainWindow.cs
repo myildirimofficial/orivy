@@ -168,6 +168,80 @@ namespace Orivy.Example
             ColorScheme.IsDarkMode = !ColorScheme.IsDarkMode;
         }
 
+        private void NotifBtnInfo_Click(object sender, EventArgs e)
+            => Notifications.Show(
+                "Information",
+                "The operation completed successfully. No further action is required.",
+                NotificationKind.Info);
+
+        private void NotifBtnSuccess_Click(object sender, EventArgs e)
+            => Notifications.Show(
+                "Deployment Successful",
+                "The build artifact has been deployed to the staging environment and all health probes are green.",
+                NotificationKind.Success);
+
+        private void NotifBtnWarning_Click(object sender, EventArgs e)
+            => Notifications.Show(
+                "High Latency Detected",
+                "Response times on the Telemetry workload have exceeded the 40 ms threshold for the last three checks.",
+                NotificationKind.Warning);
+
+        private void NotifBtnError_Click(object sender, EventArgs e)
+            => Notifications.Show(
+                "Connection Failed",
+                "Unable to establish a connection to the remote endpoint. Check network configuration and try again.",
+                NotificationKind.Error);
+
+        private void NotifBtnAllFour_Click(object sender, EventArgs e)
+        {
+            Notifications.Show("Information",         "Background sync completed with no conflicts detected.",                         NotificationKind.Info,    4000);
+            Notifications.Show("Changes Saved",       "Your configuration has been written to disk and is active immediately.",         NotificationKind.Success, 5000);
+            Notifications.Show("Token Expiring Soon", "Your session token will expire in 15 minutes. Save your work before it does.",   NotificationKind.Warning, 6000);
+            Notifications.Show("Render Error",        "The DirectX 11 context was lost. The renderer has fallen back to software mode.", NotificationKind.Error,   7000);
+        }
+
+        private void NotifBtnDismissAll_Click(object sender, EventArgs e)
+            => Notifications.DismissAll();
+
+        private void NotifBtnLongMessage_Click(object sender, EventArgs e)
+            => Notifications.Show(
+                "Audit Trail Delayed",
+                "The retention sweep has been postponed because the archive lane is warming up.\nEstimated completion: 3–5 minutes.\nNo data will be lost during this window.",
+                NotificationKind.Warning,
+                6000);
+
+        private void NotifBtnLongDuration_Click(object sender, EventArgs e)
+            => Notifications.Show(
+                "Background Task Running",
+                "An 8-second background task is in progress. Hover to pause the countdown.",
+                NotificationKind.Info,
+                8000);
+
+        private async void NotifBtnConfirm_Click(object sender, EventArgs e)
+        {
+            var result = await Notifications.ConfirmAsync(
+                "Delete Workload",
+                "This will permanently remove the selected workload. This action cannot be undone.",
+                NotificationKind.Warning,
+                0,
+                "Delete", "Cancel");
+
+            if (result == "Delete")
+                Notifications.Show("Deleted", "The workload has been permanently removed.", NotificationKind.Success, 3000);
+            else if (result == "Cancel")
+                Notifications.Show("Cancelled", "No changes were made.", NotificationKind.Info, 2500);
+        }
+
+        private void NotifBtnActions_Click(object sender, EventArgs e)
+            => Notifications.Show(
+                "Update Available",
+                "Version 2.4.1 is ready to install. It includes performance improvements and security patches.",
+                NotificationKind.Info,
+                0,
+                new NotificationAction("Install Now", () =>
+                    Notifications.Show("Installing", "Updating to v2.4.1 in the background…", NotificationKind.Info, 3000)),
+                new NotificationAction("Later"));
+
         private void VisualStyleDangerToggle_Click(object sender, EventArgs e)
         {
             _dangerModeEnabled = !_dangerModeEnabled;

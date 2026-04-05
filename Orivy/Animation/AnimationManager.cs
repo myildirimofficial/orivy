@@ -1,7 +1,10 @@
 using SkiaSharp;
+using System.Buffers;
+using System.Collections.Generic;
 using System;
-using System.Diagnostics;
-using System.Timers;
+using System.Threading;
+using SharedTimer = System.Timers.Timer;
+using TimerElapsedEventArgs = System.Timers.ElapsedEventArgs;
 
 namespace Orivy.Animation;
 
@@ -10,12 +13,17 @@ namespace Orivy.Animation;
 /// </summary>
 public class AnimationManager : IDisposable
 {
+    private static readonly object s_sync = new();
+    private static readonly List<AnimationManager> s_activeManagers = new();
+    private static SharedTimer? s_sharedTimer;
+    private static int s_tickInProgress;
+
     private readonly ValueProvider<double> _valueProvider;
     private object[] _animationData;
     private SKPoint _animationSource;
     private AnimationDirection _currentDirection;
     private bool _disposed;
-    private Timer _timer; // Removed readonly for lazy initialization
+    private bool _registered;
 
     public AnimationManager(bool singular = true)
     {
@@ -26,10 +34,7 @@ public class AnimationManager : IDisposable
         AnimationType = AnimationType.EaseInOut;
 
         _valueProvider = new ValueProvider<double>(0, ValueFactories.DoubleFactory, EasingMethods.DefaultEase);
-
-        // Create timer with lazy initialization to solve handle issues
-        // _timer = new Timer { Interval = 16 }; // THIS LINE WAS REMOVED
-        // _timer.Tick += OnTick; // THIS LINE WAS REMOVED
+        _animationData = Array.Empty<object>();
     }
 
     public bool Singular { get; set; }
@@ -44,46 +49,31 @@ public class AnimationManager : IDisposable
     {
         if (_disposed) return;
 
-        if (_timer != null)
-        {
-            _timer.Stop();
-            _timer.Elapsed -= OnTick; // Remove event handler
-            _timer.Dispose();
-            _timer = null;
-        }
+        UnregisterFromSharedTimer();
 
         _disposed = true;
     }
 
-    public event Action<object> OnAnimationProgress;
-    public event Action<object> OnAnimationFinished;
+    public event Action<object>? OnAnimationProgress;
+    public event Action<object>? OnAnimationFinished;
 
-    // Lazy initialization - Timer is created only when needed
-    private void EnsureTimer()
+    private static void EnsureSharedTimer()
     {
-        if (_timer != null) return;
+        if (s_sharedTimer != null)
+            return;
 
-        try
-        {
-            _timer = new Timer { Interval = 16 }; // ~60 FPS
-            _timer.Elapsed += OnTick;
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"AnimationManager: Timer could not be created - {ex.Message}");
-            // If timer creation fails, animation is disabled
-            _timer = null;
-        }
+        s_sharedTimer = new SharedTimer { Interval = 16, AutoReset = true };
+        s_sharedTimer.Elapsed += OnSharedTick;
     }
 
     public void StartNewAnimation(AnimationDirection direction)
     {
-        StartNewAnimation(direction, SKPoint.Empty, null);
+        StartNewAnimation(direction, SKPoint.Empty, Array.Empty<object>());
     }
 
     public void StartNewAnimation(AnimationDirection direction, SKPoint source)
     {
-        StartNewAnimation(direction, source, null);
+        StartNewAnimation(direction, source, Array.Empty<object>());
     }
 
     public void StartNewAnimation(AnimationDirection direction, object[] data)
@@ -91,8 +81,11 @@ public class AnimationManager : IDisposable
         StartNewAnimation(direction, SKPoint.Empty, data);
     }
 
-    public void StartNewAnimation(AnimationDirection direction, SKPoint source, object[] data)
+    public void StartNewAnimation(AnimationDirection direction, SKPoint source, object[]? data)
     {
+        if (_disposed)
+            return;
+
         if (Running && !InterruptAnimation)
             return;
 
@@ -112,12 +105,7 @@ public class AnimationManager : IDisposable
             TimeSpan.FromMilliseconds(Math.Max(16, duration)));
 
         Running = true;
-
-        // Create timer with lazy initialization
-        EnsureTimer();
-
-        if (_timer != null && !_timer.Enabled)
-            _timer.Start();
+    RegisterWithSharedTimer();
     }
 
     public double GetProgress()
@@ -188,20 +176,90 @@ public class AnimationManager : IDisposable
         return Running;
     }
 
-    private void OnTick(object sender, EventArgs e)
+    private static void OnSharedTick(object? sender, TimerElapsedEventArgs e)
     {
+        if (Interlocked.Exchange(ref s_tickInProgress, 1) != 0)
+            return;
+
+        AnimationManager[] buffer;
+        int count;
+
+        lock (s_sync)
+        {
+            count = s_activeManagers.Count;
+            if (count == 0)
+            {
+                s_sharedTimer?.Stop();
+                Interlocked.Exchange(ref s_tickInProgress, 0);
+                return;
+            }
+
+            buffer = ArrayPool<AnimationManager>.Shared.Rent(count);
+            s_activeManagers.CopyTo(buffer, 0);
+        }
+
+        try
+        {
+            for (var i = 0; i < count; i++)
+                buffer[i].TickCore();
+        }
+        finally
+        {
+            Array.Clear(buffer, 0, count);
+            ArrayPool<AnimationManager>.Shared.Return(buffer);
+            Interlocked.Exchange(ref s_tickInProgress, 0);
+        }
+    }
+
+    private void TickCore()
+    {
+        if (_disposed)
+        {
+            UnregisterFromSharedTimer();
+            return;
+        }
+
         if (_valueProvider.Completed)
         {
             Running = false;
-            if (_timer != null)
-                _timer.Stop();
+            UnregisterFromSharedTimer();
 
             OnAnimationFinished?.Invoke(this);
-
             return;
         }
 
         OnAnimationProgress?.Invoke(this);
+    }
+
+    private void RegisterWithSharedTimer()
+    {
+        lock (s_sync)
+        {
+            EnsureSharedTimer();
+            if (!_registered)
+            {
+                s_activeManagers.Add(this);
+                _registered = true;
+            }
+
+            if (s_sharedTimer != null && !s_sharedTimer.Enabled)
+                s_sharedTimer.Start();
+        }
+    }
+
+    private void UnregisterFromSharedTimer()
+    {
+        lock (s_sync)
+        {
+            if (_registered)
+            {
+                s_activeManagers.Remove(this);
+                _registered = false;
+            }
+
+            if (s_activeManagers.Count == 0 && s_sharedTimer != null)
+                s_sharedTimer.Stop();
+        }
     }
 
     private void UpdateEasingMethod()
@@ -227,7 +285,6 @@ public class AnimationManager : IDisposable
         if (!Running) return;
 
         Running = false;
-        if (_timer != null)
-            _timer.Stop();
+        UnregisterFromSharedTimer();
     }
 }

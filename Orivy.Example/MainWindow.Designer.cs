@@ -1181,6 +1181,7 @@ internal partial class MainWindow
 
         InitializeBindingDemoPage();
         InitializeGridListDemo();
+        InitializeNotificationsPage();
 
         extendMenu.ShowShortcutKeys = true;
         menuStrip.ShowShortcutKeys = true;
@@ -1204,6 +1205,265 @@ internal partial class MainWindow
         this.menuStrip.BringToFront();
         this.ResumeLayout(false);
     }
+
+    private void InitializeNotificationsPage()
+    {
+        panel7 = new Container
+        {
+            Name    = "panel7",
+            Text    = "Notifications",
+            Padding = new Thickness(28),
+            Dock    = DockStyle.Fill,
+            Radius  = new Radius(0),
+            Border  = new Thickness(0),
+        };
+
+        var notifHeader = new Element
+        {
+            Text      = "Notification System\nTrigger different notification kinds and observe stacking, slide-in entry, progress-bar countdown, and hover-pause behavior.",
+            Dock      = DockStyle.Top,
+            Height    = 80,
+            Padding   = new Thickness(16),
+            Margin    = new Thickness(0, 0, 0, 20),
+            Radius    = new Radius(14),
+            Border    = new Thickness(1),
+            TextAlign = ContentAlignment.MiddleLeft,
+        };
+
+        notifHeader.ConfigureVisualStyles(s => s
+            .Base(b => b
+                .Background(ColorScheme.SurfaceVariant)
+                .Foreground(ColorScheme.ForeColor)
+                .BorderColor(ColorScheme.Outline)
+                .Radius(14)));
+
+        var notifRow1 = new Container
+        {
+            Dock    = DockStyle.Top,
+            Height  = 46,
+            Margin  = new Thickness(0, 0, 0, 10),
+            Radius  = new Radius(0),
+            Border  = new Thickness(0),
+            BackColor = SkiaSharp.SKColors.Transparent,
+        };
+
+        notifBtnInfo = new Button
+        {
+            Text   = "Info",
+            Dock   = DockStyle.Left,
+            Width  = 120,
+            Height = 38,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+
+        notifBtnSuccess = new Button
+        {
+            Text   = "Success",
+            Dock   = DockStyle.Left,
+            Width  = 120,
+            Height = 38,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+
+        notifBtnSuccess.ConfigureVisualStyles(s => s
+            .DefaultTransition(TimeSpan.FromMilliseconds(140), AnimationType.CubicEaseOut)
+            .Base(b => b
+                .Background(new SkiaSharp.SKColor(22, 163, 74))
+                .Foreground(SkiaSharp.SKColors.White)
+                .Border(1)
+                .BorderColor(new SkiaSharp.SKColor(15, 118, 55))
+                .Radius(12)
+                .Shadow(new BoxShadow(0f, 6f, 14f, 0, ColorScheme.ShadowColor.WithAlpha(26))))
+            .OnHover(r => r
+                .Background(new SkiaSharp.SKColor(34, 197, 94))
+                .BorderColor(new SkiaSharp.SKColor(22, 163, 74))));
+
+        notifBtnWarning = new Button
+        {
+            Text   = "Warning",
+            Dock   = DockStyle.Left,
+            Width  = 120,
+            Height = 38,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+
+        notifBtnWarning.ConfigureVisualStyles(s => s
+            .DefaultTransition(TimeSpan.FromMilliseconds(140), AnimationType.CubicEaseOut)
+            .Base(b => b
+                .Background(new SkiaSharp.SKColor(202, 138, 4))
+                .Foreground(SkiaSharp.SKColors.White)
+                .Border(1)
+                .BorderColor(new SkiaSharp.SKColor(161, 102, 3))
+                .Radius(12)
+                .Shadow(new BoxShadow(0f, 6f, 14f, 0, ColorScheme.ShadowColor.WithAlpha(26))))
+            .OnHover(r => r
+                .Background(new SkiaSharp.SKColor(234, 179, 8))
+                .BorderColor(new SkiaSharp.SKColor(202, 138, 4))));
+
+        notifBtnError = new Button
+        {
+            Text   = "Error",
+            Dock   = DockStyle.Left,
+            Width  = 120,
+            Height = 38,
+        };
+
+        notifBtnError.ConfigureVisualStyles(s => s
+            .DefaultTransition(TimeSpan.FromMilliseconds(140), AnimationType.CubicEaseOut)
+            .Base(b => b
+                .Background(ColorScheme.Error)
+                .Foreground(SkiaSharp.SKColors.White)
+                .Border(1)
+                .BorderColor(ColorScheme.Error.Brightness(-0.18f))
+                .Radius(12)
+                .Shadow(new BoxShadow(0f, 6f, 14f, 0, ColorScheme.ShadowColor.WithAlpha(26))))
+            .OnHover(r => r
+                .Background(ColorScheme.Error.Brightness(0.06f))
+                .BorderColor(ColorScheme.Error.Brightness(-0.08f))));
+
+        var notifRow2 = new Container
+        {
+            Dock      = DockStyle.Top,
+            Height    = 46,
+            Margin    = new Thickness(0, 0, 0, 10),
+            Radius    = new Radius(0),
+            Border    = new Thickness(0),
+            BackColor = SkiaSharp.SKColors.Transparent,
+        };
+
+        notifBtnAllFour = new Button
+        {
+            Text   = "Show All Four",
+            Dock   = DockStyle.Left,
+            Width  = 148,
+            Height = 38,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+
+        notifBtnDismissAll = new Button
+        {
+            Text   = "Dismiss All",
+            Dock   = DockStyle.Left,
+            Width  = 120,
+            Height = 38,
+        };
+
+        notifBtnDismissAll.ConfigureVisualStyles(s => s
+            .DefaultTransition(TimeSpan.FromMilliseconds(140), AnimationType.CubicEaseOut)
+            .Base(b => b
+                .Background(ColorScheme.SurfaceVariant)
+                .Foreground(ColorScheme.ForeColor)
+                .Border(1)
+                .BorderColor(ColorScheme.Outline)
+                .Radius(12))
+            .OnHover(r => r
+                .Background(ColorScheme.SurfaceVariant.Brightness(0.06f))
+                .BorderColor(ColorScheme.Primary)));
+
+        var notifRow3 = new Container
+        {
+            Dock      = DockStyle.Top,
+            Height    = 46,
+            Margin    = new Thickness(0, 0, 0, 10),
+            Radius    = new Radius(0),
+            Border    = new Thickness(0),
+            BackColor = SkiaSharp.SKColors.Transparent,
+        };
+
+        notifBtnLongMessage = new Button
+        {
+            Text   = "Long Message",
+            Dock   = DockStyle.Left,
+            Width  = 148,
+            Height = 38,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+
+        notifBtnLongDuration = new Button
+        {
+            Text   = "8-Second Timer",
+            Dock   = DockStyle.Left,
+            Width  = 148,
+            Height = 38,
+        };
+
+        notifRow1.Controls.Add(notifBtnInfo);
+        notifRow1.Controls.Add(notifBtnSuccess);
+        notifRow1.Controls.Add(notifBtnWarning);
+        notifRow1.Controls.Add(notifBtnError);
+
+        notifRow2.Controls.Add(notifBtnAllFour);
+        notifRow2.Controls.Add(notifBtnDismissAll);
+
+        notifRow3.Controls.Add(notifBtnLongMessage);
+        notifRow3.Controls.Add(notifBtnLongDuration);
+
+        var notifRow4 = new Container
+        {
+            Dock      = DockStyle.Top,
+            Height    = 46,
+            Margin    = new Thickness(0, 0, 0, 10),
+            Radius    = new Radius(0),
+            Border    = new Thickness(0),
+            BackColor = SkiaSharp.SKColors.Transparent,
+        };
+
+        notifBtnConfirm = new Button
+        {
+            Text   = "Confirm Dialog",
+            Dock   = DockStyle.Left,
+            Width  = 148,
+            Height = 38,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+        notifBtnConfirm.ConfigureVisualStyles(s => s
+            .Base(b => b
+                .Background(ColorScheme.Primary)
+                .Foreground(SkiaSharp.SKColors.White)));
+
+        notifBtnActions = new Button
+        {
+            Text   = "With Actions",
+            Dock   = DockStyle.Left,
+            Width  = 148,
+            Height = 38,
+        };
+
+        notifRow4.Controls.Add(notifBtnConfirm);
+        notifRow4.Controls.Add(notifBtnActions);
+
+        panel7.Controls.Add(notifRow4);
+        panel7.Controls.Add(notifRow3);
+        panel7.Controls.Add(notifRow2);
+        panel7.Controls.Add(notifRow1);
+        panel7.Controls.Add(notifHeader);
+
+        windowPageControl.Controls.Add(panel7);
+        windowPageControl.PerformLayout();
+        windowPageControl.Invalidate();
+
+        notifBtnInfo.Click         += NotifBtnInfo_Click;
+        notifBtnSuccess.Click      += NotifBtnSuccess_Click;
+        notifBtnWarning.Click      += NotifBtnWarning_Click;
+        notifBtnError.Click        += NotifBtnError_Click;
+        notifBtnAllFour.Click      += NotifBtnAllFour_Click;
+        notifBtnDismissAll.Click   += NotifBtnDismissAll_Click;
+        notifBtnLongMessage.Click  += NotifBtnLongMessage_Click;
+        notifBtnLongDuration.Click += NotifBtnLongDuration_Click;
+        notifBtnConfirm.Click      += NotifBtnConfirm_Click;
+        notifBtnActions.Click      += NotifBtnActions_Click;
+    }
+
+    private Button notifBtnInfo;
+    private Button notifBtnSuccess;
+    private Button notifBtnWarning;
+    private Button notifBtnError;
+    private Button notifBtnAllFour;
+    private Button notifBtnDismissAll;
+    private Button notifBtnLongMessage;
+    private Button notifBtnLongDuration;
+    private Button notifBtnConfirm;
+    private Button notifBtnActions;
 
     private void InitializeBindingDemoPage()
     {
@@ -1634,6 +1894,7 @@ internal partial class MainWindow
     private Container panel4;
     private Container panel5;
     private Container panel6;
+    private Container panel7;
     private Element buttonOpenGL;
     private Element buttonSoftware;
     private Element buttonDirectX;
