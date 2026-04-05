@@ -1220,12 +1220,12 @@ internal partial class MainWindow
 
         var notifHeader = new Element
         {
-            Text      = "Notification System\nTrigger different notification kinds and observe stacking, slide-in entry, progress-bar countdown, and hover-pause behavior.",
+            Text      = "Notification Surface\nAlert-style toasts, inline actions, confirmation flow and the new manual progress API are all demonstrated on this page.",
             Dock      = DockStyle.Top,
-            Height    = 80,
-            Padding   = new Thickness(16),
+            Height    = 88,
+            Padding   = new Thickness(18),
             Margin    = new Thickness(0, 0, 0, 20),
-            Radius    = new Radius(14),
+            Radius    = new Radius(16),
             Border    = new Thickness(1),
             TextAlign = ContentAlignment.MiddleLeft,
         };
@@ -1235,7 +1235,7 @@ internal partial class MainWindow
                 .Background(ColorScheme.SurfaceVariant)
                 .Foreground(ColorScheme.ForeColor)
                 .BorderColor(ColorScheme.Outline)
-                .Radius(14)));
+                .Radius(16)));
 
         var notifRow1 = new Container
         {
@@ -1432,6 +1432,37 @@ internal partial class MainWindow
         notifRow4.Controls.Add(notifBtnConfirm);
         notifRow4.Controls.Add(notifBtnActions);
 
+        var notifRow5 = new Container
+        {
+            Dock      = DockStyle.Top,
+            Height    = 46,
+            Margin    = new Thickness(0, 0, 0, 10),
+            Radius    = new Radius(0),
+            Border    = new Thickness(0),
+            BackColor = SkiaSharp.SKColors.Transparent,
+        };
+
+        notifBtnManualProgress = new Button
+        {
+            Text   = "Manual Progress",
+            Dock   = DockStyle.Left,
+            Width  = 156,
+            Height = 38,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+
+        notifBtnProgressToggle = new Button
+        {
+            Text   = "Toggle Progress",
+            Dock   = DockStyle.Left,
+            Width  = 156,
+            Height = 38,
+        };
+
+        notifRow5.Controls.Add(notifBtnManualProgress);
+        notifRow5.Controls.Add(notifBtnProgressToggle);
+
+        panel7.Controls.Add(notifRow5);
         panel7.Controls.Add(notifRow4);
         panel7.Controls.Add(notifRow3);
         panel7.Controls.Add(notifRow2);
@@ -1452,6 +1483,8 @@ internal partial class MainWindow
         notifBtnLongDuration.Click += NotifBtnLongDuration_Click;
         notifBtnConfirm.Click      += NotifBtnConfirm_Click;
         notifBtnActions.Click      += NotifBtnActions_Click;
+        notifBtnManualProgress.Click += NotifBtnManualProgress_Click;
+        notifBtnProgressToggle.Click += NotifBtnProgressToggle_Click;
     }
 
     private Button notifBtnInfo;
@@ -1464,6 +1497,8 @@ internal partial class MainWindow
     private Button notifBtnLongDuration;
     private Button notifBtnConfirm;
     private Button notifBtnActions;
+    private Button notifBtnManualProgress;
+    private Button notifBtnProgressToggle;
 
     private void InitializeBindingDemoPage()
     {

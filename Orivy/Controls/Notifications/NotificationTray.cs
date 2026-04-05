@@ -12,7 +12,7 @@ internal sealed class NotificationTray : ElementBase
 		Border = new Thickness(0);
 		Radius = new Radius(0);
 		AutoScroll = true;
-		AutoScrollMargin = new SKSize(0, 12);
+		AutoScrollMargin = SKSize.Empty;
 		AutoScrollMinSize = new SKSize(NotificationToast.ToastWidth, 1);
 	}
 
@@ -22,11 +22,34 @@ internal sealed class NotificationTray : ElementBase
 			_vScrollBar.Value = 0;
 	}
 
+	internal void ScrollToBottom()
+	{
+		if (_vScrollBar != null)
+			_vScrollBar.Value = _vScrollBar.Maximum;
+	}
+
 	internal void Resize(float totalContentHeight, float maxHeight)
 	{
-		var clampedHeight = Math.Min(totalContentHeight, Math.Max(1f, maxHeight));
-		Size = new SKSize(NotificationToast.ToastWidth, clampedHeight);
+		var viewportHeight = Math.Max(1f, Math.Min(totalContentHeight, maxHeight));
+		Size = new SKSize(NotificationToast.ToastWidth, viewportHeight);
 		AutoScrollMinSize = new SKSize(NotificationToast.ToastWidth, totalContentHeight);
 		PerformLayout();
+	}
+
+	internal void RefreshScrollMetrics()
+	{
+		UpdateScrollBars();
+
+		if (_vScrollBar != null && !_vScrollBar.Visible)
+		{
+			_vScrollBar.Maximum = 0;
+			_vScrollBar.Value = 0;
+		}
+
+		if (_hScrollBar != null && !_hScrollBar.Visible)
+		{
+			_hScrollBar.Maximum = 0;
+			_hScrollBar.Value = 0;
+		}
 	}
 }

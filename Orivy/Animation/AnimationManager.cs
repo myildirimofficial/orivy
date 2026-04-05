@@ -213,7 +213,7 @@ public class AnimationManager : IDisposable
 
     private void TickCore()
     {
-        if (_disposed)
+        if (_disposed || !Running)
         {
             UnregisterFromSharedTimer();
             return;

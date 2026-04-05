@@ -10,7 +10,6 @@ public sealed class NotificationManager : IDisposable
 	private const int MarginRight = 24;
 	private const int MarginBottom = 24;
 	private const int ToastSpacing = 12;
-	private const float MaxTrayHeightFraction = 0.72f;
 
 	private readonly WindowBase _owner;
 	private readonly NotificationTray _tray;
@@ -29,9 +28,10 @@ public sealed class NotificationManager : IDisposable
 		};
 
 		_owner.Controls.Add(_tray);
-		_tray.BringToFront();
+		EnsureTrayTopMost();
 
 		_owner.SizeChanged += OnOwnerSizeChanged;
+		_owner.ControlAdded += OnOwnerControlAdded;
 	}
 
 	public NotificationHandle Show(string title, string message)
@@ -120,18 +120,13 @@ public sealed class NotificationManager : IDisposable
 
 		toast.DismissCompleted += OnToastDismissed;
 
-		var shift = toast.Height + ToastSpacing;
-		for (var i = 0; i < _active.Count; i++)
-			_active[i].MoveTo(_active[i]._targetY + shift);
-
-		_active.Insert(0, toast);
+		_active.Add(toast);
 		_tray.Controls.Add(toast);
-		_tray.BringToFront();
+		_tray.Controls.SetChildIndex(toast, _tray.Controls.Count - 1);
+		_tray.UpdateZOrder();
 		toast.BringToFront();
 
 		SyncTray();
-		toast.Place(0f, 0f);
-		_tray.ScrollToTop();
 		_tray.Invalidate();
 		return handle;
 	}
@@ -147,17 +142,21 @@ public sealed class NotificationManager : IDisposable
 		if (index < 0)
 			return;
 
-		var freedHeight = dismissed.Height + ToastSpacing;
 		_active.RemoveAt(index);
 
-		for (var i = index; i < _active.Count; i++)
-			_active[i].MoveTo(_active[i]._targetY - freedHeight);
-
 		_tray.Controls.Remove(dismissed);
+		var deferredCompletion = dismissed.TakeDeferredCompletionAction();
+		var activeCountBeforeDeferred = _active.Count;
 		dismissed.DetachHandle();
 		dismissed.Dispose();
 
-		SyncTray();
+		deferredCompletion?.Invoke();
+
+		if (_disposed)
+			return;
+
+		if (_active.Count == activeCountBeforeDeferred)
+			SyncTray();
 	}
 
 	private void OnOwnerSizeChanged(object? sender, EventArgs e)
@@ -168,6 +167,14 @@ public sealed class NotificationManager : IDisposable
 		SyncTray();
 	}
 
+	private void OnOwnerControlAdded(object? sender, ElementEventArgs e)
+	{
+		if (_disposed || ReferenceEquals(e.Element, _tray))
+			return;
+
+		EnsureTrayTopMost();
+	}
+
 	private void SyncTray()
 	{
 		if (_active.Count == 0)
@@ -176,17 +183,56 @@ public sealed class NotificationManager : IDisposable
 			return;
 		}
 
+		var topInset = 0f;
+		if (_owner is Window window && window.ShowTitle)
+			topInset = window.TitleHeight;
+
 		var totalHeight = TotalContentHeight();
-		var maxHeight = Math.Max(72f, _owner.Height * MaxTrayHeightFraction);
-		_tray.Resize(totalHeight, maxHeight);
+		var availableHeight = Math.Max(1f, _owner.Height - topInset - MarginBottom);
+		_tray.Resize(totalHeight, availableHeight);
+		var trayHeight = _tray.Height;
 
 		_tray.Location = new SKPoint(
 			_owner.Width - MarginRight - _tray.Width,
-			_owner.Height - MarginBottom - _tray.Height);
+			topInset + (availableHeight - trayHeight));
+
+		EnsureTrayTopMost();
+		ArrangeToasts(totalHeight, trayHeight);
+		_tray.RefreshScrollMetrics();
+
+		if (totalHeight > trayHeight)
+			_tray.ScrollToBottom();
+		else
+			_tray.ScrollToTop();
 
 		_tray.Visible = true;
-		_tray.BringToFront();
 		_tray.Invalidate();
+	}
+
+	private void ArrangeToasts(float totalHeight, float viewportHeight)
+	{
+		var startY = Math.Max(0f, viewportHeight - totalHeight);
+		var y = startY;
+
+		for (var i = 0; i < _active.Count; i++)
+		{
+			var toast = _active[i];
+			if (!toast._hasBeenPlaced)
+				toast.Place(0f, y);
+			else
+				toast.MoveTo(y);
+
+			y += toast.Height + ToastSpacing;
+		}
+	}
+
+	private void EnsureTrayTopMost()
+	{
+		if (_owner.Controls.Count > 0)
+			_owner.Controls.SetChildIndex(_tray, _owner.Controls.Count - 1);
+
+		_owner.UpdateZOrder();
+		_tray.BringToFront();
 	}
 
 	private float TotalContentHeight()
@@ -209,6 +255,7 @@ public sealed class NotificationManager : IDisposable
 
 		_disposed = true;
 		_owner.SizeChanged -= OnOwnerSizeChanged;
+		_owner.ControlAdded -= OnOwnerControlAdded;
 
 		for (var i = _active.Count - 1; i >= 0; i--)
 		{

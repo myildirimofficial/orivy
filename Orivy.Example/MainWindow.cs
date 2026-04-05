@@ -5,6 +5,7 @@ using Orivy.Controls;
 using SkiaSharp;
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace Orivy.Example
 {
@@ -26,6 +27,7 @@ namespace Orivy.Example
         private Container? _bindingPanel;
         private bool _dangerModeEnabled;
         private int _transitionDurationPreset = 350;
+        private NotificationHandle? _manualProgressToast;
 
         internal MainWindow()
         {
@@ -241,6 +243,59 @@ namespace Orivy.Example
                 new NotificationAction("Install Now", () =>
                     Notifications.Show("Installing", "Updating to v2.4.1 in the background…", NotificationKind.Info, 3000)),
                 new NotificationAction("Later"));
+
+        private async void NotifBtnManualProgress_Click(object sender, EventArgs e)
+        {
+            _manualProgressToast?.Dismiss();
+            _manualProgressToast = Notifications.Show(
+                "Publishing Build",
+                "Pushing artifacts to the release channel and verifying checksum state.",
+                NotificationKind.Info,
+                new NotificationOptions
+                {
+                    DurationMs = 0,
+                    ShowProgressBar = true,
+                    Progress = 0f,
+                    Actions = new[] { new NotificationAction("Hide", () => _manualProgressToast?.Dismiss()) }
+                });
+
+            for (var i = 1; i <= 10; i++)
+            {
+                await Task.Delay(220);
+                _manualProgressToast?.SetProgress(i / 10f);
+            }
+
+            await Task.Delay(180);
+            _manualProgressToast?.Dismiss();
+            _manualProgressToast = null;
+            Notifications.Show("Release Ready", "Build publishing completed successfully.", NotificationKind.Success, 2600);
+        }
+
+        private async void NotifBtnProgressToggle_Click(object sender, EventArgs e)
+        {
+            var toast = Notifications.Show(
+                "Background Indexing",
+                "Collecting symbols and warming the query cache in the background.",
+                NotificationKind.Info,
+                new NotificationOptions
+                {
+                    DurationMs = 0,
+                    ShowProgressBar = false,
+                    Progress = 0.18f,
+                });
+
+            await Task.Delay(700);
+            toast.SetProgressVisible(true);
+
+            for (var i = 2; i <= 9; i++)
+            {
+                await Task.Delay(140);
+                toast.SetProgress(i / 10f);
+            }
+
+            await Task.Delay(320);
+            toast.Dismiss();
+        }
 
         private void VisualStyleDangerToggle_Click(object sender, EventArgs e)
         {

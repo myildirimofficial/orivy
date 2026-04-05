@@ -361,6 +361,25 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
+    protected bool SetAnimatedOpacity(float opacity)
+    {
+        var clamped = Math.Clamp(opacity, 0f, 1f);
+        if (Math.Abs(_opacity - clamped) < 0.0001f)
+            return false;
+
+        _opacity = clamped;
+        return true;
+    }
+
+    protected bool SetAnimatedLocation(SKPoint location)
+    {
+        if (_location == location)
+            return false;
+
+        _location = location;
+        return true;
+    }
+
     /// <summary>
     /// Moves the specified element to the highest Z-order within its parent container.
     /// This is a shared helper used by windows, designers, and any container logic.
@@ -1572,7 +1591,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private static bool IsFloatingPopup(ElementBase control)
     {
-        return control is ContextMenuStrip contextMenu && contextMenu.Visible && contextMenu.IsOpen;
+        return (control is ContextMenuStrip contextMenu && contextMenu.Visible && contextMenu.IsOpen)
+            || (control is NotificationTray tray && tray.Visible);
     }
 
     private static int GetInputPriority(ElementBase control)
@@ -3473,6 +3493,12 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     internal virtual void OnControlRemoved(ElementEventArgs e)
     {
+        if (_lastHoveredElement == e.Element)
+        {
+            _lastHoveredElement.OnMouseLeave(EventArgs.Empty);
+            _lastHoveredElement = null;
+        }
+
         ControlRemoved?.Invoke(this, e);
 
         // If the removed element was part of a window that is already loaded,

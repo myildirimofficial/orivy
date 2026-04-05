@@ -1,76 +1,75 @@
+using Orivy.Animation;
 using Orivy.Extensions;
 using Orivy.Helpers;
 using SkiaSharp;
 using System;
 using System.Threading;
-using SystemTimer = System.Timers.Timer;
-using TimerElapsedEventArgs = System.Timers.ElapsedEventArgs;
 
 namespace Orivy.Controls;
 
 public sealed class NotificationToast : ElementBase
 {
-	internal const int ToastWidth = 468;
+	internal const int ToastWidth = 452;
+	private static readonly Radius CardRadius = new(16);
+	private static readonly Radius BadgeRadius = new(10);
+	private static readonly Radius ActionRadius = new(8);
 
 	private const int PaddingH = 20;
 	private const int PaddingV = 18;
-	private const int CloseSize = 30;
+	private const int CloseSize = 32;
 	private const int CloseRightGap = 12;
-	private const int IconDiameter = 44;
-	private const int IconRadius = 22;
+	private const int IconDiameter = 36;
+	private const int IconRadius = 18;
 	private const int IconGap = 14;
-	private const int KindFontSize = 12;
-	private const int TitleFontSize = 16;
-	private const int MessageFontSize = 14;
-	private const int ActionFontSize = 13;
-	private const int KindChipHeight = 22;
-	private const int KindChipPadding = 10;
-	private const int KindTitleGap = 8;
+	private const float TitleFontSize = 17f;
+	private const float MessageFontSize = 15f;
+	private const float ActionFontSize = 13.5f;
 	private const int TitleLineHeight = 24;
-	private const int MessageLineHeight = 21;
-	private const int TitleMessageGap = 8;
+	private const int MessageLineHeight = 22;
+	private const int TitleMessageGap = 6;
 	private const int ActionTopGap = 14;
 	private const int ActionHeight = 34;
-	private const int ActionHorizontalPadding = 14;
 	private const int ActionGap = 8;
 	private const int ProgressHeight = 4;
 	private const int MaxMessageLines = 5;
-	private const float EnterDurationMs = 150f;
-	private const float ExitDurationMs = 110f;
-	private const float EnterOffset = 22f;
+	private const float EnterDurationMs = 120f;
+	private const float ExitDurationMs = 180f;
+	private const float EnterOffset = 18f;
 
 	private const float ContentLeft = PaddingH + IconDiameter + IconGap;
 	private const float ContentRight = ToastWidth - PaddingH - CloseSize - CloseRightGap;
 	private const float ContentWidth = ContentRight - ContentLeft;
 
-	private readonly SystemTimer _frameTimer;
-	private readonly SKTypeface _boldTypeface;
-	private readonly SKFont _titleFont;
-	private readonly SKFont _kindFont;
-	private readonly SKFont _messageFont;
-	private readonly SKFont _actionFont;
-	private readonly SKPaint _fillPaint;
-	private readonly SKPaint _textPaint;
-	private readonly SKPaint _iconPaint;
+	private static SKTypeface? _cachedBoldTypeface;
+	private static SKFont? _cachedTitleFont;
+	private static SKFont? _cachedMessageFont;
+	private static SKFont? _cachedActionFont;
+	private static string? _cachedTypefaceName;
+
+	private readonly AnimationManager _countdownAnimation;
+	private readonly AnimationManager _visibilityAnimation;
+	private readonly AnimationManager _slideAnimation;
 	private readonly NotificationAction[] _actions;
-	private readonly float[] _actionWidths;
 	private readonly SKRect[] _actionRects;
-	private readonly float _kindChipWidth;
-	private readonly string _kindLabel;
+	private NotificationHandle? _handle;
 
 	internal float _targetX;
 	internal float _targetY;
+	private float _startY;
 
-	private float _animationElapsedMs;
 	private float _remainingMs;
 	private float? _manualProgress;
 	private int _dismissState;
-	private bool _closeHovered;
-	private int _hoveredAction = -1;
 	private bool _countdownPaused;
+	private bool _closeHovered;
+	private bool _closePressed;
+	private bool _consumeNextLeftClick;
+	internal bool _hasBeenPlaced;
 	private bool _showProgressBar;
+	private int _hoveredAction = -1;
+	private int _pressedAction = -1;
+	private Action? _deferredCompletionAction;
 	private SKRect _closeRect;
-	private NotificationHandle? _handle;
 	private ToastVisualState _visualState;
 
 	internal Action? OnDismissWithoutAction;
@@ -81,6 +80,7 @@ public sealed class NotificationToast : ElementBase
 		Steady,
 		Exiting,
 	}
+
 
 	public string Title { get; }
 	public string Message { get; }
@@ -109,76 +109,84 @@ public sealed class NotificationToast : ElementBase
 		if (_actions.Length > 0)
 			_actions[0].IsPrimary = true;
 
-		_kindLabel = kind switch
-		{
-			NotificationKind.Success => "SUCCESS",
-			NotificationKind.Warning => "WARNING",
-			NotificationKind.Error => "ERROR",
-			_ => "INFO",
-		};
-
 		var defaultTypeface = Application.DefaultFont.Typeface;
-		_boldTypeface = SKTypeface.FromFamilyName(
-			defaultTypeface?.FamilyName ?? "Segoe UI",
-			SKFontStyle.Bold) ?? defaultTypeface ?? SKTypeface.Default;
+		var familyName = defaultTypeface?.FamilyName ?? "Segoe UI Variable Display";
 
-		_kindFont = new SKFont(_boldTypeface, KindFontSize) { Subpixel = true, Edging = SKFontEdging.SubpixelAntialias };
-		_titleFont = new SKFont(_boldTypeface, TitleFontSize) { Subpixel = true, Edging = SKFontEdging.SubpixelAntialias };
-		_messageFont = new SKFont(defaultTypeface, MessageFontSize) { Subpixel = true, Edging = SKFontEdging.SubpixelAntialias };
-		_actionFont = new SKFont(defaultTypeface, ActionFontSize) { Subpixel = true, Edging = SKFontEdging.SubpixelAntialias };
-
-		_fillPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
-		_textPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
-		_iconPaint = new SKPaint { IsAntialias = true, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round };
-
-		var kindSize = TextRenderer.MeasureText(
-			_kindLabel,
-			_kindFont,
-			new SKSize(short.MaxValue, KindChipHeight),
-			new TextRenderOptions { Wrap = TextWrap.None, MaxWidth = short.MaxValue });
-		_kindChipWidth = (float)Math.Ceiling(kindSize.Width) + KindChipPadding * 2;
-
-		_actionWidths = new float[_actions.Length];
-		_actionRects = new SKRect[_actions.Length];
-		for (var i = 0; i < _actions.Length; i++)
+		if (_cachedTitleFont == null || _cachedMessageFont == null || _cachedActionFont == null || _cachedTypefaceName != familyName)
 		{
-			var measured = TextRenderer.MeasureText(
-				_actions[i].Label,
-				_actionFont,
-				new SKSize(short.MaxValue, ActionHeight),
-				new TextRenderOptions { Wrap = TextWrap.None, MaxWidth = short.MaxValue });
-			_actionWidths[i] = (float)Math.Ceiling(measured.Width) + ActionHorizontalPadding * 2;
+			_cachedTitleFont?.Dispose();
+			_cachedMessageFont?.Dispose();
+			_cachedActionFont?.Dispose();
+			_cachedBoldTypeface?.Dispose();
+
+			_cachedTypefaceName = familyName;
+			_cachedBoldTypeface = SKTypeface.FromFamilyName(familyName, SKFontStyle.Bold) ?? defaultTypeface ?? SKTypeface.Default;
+
+			_cachedTitleFont = new SKFont(_cachedBoldTypeface, TitleFontSize) { Subpixel = true, Edging = SKFontEdging.SubpixelAntialias };
+			_cachedMessageFont = new SKFont(defaultTypeface, MessageFontSize) { Subpixel = true, Edging = SKFontEdging.SubpixelAntialias };
+			_cachedActionFont = new SKFont(_cachedBoldTypeface, ActionFontSize) { Subpixel = true, Edging = SKFontEdging.SubpixelAntialias };
 		}
+
+		_actionRects = new SKRect[_actions.Length];
 
 		var height = ComputeToastHeight(message, _actions.Length > 0);
 
 		Size = new SKSize(ToastWidth, height);
-		BackColor = SKColors.Transparent;
-		Border = new Thickness(1);
-		BorderColor = ColorScheme.Outline.WithAlpha(82);
-		Radius = new Radius(20);
-		Shadows = new[]
-		{
-			new BoxShadow(0f, 8f, 22f, 0, ColorScheme.ShadowColor.WithAlpha(26)),
-			new BoxShadow(0f, 18f, 36f, 0, ColorScheme.ShadowColor.WithAlpha(18)),
-		};
+		ApplyTheme();
 		ZOrder = 9999;
 		Opacity = 0f;
+		ColorScheme.ThemeChanged += OnThemeChanged;
+
+		_visibilityAnimation = new AnimationManager(true)
+		{
+			AnimationType = AnimationType.CubicEaseOut,
+			InterruptAnimation = true,
+			Increment = Math.Max(0.01, 16d / EnterDurationMs),
+			SecondaryIncrement = Math.Max(0.01, 16d / ExitDurationMs),
+		};
+		_visibilityAnimation.OnAnimationProgress += HandleVisibilityAnimationProgress;
+		_visibilityAnimation.OnAnimationFinished += HandleVisibilityAnimationFinished;
+
+		_countdownAnimation = new AnimationManager(true)
+		{
+			AnimationType = AnimationType.Linear,
+			InterruptAnimation = true,
+			Increment = DurationMs > 0 ? Math.Max(0.0001, 16d / DurationMs) : 1d,
+			SecondaryIncrement = DurationMs > 0 ? Math.Max(0.0001, 16d / DurationMs) : 1d,
+		};
+		_countdownAnimation.OnAnimationProgress += HandleCountdownAnimationProgress;
+		_countdownAnimation.OnAnimationFinished += HandleCountdownAnimationFinished;
+
+		_slideAnimation = new AnimationManager(true)
+		{
+			AnimationType = AnimationType.CubicEaseOut,
+			InterruptAnimation = true,
+			Increment = Math.Max(0.01, 16d / 150d), // 150ms sliding up
+			SecondaryIncrement = Math.Max(0.01, 16d / 150d),
+		};
+		_slideAnimation.OnAnimationProgress += HandleSlideAnimationProgress;
+
+		LayoutInteractiveElements();
 
 		_remainingMs = durationMs;
 		_visualState = ToastVisualState.Entering;
-		_frameTimer = new SystemTimer(16) { AutoReset = true };
-		_frameTimer.Elapsed += OnFrameElapsed;
 	}
 
 	internal void Place(float targetX, float targetY)
 	{
 		_targetX = targetX;
 		_targetY = targetY;
+		_startY = targetY;
+		_hasBeenPlaced = true;
+		SetAnimatedOpacity(1f);
 		Location = new SKPoint(targetX + EnterOffset, targetY);
-		_animationElapsedMs = 0f;
+		_remainingMs = DurationMs;
 		_visualState = ToastVisualState.Entering;
-		_frameTimer.Start();
+		_visibilityAnimation.AnimationType = AnimationType.CubicEaseOut;
+		_visibilityAnimation.Increment = Math.Max(0.01, 16d / EnterDurationMs);
+		_visibilityAnimation.SecondaryIncrement = _visibilityAnimation.Increment;
+		_visibilityAnimation.SetProgress(0d);
+		_visibilityAnimation.StartNewAnimation(AnimationDirection.In);
 	}
 
 	internal void MoveTo(float newTargetY)
@@ -186,9 +194,18 @@ public sealed class NotificationToast : ElementBase
 		if (Math.Abs(newTargetY - _targetY) < 0.5f)
 			return;
 
+		_startY = Location.Y;
 		_targetY = newTargetY;
-		Location = new SKPoint(Location.X, newTargetY);
-		Invalidate();
+
+		if (_visualState == ToastVisualState.Steady && !_visibilityAnimation.IsAnimating())
+		{
+			_slideAnimation.SetProgress(0d);
+			_slideAnimation.StartNewAnimation(AnimationDirection.In);
+		}
+		else
+		{
+			// If it's already entering or exiting, we just update targetY and it will glide there.
+		}
 	}
 
 	internal void BeginDismiss()
@@ -196,9 +213,17 @@ public sealed class NotificationToast : ElementBase
 		if (Interlocked.CompareExchange(ref _dismissState, 1, 0) != 0)
 			return;
 
-		_animationElapsedMs = 0f;
+		_closeHovered = false;
+		_closePressed = false;
+		_hoveredAction = -1;
+		_pressedAction = -1;
+		Cursor = Cursors.Default;
+		_countdownAnimation.Stop();
 		_visualState = ToastVisualState.Exiting;
-		_frameTimer.Start();
+		_visibilityAnimation.AnimationType = AnimationType.CubicEaseIn;
+		_visibilityAnimation.Increment = Math.Max(0.01, 16d / ExitDurationMs);
+		_visibilityAnimation.SecondaryIncrement = _visibilityAnimation.Increment;
+		_visibilityAnimation.StartNewAnimation(AnimationDirection.Out);
 	}
 
 	internal override void OnMouseEnter(EventArgs e)
@@ -206,7 +231,10 @@ public sealed class NotificationToast : ElementBase
 		base.OnMouseEnter(e);
 
 		if (_dismissState == 0)
+		{
 			_countdownPaused = true;
+			_countdownAnimation.Stop();
+		}
 	}
 
 	internal override void OnMouseLeave(EventArgs e)
@@ -214,12 +242,93 @@ public sealed class NotificationToast : ElementBase
 		base.OnMouseLeave(e);
 
 		_closeHovered = false;
+		_closePressed = false;
 		_hoveredAction = -1;
+		_pressedAction = -1;
+		Cursor = Cursors.Default;
+		Invalidate();
 
 		if (_dismissState == 0)
+		{
 			_countdownPaused = false;
+			ResumeCountdownIfNeeded();
+		}
+	}
+
+	internal override void OnMouseMove(MouseEventArgs e)
+	{
+		if (_dismissState != 0)
+			return;
+
+		var point = new SKPoint(e.X, e.Y);
+		var previousCloseHovered = _closeHovered;
+		var previousHoveredAction = _hoveredAction;
+
+		_closeHovered = _closeRect.Contains(point);
+		_hoveredAction = HitTestAction(point);
+		Cursor = _closeHovered || _hoveredAction >= 0 ? Cursors.Hand : Cursors.Default;
+
+		if (previousCloseHovered != _closeHovered || previousHoveredAction != _hoveredAction)
+			Invalidate();
+	}
+
+	internal override void OnMouseDown(MouseEventArgs e)
+	{
+		if (_dismissState != 0)
+			return;
+
+		if (e.Button != MouseButtons.Left)
+			return;
+
+		var point = new SKPoint(e.X, e.Y);
+		_closePressed = _closeRect.Contains(point);
+		_pressedAction = HitTestAction(point);
+		_consumeNextLeftClick = _closePressed || _pressedAction >= 0;
+		if (_closePressed || _pressedAction >= 0)
+			Invalidate();
+	}
+
+	internal override void OnMouseUp(MouseEventArgs e)
+	{
+		if (_dismissState != 0)
+			return;
+
+		if (e.Button != MouseButtons.Left)
+			return;
+
+		var point = new SKPoint(e.X, e.Y);
+		var shouldDismiss = _closePressed && _closeRect.Contains(point);
+		var actionIndex = _pressedAction >= 0 && _pressedAction == HitTestAction(point) ? _pressedAction : -1;
+
+		_closePressed = false;
+		_pressedAction = -1;
+
+		if (shouldDismiss)
+		{
+			_deferredCompletionAction = OnDismissWithoutAction;
+			BeginDismiss();
+			return;
+		}
+
+		if (actionIndex >= 0)
+		{
+			_deferredCompletionAction = _actions[actionIndex].Invoke;
+			BeginDismiss();
+			return;
+		}
 
 		Invalidate();
+	}
+
+	protected internal override void OnMouseClick(MouseEventArgs e)
+	{
+		if (e.Button == MouseButtons.Left && (_consumeNextLeftClick || _dismissState != 0))
+		{
+			_consumeNextLeftClick = false;
+			return;
+		}
+
+		base.OnMouseClick(e);
 	}
 
 	internal void AttachHandle(NotificationHandle handle)
@@ -231,6 +340,13 @@ public sealed class NotificationToast : ElementBase
 	{
 		_handle?.Detach();
 		_handle = null;
+	}
+
+	internal Action? TakeDeferredCompletionAction()
+	{
+		var deferred = _deferredCompletionAction;
+		_deferredCompletionAction = null;
+		return deferred;
 	}
 
 	internal void SetProgressVisible(bool visible)
@@ -247,221 +363,152 @@ public sealed class NotificationToast : ElementBase
 		Invalidate();
 	}
 
-	internal override void OnMouseMove(MouseEventArgs e)
-	{
-		base.OnMouseMove(e);
-
-		var point = new SKPoint(e.X, e.Y);
-		var previousClose = _closeHovered;
-		var previousAction = _hoveredAction;
-
-		_closeHovered = _closeRect.Contains(point);
-		_hoveredAction = -1;
-		for (var i = 0; i < _actionRects.Length; i++)
-		{
-			if (_actionRects[i].Contains(point))
-			{
-				_hoveredAction = i;
-				break;
-			}
-		}
-
-		if (previousClose != _closeHovered || previousAction != _hoveredAction)
-			Invalidate();
-	}
-
-	protected internal override void OnMouseClick(MouseEventArgs e)
-	{
-		base.OnMouseClick(e);
-
-		if (e.Button != MouseButtons.Left)
-			return;
-
-		var point = new SKPoint(e.X, e.Y);
-
-		if (_closeRect.Contains(point))
-		{
-			OnDismissWithoutAction?.Invoke();
-			BeginDismiss();
-			return;
-		}
-
-		for (var i = 0; i < _actionRects.Length; i++)
-		{
-			if (!_actionRects[i].Contains(point))
-				continue;
-
-			_actions[i].Invoke();
-			BeginDismiss();
-			return;
-		}
-	}
-
 	public override void OnPaint(SKCanvas canvas)
 	{
 		var width = (float)Width;
 		var height = (float)Height;
 		var accent = GetAccentColor();
 
-		DrawCardSurface(canvas, width, height, accent);
 		DrawIconBadge(canvas, accent);
-		DrawKindChip(canvas, accent);
 		DrawTitle(canvas);
 		DrawMessage(canvas, height);
-
-		if (_actions.Length > 0)
-		{
-			DrawFooterDivider(canvas, height, accent);
-			DrawActions(canvas, height, accent);
-		}
-
 		DrawCloseButton(canvas);
+		if (_actions.Length > 0)
+			DrawActions(canvas);
 		if (_showProgressBar)
 			DrawProgress(canvas, width, height, accent);
 	}
 
-	private void DrawCardSurface(SKCanvas canvas, float width, float height, SKColor accent)
+	private void OnThemeChanged(object? sender, EventArgs e)
 	{
-		var surfacePaint = new SKPaint
-		{
-			IsAntialias = true,
-			Style = SKPaintStyle.Fill,
-			Color = MixWithSurface(accent),
-		};
+		ApplyTheme();
+	}
 
-		var topWashPaint = new SKPaint
-		{
-			IsAntialias = true,
-			Style = SKPaintStyle.Fill,
-			Color = accent.WithAlpha(18),
-		};
+	private void ApplyTheme()
+	{
+		var accent = GetAccentColor();
+		var mixFactor = ColorScheme.IsDarkMode ? 0.095f : 0.045f;
+		var backgroundAlpha = ColorScheme.IsDarkMode ? (byte)236 : (byte)244;
+		var borderAlpha = ColorScheme.IsDarkMode ? (byte)76 : (byte)44;
+		var shadow = ColorScheme.FlatDesign
+			? BoxShadow.None
+			: new BoxShadow(0f, 8f, 18f, CardRadius, ColorScheme.ShadowColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)46 : (byte)20));
 
-		var edgePaint = new SKPaint
-		{
-			IsAntialias = true,
-			Style = SKPaintStyle.Fill,
-			Color = accent.WithAlpha(110),
-		};
-
-		canvas.DrawRect(new SKRect(0, 0, width, height), surfacePaint);
-		canvas.DrawRoundRect(new Radius(20).ToRoundRect(new SKRect(0, 0, width, 54f)), topWashPaint);
-		canvas.DrawRoundRect(new Radius(3).ToRoundRect(new SKRect(22f, 0, width - 22f, 3f)), edgePaint);
-
-		surfacePaint.Dispose();
-		topWashPaint.Dispose();
-		edgePaint.Dispose();
+		BackColor = MixWithSurface(accent, mixFactor, backgroundAlpha);
+		Border = new Thickness(1);
+		BorderColor = accent.WithAlpha(borderAlpha);
+		Radius = CardRadius;
+		Shadow = shadow;
 	}
 
 	private void DrawIconBadge(SKCanvas canvas, SKColor accent)
 	{
 		var centerX = PaddingH + IconRadius;
-		var centerY = PaddingV + IconRadius;
+		var centerY = PaddingV + 1f + IconRadius;
+		var badgeRect = new SKRect(centerX - IconRadius, centerY - IconRadius, centerX + IconRadius, centerY + IconRadius);
 
-		_fillPaint.Style = SKPaintStyle.Fill;
-		_fillPaint.Color = accent.WithAlpha(28);
-		canvas.DrawCircle(centerX, centerY, IconRadius, _fillPaint);
+		using var fillPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = accent.WithAlpha(22) };
+		using var strokePaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1f, Color = accent.WithAlpha(82) };
+		using var iconPaint = new SKPaint
+		{
+			IsAntialias = true,
+			Style = SKPaintStyle.Stroke,
+			StrokeWidth = 2.1f,
+			StrokeCap = SKStrokeCap.Round,
+			StrokeJoin = SKStrokeJoin.Round,
+			Color = accent,
+		};
 
-		_fillPaint.Color = accent.WithAlpha(72);
-		canvas.DrawCircle(centerX, centerY, IconRadius - 6f, _fillPaint);
-
-		_iconPaint.Color = accent;
-		_iconPaint.StrokeWidth = 2.4f;
+		canvas.DrawRoundRect(BadgeRadius.ToRoundRect(badgeRect), fillPaint);
+		canvas.DrawRoundRect(BadgeRadius.ToRoundRect(badgeRect), strokePaint);
 
 		switch (Kind)
 		{
 			case NotificationKind.Success:
-				DrawCheckIcon(canvas, centerX, centerY);
+				DrawCheckIcon(canvas, centerX, centerY, iconPaint);
 				break;
 			case NotificationKind.Warning:
-				DrawWarningIcon(canvas, centerX, centerY);
+				DrawWarningIcon(canvas, centerX, centerY, iconPaint);
 				break;
 			case NotificationKind.Error:
-				DrawErrorIcon(canvas, centerX, centerY);
+				DrawErrorIcon(canvas, centerX, centerY, iconPaint);
 				break;
 			default:
-				DrawInfoIcon(canvas, centerX, centerY);
+				DrawInfoIcon(canvas, centerX, centerY, iconPaint);
 				break;
 		}
 	}
 
-	private void DrawKindChip(SKCanvas canvas, SKColor accent)
+	private static void DrawCheckIcon(SKCanvas canvas, float centerX, float centerY, SKPaint iconPaint)
 	{
-		var chipRect = new SKRect(ContentLeft, PaddingV, ContentLeft + _kindChipWidth, PaddingV + KindChipHeight);
-		var rr = new Radius(9).ToRoundRect(chipRect);
-
-		_fillPaint.Style = SKPaintStyle.Fill;
-		_fillPaint.Color = accent.WithAlpha(26);
-		canvas.DrawRoundRect(rr, _fillPaint);
-
-		_fillPaint.Style = SKPaintStyle.Stroke;
-		_fillPaint.StrokeWidth = 1f;
-		_fillPaint.Color = accent.WithAlpha(110);
-		canvas.DrawRoundRect(rr, _fillPaint);
-
-		_textPaint.Color = accent;
-		TextRenderer.DrawText(canvas, _kindLabel, chipRect, _textPaint, _kindFont, ContentAlignment.MiddleCenter, autoEllipsis: false);
-	}
-
-	private void DrawCheckIcon(SKCanvas canvas, float centerX, float centerY)
-	{
-		_iconPaint.Style = SKPaintStyle.Stroke;
 		using var path = new SKPath();
 		path.MoveTo(centerX - 6.5f, centerY + 0.5f);
 		path.LineTo(centerX - 1.5f, centerY + 5.5f);
 		path.LineTo(centerX + 6.5f, centerY - 5.5f);
-		canvas.DrawPath(path, _iconPaint);
+		canvas.DrawPath(path, iconPaint);
 	}
 
-	private void DrawWarningIcon(SKCanvas canvas, float centerX, float centerY)
+	private static void DrawWarningIcon(SKCanvas canvas, float centerX, float centerY, SKPaint iconPaint)
 	{
-		_iconPaint.Style = SKPaintStyle.Stroke;
-		canvas.DrawLine(centerX, centerY - 6f, centerX, centerY + 1f, _iconPaint);
-		_iconPaint.Style = SKPaintStyle.Fill;
-		canvas.DrawCircle(centerX, centerY + 6f, 1.8f, _iconPaint);
+		canvas.DrawLine(centerX, centerY - 6f, centerX, centerY + 1f, iconPaint);
+		using var fillPaint = new SKPaint
+		{
+			IsAntialias = true,
+			Style = SKPaintStyle.Fill,
+			Color = iconPaint.Color,
+			StrokeCap = iconPaint.StrokeCap,
+			StrokeJoin = iconPaint.StrokeJoin,
+		};
+		canvas.DrawCircle(centerX, centerY + 6f, 1.8f, fillPaint);
 	}
 
-	private void DrawErrorIcon(SKCanvas canvas, float centerX, float centerY)
+	private static void DrawErrorIcon(SKCanvas canvas, float centerX, float centerY, SKPaint iconPaint)
 	{
-		_iconPaint.Style = SKPaintStyle.Stroke;
 		const float delta = 5.5f;
-		canvas.DrawLine(centerX - delta, centerY - delta, centerX + delta, centerY + delta, _iconPaint);
-		canvas.DrawLine(centerX + delta, centerY - delta, centerX - delta, centerY + delta, _iconPaint);
+		canvas.DrawLine(centerX - delta, centerY - delta, centerX + delta, centerY + delta, iconPaint);
+		canvas.DrawLine(centerX + delta, centerY - delta, centerX - delta, centerY + delta, iconPaint);
 	}
 
-	private void DrawInfoIcon(SKCanvas canvas, float centerX, float centerY)
+	private static void DrawInfoIcon(SKCanvas canvas, float centerX, float centerY, SKPaint iconPaint)
 	{
-		_iconPaint.Style = SKPaintStyle.Fill;
-		canvas.DrawCircle(centerX, centerY - 5.5f, 1.8f, _iconPaint);
-		_iconPaint.Style = SKPaintStyle.Stroke;
-		canvas.DrawLine(centerX, centerY - 1f, centerX, centerY + 6f, _iconPaint);
+		using var fillPaint = new SKPaint
+		{
+			IsAntialias = true,
+			Style = SKPaintStyle.Fill,
+			Color = iconPaint.Color,
+			StrokeCap = iconPaint.StrokeCap,
+			StrokeJoin = iconPaint.StrokeJoin,
+		};
+		canvas.DrawCircle(centerX, centerY - 5.5f, 1.8f, fillPaint);
+		canvas.DrawLine(centerX, centerY - 1f, centerX, centerY + 6f, iconPaint);
 	}
 
 	private void DrawTitle(SKCanvas canvas)
 	{
-		var titleTop = PaddingV + KindChipHeight + KindTitleGap;
+		var titleTop = PaddingV;
 		var titleRect = new SKRect(ContentLeft, titleTop, ContentRight, titleTop + TitleLineHeight);
-		_textPaint.Color = ColorScheme.ForeColor;
-		TextRenderer.DrawText(canvas, Title, titleRect, _textPaint, _titleFont, ContentAlignment.MiddleLeft, autoEllipsis: true);
+		using var textPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = ColorScheme.ForeColor };
+		TextRenderer.DrawText(canvas, Title, titleRect, textPaint, _cachedTitleFont!, ContentAlignment.MiddleLeft, autoEllipsis: true);
 	}
 
 	private void DrawMessage(SKCanvas canvas, float height)
 	{
-		var messageTop = PaddingV + KindChipHeight + KindTitleGap + TitleLineHeight + TitleMessageGap;
+		var messageTop = PaddingV + TitleLineHeight + TitleMessageGap;
 		var reservedBottom = PaddingV + ProgressHeight + (_actions.Length > 0 ? ActionTopGap + ActionHeight : 0);
 		var messageBottom = height - reservedBottom;
 		if (messageBottom <= messageTop)
 			return;
 
-		_textPaint.Color = ColorScheme.ForeColor.WithAlpha(190);
-		var baselineY = messageTop + 4f - _messageFont.Metrics.Ascent;
+		using var textPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = ColorScheme.ForeColor.WithAlpha(184) };
+		var baselineY = messageTop + 4f - _cachedMessageFont!.Metrics.Ascent;
 		TextRenderer.DrawText(
 			canvas,
 			Message,
 			ContentLeft,
 			baselineY,
 			SKTextAlign.Left,
-			_messageFont,
-			_textPaint,
+			_cachedMessageFont!,
+			textPaint,
 			new TextRenderOptions
 			{
 				Wrap = TextWrap.WordWrap,
@@ -470,85 +517,121 @@ public sealed class NotificationToast : ElementBase
 			});
 	}
 
-	private void DrawFooterDivider(SKCanvas canvas, float height, SKColor accent)
+
+	internal override void OnSizeChanged(EventArgs e)
 	{
-		var dividerY = height - PaddingV - ProgressHeight - ActionHeight - (ActionTopGap * 0.55f);
-		_fillPaint.Style = SKPaintStyle.Fill;
-		_fillPaint.Color = accent.WithAlpha(46);
-		canvas.DrawRect(new SKRect(ContentLeft, dividerY, ContentRight, dividerY + 1f), _fillPaint);
+		base.OnSizeChanged(e);
+		LayoutInteractiveElements();
 	}
 
-	private void DrawActions(SKCanvas canvas, float height, SKColor accent)
+	private void DrawActions(SKCanvas canvas)
 	{
-		var actionY = height - PaddingV - ProgressHeight - ActionHeight;
-		var totalWidth = 0f;
+		using var fillPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
+		using var strokePaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1f };
+		using var textPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
 
 		for (var i = 0; i < _actions.Length; i++)
 		{
-			if (i > 0)
-				totalWidth += ActionGap;
-			totalWidth += _actionWidths[i];
-		}
-
-		var x = ContentRight - totalWidth;
-
-		for (var i = 0; i < _actions.Length; i++)
-		{
-			var width = _actionWidths[i];
-			var rect = new SKRect(x, actionY, x + width, actionY + ActionHeight);
-			_actionRects[i] = rect;
-
-			var roundRect = new Radius(9).ToRoundRect(rect);
+			var rect = _actionRects[i];
+			var isPrimary = _actions[i].IsPrimary;
 			var hovered = _hoveredAction == i;
-			var primary = _actions[i].IsPrimary;
+			var pressed = _pressedAction == i;
 
-			if (primary)
-			{
-				_fillPaint.Style = SKPaintStyle.Fill;
-				_fillPaint.Color = hovered ? accent.Brightness(0.05f) : accent;
-				canvas.DrawRoundRect(roundRect, _fillPaint);
-				_textPaint.Color = SKColors.White;
-			}
-			else
-			{
-				_fillPaint.Style = SKPaintStyle.Fill;
-				_fillPaint.Color = hovered ? ColorScheme.SurfaceVariant.WithAlpha(220) : ColorScheme.SurfaceVariant.WithAlpha(132);
-				canvas.DrawRoundRect(roundRect, _fillPaint);
+			var background = isPrimary
+				? (pressed ? ColorScheme.Primary.Brightness(-0.08f) : hovered ? ColorScheme.Primary.Brightness(0.06f) : ColorScheme.Primary)
+				: (pressed ? ColorScheme.SurfaceVariant.WithAlpha(190) : hovered ? ColorScheme.SurfaceVariant.WithAlpha(150) : ColorScheme.SurfaceVariant.WithAlpha(120));
 
-				_fillPaint.Style = SKPaintStyle.Stroke;
-				_fillPaint.StrokeWidth = 1f;
-				_fillPaint.Color = hovered ? accent.WithAlpha(170) : ColorScheme.Outline.WithAlpha(120);
-				canvas.DrawRoundRect(roundRect, _fillPaint);
-				_textPaint.Color = ColorScheme.ForeColor;
-			}
+			var borderColor = isPrimary
+				? (pressed ? ColorScheme.Primary.Brightness(-0.24f) : hovered ? ColorScheme.Primary.Brightness(-0.08f) : ColorScheme.Primary.Brightness(-0.18f))
+				: (pressed ? ColorScheme.Outline.WithAlpha(190) : hovered ? ColorScheme.Outline.WithAlpha(160) : ColorScheme.Outline.WithAlpha(100));
 
-			TextRenderer.DrawText(canvas, _actions[i].Label, rect, _textPaint, _actionFont, ContentAlignment.MiddleCenter, autoEllipsis: false);
-			x += width + ActionGap;
+			var foreground = isPrimary ? SKColors.White : ColorScheme.ForeColor;
+
+			fillPaint.Color = background;
+			strokePaint.Color = borderColor;
+			textPaint.Color = foreground;
+
+			var rr = ActionRadius.ToRoundRect(rect);
+			canvas.DrawRoundRect(rr, fillPaint);
+			canvas.DrawRoundRect(rr, strokePaint);
+			TextRenderer.DrawText(canvas, _actions[i].Label, rect, textPaint, _cachedActionFont!, ContentAlignment.MiddleCenter, autoEllipsis: false);
 		}
 	}
 
 	private void DrawCloseButton(SKCanvas canvas)
 	{
-		var centerX = ToastWidth - CloseRightGap - CloseSize / 2f;
-		var centerY = PaddingV + KindChipHeight + (KindTitleGap * 0.5f);
-		var half = CloseSize / 2f;
+		var background = _closePressed
+			? (ColorScheme.IsDarkMode ? ColorScheme.SurfaceVariant.WithAlpha(230) : ColorScheme.SurfaceVariant.WithAlpha(200))
+			: _closeHovered ? (ColorScheme.IsDarkMode ? ColorScheme.SurfaceVariant.WithAlpha(190) : ColorScheme.SurfaceVariant.WithAlpha(140)) : SKColors.Transparent;
+		var foreground = _closeHovered || _closePressed
+			? (ColorScheme.IsDarkMode ? ColorScheme.ForeColor : ColorScheme.ForeColor.WithAlpha(200))
+			: ColorScheme.ForeColor.WithAlpha(150);
+		var outline = _closeHovered || _closePressed
+			? (ColorScheme.IsDarkMode ? ColorScheme.Outline.WithAlpha(110) : ColorScheme.Outline.WithAlpha(80))
+			: SKColors.Transparent;
 
-		_closeRect = new SKRect(centerX - half, centerY - half, centerX + half, centerY + half);
-
-		if (_closeHovered)
+		using var fillPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = background };
+		using var outlinePaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1f, Color = outline };
+		using var linePaint = new SKPaint
 		{
-			_fillPaint.Style = SKPaintStyle.Fill;
-			_fillPaint.Color = ColorScheme.Outline.WithAlpha(44);
-			canvas.DrawCircle(centerX, centerY, half, _fillPaint);
+			IsAntialias = true,
+			Style = SKPaintStyle.Stroke,
+			StrokeWidth = 1.8f,
+			StrokeCap = SKStrokeCap.Round,
+			Color = foreground,
+		};
+
+		var centerX = _closeRect.MidX;
+		var centerY = _closeRect.MidY;
+		var radius = _closeRect.Width / 2f;
+		canvas.DrawCircle(centerX, centerY, radius, fillPaint);
+		if (outline != SKColors.Transparent)
+			canvas.DrawCircle(centerX, centerY, radius - 0.5f, outlinePaint);
+
+		const float delta = 5.2f;
+		canvas.DrawLine(centerX - delta, centerY - delta, centerX + delta, centerY + delta, linePaint);
+		canvas.DrawLine(centerX + delta, centerY - delta, centerX - delta, centerY + delta, linePaint);
+	}
+
+	private void LayoutInteractiveElements()
+	{
+		_closeRect = new SKRect(
+			ToastWidth - CloseRightGap - CloseSize,
+			PaddingV - 3f,
+			ToastWidth - CloseRightGap,
+			PaddingV - 3f + CloseSize);
+
+		var actionY = Height - PaddingV - ProgressHeight - ActionHeight;
+		var x = ContentRight;
+
+		for (var i = _actions.Length - 1; i >= 0; i--)
+		{
+			var width = EstimateActionButtonWidth(_actions[i].Label);
+			x -= width;
+			_actionRects[i] = new SKRect(x, actionY, x + width, actionY + ActionHeight);
+			x -= ActionGap;
+		}
+	}
+
+	private int HitTestAction(SKPoint point)
+	{
+		for (var i = 0; i < _actionRects.Length; i++)
+		{
+			if (_actionRects[i].Contains(point))
+				return i;
 		}
 
-		_iconPaint.Style = SKPaintStyle.Stroke;
-		_iconPaint.StrokeWidth = 1.8f;
-		_iconPaint.Color = _closeHovered ? ColorScheme.ForeColor : ColorScheme.ForeColor.WithAlpha(150);
+		return -1;
+	}
 
-		const float delta = 4.8f;
-		canvas.DrawLine(centerX - delta, centerY - delta, centerX + delta, centerY + delta, _iconPaint);
-		canvas.DrawLine(centerX + delta, centerY - delta, centerX - delta, centerY + delta, _iconPaint);
+	private static float EstimateActionButtonWidth(string? text)
+	{
+		if (string.IsNullOrWhiteSpace(text))
+			return 80f;
+
+		var length = text.Length;
+		var estimated = 34f + (length * 9.2f);
+		return Math.Clamp(estimated, 80f, 196f);
 	}
 
 	private void DrawProgress(SKCanvas canvas, float width, float height, SKColor accent)
@@ -565,66 +648,108 @@ public sealed class NotificationToast : ElementBase
 
 		var barRect = new SKRect(0, height - ProgressHeight, width * fraction, height);
 
-		_fillPaint.Style = SKPaintStyle.Fill;
-		_fillPaint.Color = accent.WithAlpha(145);
-		canvas.DrawRect(barRect, _fillPaint);
+		using var fillPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = accent.WithAlpha(168) };
+		canvas.DrawRect(barRect, fillPaint);
 	}
 
-	private void OnFrameElapsed(object? sender, TimerElapsedEventArgs e)
+	private void HandleSlideAnimationProgress(object _)
 	{
-		const float dt = 16f;
-
-		switch (_visualState)
+		var progress = (float)_slideAnimation.GetProgress();
+		var currentY = _startY + (_targetY - _startY) * progress;
+		
+		// If visibility is also animating, it might step on _targetX. 
+		// But visibility only touches targetY when finished.
+		// However, SetAnimatedLocation overrides X entirely when called.
+		// Since Visibility animates X, let's keep X steady based on visibility state.
+		
+		var currentX = _targetX;
+		if (_visualState == ToastVisualState.Entering)
 		{
-			case ToastVisualState.Entering:
-				_animationElapsedMs += dt;
-				var enterT = Math.Clamp(_animationElapsedMs / EnterDurationMs, 0f, 1f);
-				var enterP = EaseOutCubic(enterT);
-				Location = new SKPoint(_targetX + (1f - enterP) * EnterOffset, _targetY);
-				Opacity = enterP;
-				if (enterT >= 1f)
-				{
-					_visualState = ToastVisualState.Steady;
-					Location = new SKPoint(_targetX, _targetY);
-					Opacity = 1f;
-				}
-				break;
-
-			case ToastVisualState.Steady:
-				Location = new SKPoint(_targetX, _targetY);
-				Opacity = 1f;
-				if (DurationMs > 0 && !_countdownPaused)
-				{
-					_remainingMs -= dt;
-					if (_remainingMs <= 0f)
-					{
-						_remainingMs = 0f;
-						OnDismissWithoutAction?.Invoke();
-						BeginDismiss();
-					}
-				}
-				break;
-
-			case ToastVisualState.Exiting:
-				_animationElapsedMs += dt;
-				var exitT = Math.Clamp(_animationElapsedMs / ExitDurationMs, 0f, 1f);
-				var exitP = EaseInCubic(exitT);
-				Location = new SKPoint(_targetX + exitP * EnterOffset, _targetY);
-				Opacity = 1f - exitP;
-				if (exitT >= 1f)
-				{
-					_frameTimer.Stop();
-					Visible = false;
-					DismissCompleted?.Invoke(this, EventArgs.Empty);
-					return;
-				}
-				break;
+			var visProgress = (float)_visibilityAnimation.GetProgress();
+			currentX = _targetX + (1f - visProgress) * EnterOffset;
+		}
+		else if (_visualState == ToastVisualState.Exiting)
+		{
+			var visProgress = (float)_visibilityAnimation.GetProgress();
+			currentX = _targetX + (1f - visProgress) * EnterOffset;
 		}
 
-		if (_visualState == ToastVisualState.Steady && DurationMs <= 0 && !_showProgressBar)
-			_frameTimer.Stop();
+		if (SetAnimatedLocation(new SKPoint(currentX, currentY)))
+			Invalidate();
+	}
 
-		Invalidate();
+	private void HandleVisibilityAnimationProgress(object _)
+	{
+		var progress = (float)_visibilityAnimation.GetProgress();
+		
+		var currentY = _targetY;
+		if (_slideAnimation.IsAnimating())
+		{
+			var slideProgress = (float)_slideAnimation.GetProgress();
+			currentY = _startY + (_targetY - _startY) * slideProgress;
+		}
+
+		var changed = false;
+		changed |= SetAnimatedLocation(new SKPoint(_targetX + (1f - progress) * EnterOffset, currentY));
+
+		if (changed)
+			Invalidate();
+	}
+
+	private void HandleVisibilityAnimationFinished(object _)
+	{
+		if (_visualState == ToastVisualState.Entering)
+		{
+			_visualState = ToastVisualState.Steady;
+			var changed = SetAnimatedLocation(new SKPoint(_targetX, _targetY));
+			ResumeCountdownIfNeeded();
+			if (changed)
+				Invalidate();
+			return;
+		}
+
+		if (_visualState == ToastVisualState.Exiting)
+		{
+			Visible = false;
+			DismissCompleted?.Invoke(this, EventArgs.Empty);
+		}
+	}
+
+	private void HandleCountdownAnimationProgress(object _)
+	{
+		if (DurationMs <= 0)
+			return;
+
+		_remainingMs = (float)(_countdownAnimation.GetProgress() * DurationMs);
+
+		if (_showProgressBar && !_manualProgress.HasValue)
+			Invalidate();
+	}
+
+	private void HandleCountdownAnimationFinished(object _)
+	{
+		if (_dismissState != 0 || DurationMs <= 0)
+			return;
+
+		_remainingMs = 0f;
+		_deferredCompletionAction = OnDismissWithoutAction;
+		BeginDismiss();
+	}
+
+	private void ResumeCountdownIfNeeded()
+	{
+		if (_dismissState != 0 || _countdownPaused || DurationMs <= 0)
+			return;
+
+		var progress = Math.Clamp(DurationMs > 0 ? _remainingMs / DurationMs : 0f, 0f, 1f);
+		if (progress <= 0f)
+			return;
+
+		_countdownAnimation.AnimationType = AnimationType.Linear;
+		_countdownAnimation.Increment = Math.Max(0.0001, 16d / DurationMs);
+		_countdownAnimation.SecondaryIncrement = _countdownAnimation.Increment;
+		_countdownAnimation.SetProgress(progress);
+		_countdownAnimation.StartNewAnimation(AnimationDirection.Out);
 	}
 
 	private SKColor GetAccentColor() => Kind switch
@@ -635,22 +760,21 @@ public sealed class NotificationToast : ElementBase
 		_ => ColorScheme.Primary,
 	};
 
-	private SKColor MixWithSurface(SKColor accent)
+	private SKColor MixWithSurface(SKColor accent, float factor, byte alpha)
 	{
 		var surface = ColorScheme.SurfaceContainerHigh;
-		var factor = Kind == NotificationKind.Info ? 0.03f : 0.10f;
 
 		return new SKColor(
 			(byte)Math.Clamp(surface.Red + (accent.Red - surface.Red) * factor, 0, 255),
 			(byte)Math.Clamp(surface.Green + (accent.Green - surface.Green) * factor, 0, 255),
 			(byte)Math.Clamp(surface.Blue + (accent.Blue - surface.Blue) * factor, 0, 255),
-			255);
+			alpha);
 	}
 
 	private static int ComputeToastHeight(string message, bool hasActions)
 	{
 		var lines = EstimateMessageLines(message);
-		var contentHeight = KindChipHeight + KindTitleGap + TitleLineHeight + TitleMessageGap + lines * MessageLineHeight;
+		var contentHeight = TitleLineHeight + TitleMessageGap + lines * MessageLineHeight;
 		if (hasActions)
 			contentHeight += ActionTopGap + ActionHeight;
 
@@ -677,7 +801,7 @@ public sealed class NotificationToast : ElementBase
 			}
 
 			lineLength++;
-			if (lineLength > 34)
+			if (lineLength > 42)
 			{
 				lines++;
 				lineLength = 1;
@@ -687,34 +811,22 @@ public sealed class NotificationToast : ElementBase
 		return Math.Min(lines, MaxMessageLines);
 	}
 
-	private static float EaseOutCubic(float t)
-	{
-		var inv = 1f - t;
-		return 1f - inv * inv * inv;
-	}
-
-	private static float EaseInCubic(float t)
-	{
-		return t * t * t;
-	}
-
 	protected override void Dispose(bool disposing)
 	{
 		if (disposing)
 		{
-			_frameTimer.Stop();
-			_frameTimer.Elapsed -= OnFrameElapsed;
-			_frameTimer.Dispose();
+			ColorScheme.ThemeChanged -= OnThemeChanged;
+			_countdownAnimation.OnAnimationProgress -= HandleCountdownAnimationProgress;
+			_countdownAnimation.OnAnimationFinished -= HandleCountdownAnimationFinished;
+			_countdownAnimation.Dispose();
+			_visibilityAnimation.OnAnimationProgress -= HandleVisibilityAnimationProgress;
+			_visibilityAnimation.OnAnimationFinished -= HandleVisibilityAnimationFinished;
+			_visibilityAnimation.Dispose();
+
+			_slideAnimation.OnAnimationProgress -= HandleSlideAnimationProgress;
+			_slideAnimation.Dispose();
 
 			DetachHandle();
-			_kindFont.Dispose();
-			_titleFont.Dispose();
-			_messageFont.Dispose();
-			_actionFont.Dispose();
-			_boldTypeface.Dispose();
-			_fillPaint.Dispose();
-			_textPaint.Dispose();
-			_iconPaint.Dispose();
 		}
 
 		base.Dispose(disposing);
