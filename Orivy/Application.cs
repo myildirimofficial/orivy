@@ -153,11 +153,13 @@ public class Application
 
     private static SKFont CreateDefaultFont()
     {
-        return new SKFont(SKTypeface.FromFamilyName("Inter") ?? SKTypeface.Default, 9.25f)
+        var typeface = SKTypeface.FromFamilyName("Inter") ?? SKTypeface.Default;
+
+        return new SKFont(typeface, 9.25f)
         {
             Subpixel = true,
             Edging = SKFontEdging.Antialias,
-            Hinting = SKFontHinting.Slight
+            Hinting = SKFontHinting.Full
         };
     }
 

@@ -1,8 +1,7 @@
 ﻿using SkiaSharp;
 using System;
-using System.Diagnostics;
-using System.Threading;
 using System.Threading.Tasks;
+using Orivy.Controls;
 
 namespace Orivy;
 
@@ -17,8 +16,6 @@ public static class ColorScheme
     private static int _transitionId;
 
     private static int _themeQueued;
-
-    public static bool FlatDesign { get; set; } = true;
     public static bool DrawDebugBorders;
 
     public static event EventHandler? ThemeChanged;
@@ -70,7 +67,7 @@ public static class ColorScheme
         : new SKColor(220,150,50);
 
     public static SKColor ShadowColor
-        => FlatDesign ? SKColors.Transparent : SKColors.Black.WithAlpha(30);
+        => IsDarkMode ? SKColors.White.WithAlpha(20) : SKColors.Black.WithAlpha(20);
 
     public static void SetPrimarySeedColor(SKColor seed)
     {
@@ -139,7 +136,27 @@ public static class ColorScheme
 
     private static void RaiseThemeChanged()
     {
-        ThemeChanged?.Invoke(null, EventArgs.Empty);
+        var handlers = ThemeChanged;
+        if (handlers == null)
+            return;
+
+        foreach (EventHandler handler in handlers.GetInvocationList())
+        {
+            if (handler.Target is ElementBase element && (element.IsDisposed || element.Disposing))
+            {
+                ThemeChanged -= handler;
+                continue;
+            }
+
+            try
+            {
+                handler(null, EventArgs.Empty);
+            }
+            catch (ObjectDisposedException) when (handler.Target is ElementBase)
+            {
+                ThemeChanged -= handler;
+            }
+        }
     }
 
     private static SKColor SurfaceAdjust(SKColor baseColor, double amount)
@@ -195,9 +212,6 @@ public static class ColorScheme
 
     public static float GetElevationBlur(int level)
     {
-        if (FlatDesign)
-            return 0;
-
         return level switch
         {
             1 => 2,
@@ -211,9 +225,6 @@ public static class ColorScheme
 
     public static float GetElevationOffset(int level)
     {
-        if (FlatDesign)
-            return 0;
-
         return level * 2;
     }
 }

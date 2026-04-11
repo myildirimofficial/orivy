@@ -11,4 +11,10 @@
     <ProjectReference Include="..\Orivy\Orivy.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="assets\images\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

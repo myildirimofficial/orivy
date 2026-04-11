@@ -134,4 +134,81 @@ public static class ColorExtensions
             (byte)(outA * 255)
         );
     }
+
+    public static float HueToRgb(float p, float q, float t)
+    {
+        if (t < 0) t += 1;
+        if (t > 1) t -= 1;
+        if (t < 1f / 6f) return p + (q - p) * 6f * t;
+        if (t < 1f / 2f) return q;
+        if (t < 2f / 3f) return p + (q - p) * (2f / 3f - t) * 6f;
+        return p;
+    }
+
+    public static float NormalizeHue(float hue)
+    {
+        var h = hue % 360f;
+        return h < 0f ? h + 360f : h;
+    }
+
+    public static SKColor HsvToColor(float hue, float saturation, float value, byte alpha)
+    {
+        hue = NormalizeHue(hue);
+        saturation = Math.Clamp(saturation, 0f, 1f);
+        value = Math.Clamp(value, 0f, 1f);
+
+        if (saturation <= 0.0001f)
+        {
+            var gray = (byte)Math.Round(value * 255f);
+            return new SKColor(gray, gray, gray, alpha);
+        }
+
+        var sector = hue / 60f;
+        var index = (int)Math.Floor(sector);
+        var fraction = sector - index;
+        var p = value * (1f - saturation);
+        var q = value * (1f - saturation * fraction);
+        var t = value * (1f - saturation * (1f - fraction));
+
+        var (r, g, b) = index switch
+        {
+            0 => (value, t, p),
+            1 => (q, value, p),
+            2 => (p, value, t),
+            3 => (p, q, value),
+            4 => (t, p, value),
+            _ => (value, p, q)
+        };
+
+        return new SKColor(
+            (byte)Math.Round(r * 255f),
+            (byte)Math.Round(g * 255f),
+            (byte)Math.Round(b * 255f),
+            alpha);
+    }
+
+    public static void RgbToHsv(SKColor color,
+        out float hue, out float saturation, out float value)
+    {
+        color.ToHsv(out hue, out saturation, out value);
+
+        var r = color.Red / 255f;
+        var g = color.Green / 255f;
+        var b = color.Blue / 255f;
+
+        var max = Math.Max(r, Math.Max(g, b));
+        var min = Math.Min(r, Math.Min(g, b));
+        var delta = max - min;
+
+        value = max;
+        saturation = max <= 0.0001f ? 0f : delta / max;
+
+        if (delta <= 0.0001f) { hue = 0f; return; }
+
+        if (Math.Abs(max - r) < 0.0001f) hue = 60f * (((g - b) / delta) % 6f);
+        else if (Math.Abs(max - g) < 0.0001f) hue = 60f * (((b - r) / delta) + 2f);
+        else hue = 60f * (((r - g) / delta) + 4f);
+
+        hue = NormalizeHue(hue);
+    }
 }

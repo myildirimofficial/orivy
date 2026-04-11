@@ -63,16 +63,43 @@ internal static class TextWrapper
             if (width > maxWidth && !string.IsNullOrEmpty(currentLine))
             {
                 lines.Add(currentLine);
-                currentLine = word;
+                currentLine = string.Empty;
             }
-            else
+
+            if (font.MeasureText(word) > maxWidth)
             {
-                currentLine = testLine;
+                AppendCharacterWrappedWord(word, font, maxWidth, lines, ref currentLine);
+                continue;
             }
+
+            currentLine = string.IsNullOrEmpty(currentLine) ? word : currentLine + " " + word;
         }
 
         if (!string.IsNullOrEmpty(currentLine))
             lines.Add(currentLine);
+    }
+
+    private static void AppendCharacterWrappedWord(string word, SKFont font, float maxWidth, List<string> lines, ref string currentLine)
+    {
+        var wrappedSegments = new List<string>();
+        WrapByCharacters(word, font, maxWidth, wrappedSegments);
+
+        if (wrappedSegments.Count == 0)
+            return;
+
+        for (var i = 0; i < wrappedSegments.Count; i++)
+        {
+            var segment = wrappedSegments[i];
+            var isLastSegment = i == wrappedSegments.Count - 1;
+
+            if (isLastSegment)
+            {
+                currentLine = segment;
+                continue;
+            }
+
+            lines.Add(segment);
+        }
     }
 
     private static void WrapByCharacters(string text, SKFont font, float maxWidth, List<string> lines)

@@ -5,12 +5,16 @@ using Orivy.Controls;
 using SkiaSharp;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 
 namespace Orivy.Example
 {
     internal partial class MainWindow : Window
     {
+        private const int BackgroundAssetMaxWidth = 1600;
+        private const int BackgroundAssetMaxHeight = 900;
+
         private enum GridListIconKind
         {
             Healthy,
@@ -19,60 +23,85 @@ namespace Orivy.Example
             Pulse
         }
 
+        private enum WindowBackgroundMode
+        {
+            Normal,
+            Slide
+        }
+
         private readonly Dictionary<WindowPageTransitionEffect, List<MenuItem>> _transitionMenuItems = new();
         private readonly Dictionary<AnimationType, List<MenuItem>> _transitionEasingMenuItems = new();
         private readonly Dictionary<int, List<MenuItem>> _transitionSpeedMenuItems = new();
+        private readonly Dictionary<ImageLayout, List<MenuItem>> _backgroundLayoutMenuItems = new();
+        private readonly Dictionary<BackgroundImageTransitionEffect, List<MenuItem>> _backgroundEffectMenuItems = new();
+        private readonly Dictionary<BackgroundImageCaptionDesignMode, List<MenuItem>> _backgroundCaptionDesignMenuItems = new();
+        private readonly Dictionary<int, List<MenuItem>> _backgroundDurationMenuItems = new();
+        private readonly Dictionary<int, List<MenuItem>> _backgroundIntervalMenuItems = new();
+        private readonly Dictionary<WindowBackgroundMode, List<MenuItem>> _windowBackgroundModeMenuItems = new();
+        private readonly Dictionary<int, List<MenuItem>> _windowBackgroundBlurAmountMenuItems = new();
+        private readonly Dictionary<BackgroundImageBlurMode, List<MenuItem>> _windowBackgroundBlurModeMenuItems = new();
         private readonly BindingDemoViewModel _bindingDemoViewModel = new();
         private readonly List<SKImage> _gridListImages = new();
+        private readonly List<BackgroundImageFrame> _backgroundSlides = new();
         private Container? _bindingPanel;
+        private Container? _backgroundPanel;
+        private Container? _backgroundHero;
+        private Element? _backgroundHeroCaption;
+        private Element? _backgroundStatusCard;
+        private Button? _backgroundPlayPauseButton;
         private bool _dangerModeEnabled;
         private int _transitionDurationPreset = 350;
+        private int _backgroundTransitionDurationPreset = 420;
+        private int _backgroundIntervalPreset = 2600;
+        private int _windowBackgroundBlurAmountPreset;
+        private bool _windowBackgroundEnabled = false;
+        private WindowBackgroundMode _windowBackgroundMode = WindowBackgroundMode.Normal;
+        private bool _windowBackgroundSlideInitialized;
+        private SKImage? _windowBackgroundNormalImage;
         private NotificationHandle? _manualProgressToast;
+        private MenuItem? _backgroundSlideshowMenuItem;
+        private MenuItem? _backgroundRepeatMenuItem;
+        private MenuItem? _windowBackgroundEnabledMenuItem;
 
         internal MainWindow()
         {
             InitializeComponent();
+            InitializeBackgroundImageShowcase();
+            InitializeBackgroundImageMenu();
+            InitializeWindowBackgroundMenu();
         }
 
         private void InitializeTransitionMenu(MenuItem rootItem)
         {
-            // ── Effects ────────────────────────────────────────────────────────────
-            RegisterEffectItem(rootItem.AddMenuItem("None",             (_, _) => SetTransitionEffect(WindowPageTransitionEffect.None)),             WindowPageTransitionEffect.None);
-            RegisterEffectItem(rootItem.AddMenuItem("Fade",             (_, _) => SetTransitionEffect(WindowPageTransitionEffect.Fade)),             WindowPageTransitionEffect.Fade);
-            RegisterEffectItem(rootItem.AddMenuItem("Slide Horizontal", (_, _) => SetTransitionEffect(WindowPageTransitionEffect.SlideHorizontal)), WindowPageTransitionEffect.SlideHorizontal);
-            RegisterEffectItem(rootItem.AddMenuItem("Slide Vertical",   (_, _) => SetTransitionEffect(WindowPageTransitionEffect.SlideVertical)),   WindowPageTransitionEffect.SlideVertical);
-            RegisterEffectItem(rootItem.AddMenuItem("Scale Fade",       (_, _) => SetTransitionEffect(WindowPageTransitionEffect.ScaleFade)),       WindowPageTransitionEffect.ScaleFade);
-            RegisterEffectItem(rootItem.AddMenuItem("Push",             (_, _) => SetTransitionEffect(WindowPageTransitionEffect.Push)),             WindowPageTransitionEffect.Push);
-            RegisterEffectItem(rootItem.AddMenuItem("Cover",            (_, _) => SetTransitionEffect(WindowPageTransitionEffect.Cover)),            WindowPageTransitionEffect.Cover);
-            RegisterEffectItem(rootItem.AddMenuItem("Reveal",           (_, _) => SetTransitionEffect(WindowPageTransitionEffect.Reveal)),           WindowPageTransitionEffect.Reveal);
-            RegisterEffectItem(rootItem.AddMenuItem("Uncover",          (_, _) => SetTransitionEffect(WindowPageTransitionEffect.Uncover)),          WindowPageTransitionEffect.Uncover);
-            RegisterEffectItem(rootItem.AddMenuItem("Flip",             (_, _) => SetTransitionEffect(WindowPageTransitionEffect.Flip)),             WindowPageTransitionEffect.Flip);
-            RegisterEffectItem(rootItem.AddMenuItem("Iris",             (_, _) => SetTransitionEffect(WindowPageTransitionEffect.Iris)),             WindowPageTransitionEffect.Iris);
+            var effects = (WindowPageTransitionEffect[])Enum.GetValues(typeof(WindowPageTransitionEffect));
+            foreach (var effect in effects)
+            {
+                var menuItem = rootItem.AddMenuItem(effect.ToString(), (_, _) => SetTransitionEffect(effect));
+                RegisterEffectItem(menuItem, effect);
+            }
 
             rootItem.AddSeparator();
 
+            var animationType = (AnimationType[])Enum.GetValues(typeof(AnimationType));
+
             // ── Easing ─────────────────────────────────────────────────────────────
             var easingMenu = rootItem.AddMenuItem("Easing");
-            RegisterEasingItem(easingMenu.AddMenuItem("Linear",              (_, _) => SetTransitionAnimationType(AnimationType.Linear)),              AnimationType.Linear);
-            RegisterEasingItem(easingMenu.AddMenuItem("Ease In",             (_, _) => SetTransitionAnimationType(AnimationType.EaseIn)),              AnimationType.EaseIn);
-            RegisterEasingItem(easingMenu.AddMenuItem("Ease Out",            (_, _) => SetTransitionAnimationType(AnimationType.EaseOut)),             AnimationType.EaseOut);
-            RegisterEasingItem(easingMenu.AddMenuItem("Ease In \u00b7 Out",  (_, _) => SetTransitionAnimationType(AnimationType.EaseInOut)),           AnimationType.EaseInOut);
-            RegisterEasingItem(easingMenu.AddMenuItem("Cubic Ease In",       (_, _) => SetTransitionAnimationType(AnimationType.CubicEaseIn)),         AnimationType.CubicEaseIn);
-            RegisterEasingItem(easingMenu.AddMenuItem("Cubic Ease Out",      (_, _) => SetTransitionAnimationType(AnimationType.CubicEaseOut)),        AnimationType.CubicEaseOut);
-            RegisterEasingItem(easingMenu.AddMenuItem("Cubic In \u00b7 Out", (_, _) => SetTransitionAnimationType(AnimationType.CubicEaseInOut)),      AnimationType.CubicEaseInOut);
-            RegisterEasingItem(easingMenu.AddMenuItem("Quartic In",          (_, _) => SetTransitionAnimationType(AnimationType.QuarticEaseIn)),       AnimationType.QuarticEaseIn);
-            RegisterEasingItem(easingMenu.AddMenuItem("Quartic Out",         (_, _) => SetTransitionAnimationType(AnimationType.QuarticEaseOut)),      AnimationType.QuarticEaseOut);
-            RegisterEasingItem(easingMenu.AddMenuItem("Quartic In \u00b7 Out", (_, _) => SetTransitionAnimationType(AnimationType.QuarticEaseInOut)), AnimationType.QuarticEaseInOut);
+            
+            foreach (var type in animationType)
+            {
+                var menuItem = easingMenu.AddMenuItem(type.ToString(), (_, _) => SetTransitionAnimationType(type));
+                RegisterEasingItem(menuItem, type);
+            }
 
             rootItem.AddSeparator();
 
             // ── Speed ──────────────────────────────────────────────────────────────
             var speedMenu = rootItem.AddMenuItem("Speed");
-            RegisterSpeedItem(speedMenu.AddMenuItem("Fast  (100 ms)",        (_, _) => SetTransitionDuration(100)),   100);
-            RegisterSpeedItem(speedMenu.AddMenuItem("Normal  (250 ms)",      (_, _) => SetTransitionDuration(250)),   250);
-            RegisterSpeedItem(speedMenu.AddMenuItem("Comfortable  (350 ms)", (_, _) => SetTransitionDuration(350)),   350);
-            RegisterSpeedItem(speedMenu.AddMenuItem("Relaxed  (500 ms)",     (_, _) => SetTransitionDuration(500)),   500);
-            RegisterSpeedItem(speedMenu.AddMenuItem("Cinematic  (1 s)",      (_, _) => SetTransitionDuration(1000)), 1000);
+            RegisterSpeedItem(speedMenu.AddMenuItem("Fast  (100 ms)", (_, _) => SetTransitionDuration(100)), 100);
+            RegisterSpeedItem(speedMenu.AddMenuItem("Normal  (250 ms)", (_, _) => SetTransitionDuration(250)), 250);
+            RegisterSpeedItem(speedMenu.AddMenuItem("Comfortable  (350 ms)", (_, _) => SetTransitionDuration(350)), 350);
+            RegisterSpeedItem(speedMenu.AddMenuItem("Relaxed  (500 ms)", (_, _) => SetTransitionDuration(500)), 500);
+            RegisterSpeedItem(speedMenu.AddMenuItem("Cinematic  (1 s)", (_, _) => SetTransitionDuration(1000)), 1000);
 
             RefreshTransitionMenuChecks();
             RefreshTransitionEasingMenuChecks();
@@ -150,70 +179,974 @@ namespace Orivy.Example
             }
         }
 
-        private void ButtonDirectX_Click(object sender, EventArgs e)
+        private void InitializeBackgroundImageMenu()
         {
-            this.RenderBackend = Orivy.Rendering.RenderBackend.DirectX11;
+            if (menuStrip == null || _backgroundHero == null)
+                return;
+
+            var backgroundsMenu = menuStrip.AddMenuItem("Backgrounds");
+
+            _backgroundSlideshowMenuItem = backgroundsMenu.AddMenuItem("Slideshow Active");
+            _backgroundSlideshowMenuItem.CheckOnClick = true;
+            _backgroundSlideshowMenuItem.Checked = _backgroundHero.BackgroundImageSlideshowEnabled;
+            _backgroundSlideshowMenuItem.CheckedChanged += (_, _) => SetBackgroundSlideshowEnabled(_backgroundSlideshowMenuItem.Checked);
+
+            _backgroundRepeatMenuItem = backgroundsMenu.AddMenuItem("Repeat Active");
+            _backgroundRepeatMenuItem.CheckOnClick = true;
+            _backgroundRepeatMenuItem.Checked = _backgroundHero.BackgroundImageSlideshowRepeat;
+            _backgroundRepeatMenuItem.CheckedChanged += (_, _) => SetBackgroundRepeatEnabled(_backgroundRepeatMenuItem.Checked);
+
+            backgroundsMenu.AddSeparator();
+
+            var layoutMenu = backgroundsMenu.AddMenuItem("Layout");
+            foreach (ImageLayout layout in Enum.GetValues(typeof(ImageLayout)))
+            {
+                var item = layoutMenu.AddMenuItem(layout.ToString(), (_, _) => SetBackgroundLayout(layout));
+                RegisterBackgroundLayoutItem(item, layout);
+            }
+
+            var effectMenu = backgroundsMenu.AddMenuItem("Effect");
+            foreach (BackgroundImageTransitionEffect effect in Enum.GetValues(typeof(BackgroundImageTransitionEffect)))
+            {
+                var item = effectMenu.AddMenuItem(effect.ToString(), (_, _) => SetBackgroundEffect(effect));
+                RegisterBackgroundEffectItem(item, effect);
+            }
+
+            var captionMenu = backgroundsMenu.AddMenuItem("Caption");
+            var captionDesignMenu = captionMenu.AddMenuItem("Design");
+            foreach (BackgroundImageCaptionDesignMode mode in Enum.GetValues(typeof(BackgroundImageCaptionDesignMode)))
+            {
+                var item = captionDesignMenu.AddMenuItem(mode.ToString(), (_, _) => SetBackgroundCaptionDesignMode(mode));
+                RegisterBackgroundCaptionDesignItem(item, mode);
+            }
+
+            var durationMenu = backgroundsMenu.AddMenuItem("Duration");
+            RegisterBackgroundDurationItem(durationMenu.AddMenuItem("Instant  (0 ms)", (_, _) => SetBackgroundTransitionDuration(0)), 0);
+            RegisterBackgroundDurationItem(durationMenu.AddMenuItem("Fast  (180 ms)", (_, _) => SetBackgroundTransitionDuration(180)), 180);
+            RegisterBackgroundDurationItem(durationMenu.AddMenuItem("Balanced  (420 ms)", (_, _) => SetBackgroundTransitionDuration(420)), 420);
+            RegisterBackgroundDurationItem(durationMenu.AddMenuItem("Slow  (700 ms)", (_, _) => SetBackgroundTransitionDuration(700)), 700);
+            RegisterBackgroundDurationItem(durationMenu.AddMenuItem("Very Slow  (1400 ms)", (_, _) => SetBackgroundTransitionDuration(1400)), 1400);
+            RegisterBackgroundDurationItem(durationMenu.AddMenuItem("Extremely Slow  (2800 ms)", (_, _) => SetBackgroundTransitionDuration(2800)), 2800);
+
+            var intervalMenu = backgroundsMenu.AddMenuItem("Interval");
+            RegisterBackgroundIntervalItem(intervalMenu.AddMenuItem("Fast  (1.6 s)", (_, _) => SetBackgroundInterval(1600)), 1600);
+            RegisterBackgroundIntervalItem(intervalMenu.AddMenuItem("Normal  (2.6 s)", (_, _) => SetBackgroundInterval(2600)), 2600);
+            RegisterBackgroundIntervalItem(intervalMenu.AddMenuItem("Slow  (4 s)", (_, _) => SetBackgroundInterval(4000)), 4000);
+
+            RefreshBackgroundMenuChecks();
         }
 
-        private void ButtonSoftware_Click(object sender, EventArgs e)
+        private void RegisterBackgroundLayoutItem(MenuItem item, ImageLayout layout)
         {
-            this.RenderBackend = Orivy.Rendering.RenderBackend.Software;
+            item.CheckOnClick = false;
+            if (!_backgroundLayoutMenuItems.TryGetValue(layout, out var list))
+            {
+                list = new List<MenuItem>();
+                _backgroundLayoutMenuItems[layout] = list;
+            }
+
+            list.Add(item);
         }
 
-        private void ButtonOpenGL_Click(object sender, EventArgs e)
+        private void RegisterBackgroundEffectItem(MenuItem item, BackgroundImageTransitionEffect effect)
         {
-            this.RenderBackend = Orivy.Rendering.RenderBackend.OpenGL;
+            item.CheckOnClick = false;
+            if (!_backgroundEffectMenuItems.TryGetValue(effect, out var list))
+            {
+                list = new List<MenuItem>();
+                _backgroundEffectMenuItems[effect] = list;
+            }
+
+            list.Add(item);
         }
 
-        private void ButtonDarkMode_Click(object sender, EventArgs e)
+        private void RegisterBackgroundCaptionDesignItem(MenuItem item, BackgroundImageCaptionDesignMode mode)
         {
-            ColorScheme.IsDarkMode = !ColorScheme.IsDarkMode;
+            item.CheckOnClick = false;
+            if (!_backgroundCaptionDesignMenuItems.TryGetValue(mode, out var list))
+            {
+                list = new List<MenuItem>();
+                _backgroundCaptionDesignMenuItems[mode] = list;
+            }
+
+            list.Add(item);
+        }
+
+        private void RegisterBackgroundDurationItem(MenuItem item, int durationMs)
+        {
+            item.CheckOnClick = false;
+            if (!_backgroundDurationMenuItems.TryGetValue(durationMs, out var list))
+            {
+                list = new List<MenuItem>();
+                _backgroundDurationMenuItems[durationMs] = list;
+            }
+
+            list.Add(item);
+        }
+
+        private void RegisterBackgroundIntervalItem(MenuItem item, int intervalMs)
+        {
+            item.CheckOnClick = false;
+            if (!_backgroundIntervalMenuItems.TryGetValue(intervalMs, out var list))
+            {
+                list = new List<MenuItem>();
+                _backgroundIntervalMenuItems[intervalMs] = list;
+            }
+
+            list.Add(item);
+        }
+
+        private void RefreshBackgroundMenuChecks()
+        {
+            if (_backgroundHero == null)
+                return;
+
+            if (_backgroundSlideshowMenuItem != null)
+                _backgroundSlideshowMenuItem.Checked = _backgroundHero.BackgroundImageSlideshowEnabled;
+
+            if (_backgroundRepeatMenuItem != null)
+                _backgroundRepeatMenuItem.Checked = _backgroundHero.BackgroundImageSlideshowRepeat;
+
+            foreach (var pair in _backgroundLayoutMenuItems)
+            {
+                var isSelected = pair.Key == _backgroundHero.BackgroundImageLayout;
+                for (var i = 0; i < pair.Value.Count; i++)
+                    pair.Value[i].Checked = isSelected;
+            }
+
+            foreach (var pair in _backgroundEffectMenuItems)
+            {
+                var isSelected = pair.Key == _backgroundHero.BackgroundImageTransitionEffect;
+                for (var i = 0; i < pair.Value.Count; i++)
+                    pair.Value[i].Checked = isSelected;
+            }
+
+            foreach (var pair in _backgroundCaptionDesignMenuItems)
+            {
+                var isSelected = pair.Key == _backgroundHero.CurrentBackgroundImageCaptionDesignMode;
+                for (var i = 0; i < pair.Value.Count; i++)
+                    pair.Value[i].Checked = isSelected;
+            }
+
+            foreach (var pair in _backgroundDurationMenuItems)
+            {
+                var isSelected = pair.Key == _backgroundTransitionDurationPreset;
+                for (var i = 0; i < pair.Value.Count; i++)
+                    pair.Value[i].Checked = isSelected;
+            }
+
+            foreach (var pair in _backgroundIntervalMenuItems)
+            {
+                var isSelected = pair.Key == _backgroundIntervalPreset;
+                for (var i = 0; i < pair.Value.Count; i++)
+                    pair.Value[i].Checked = isSelected;
+            }
+
+            RefreshWindowBackgroundMenuChecks();
+        }
+
+        private void SetBackgroundSlideshowEnabled(bool enabled)
+        {
+            if (_backgroundHero == null)
+                return;
+
+            _backgroundHero.BackgroundImageSlideshowEnabled = enabled;
+            UpdateBackgroundShowcaseStatus();
+        }
+
+        private void SetBackgroundRepeatEnabled(bool enabled)
+        {
+            if (_backgroundHero == null)
+                return;
+
+            _backgroundHero.BackgroundImageSlideshowRepeat = enabled;
+            UpdateBackgroundShowcaseStatus();
+        }
+
+        private void SetBackgroundLayout(ImageLayout layout)
+        {
+            if (_backgroundHero == null)
+                return;
+
+            _backgroundHero.BackgroundImageLayout = layout;
+            SyncWindowBackgroundWithShowcase();
+            UpdateBackgroundShowcaseStatus();
+        }
+
+        private void SetBackgroundEffect(BackgroundImageTransitionEffect effect)
+        {
+            if (_backgroundHero == null)
+                return;
+
+            _backgroundHero.BackgroundImageTransitionEffect = effect;
+            SyncWindowBackgroundWithShowcase();
+            UpdateBackgroundShowcaseStatus();
+        }
+
+        private void SetBackgroundCaptionDesignMode(BackgroundImageCaptionDesignMode mode)
+        {
+            if (_backgroundHero == null || _backgroundSlides.Count == 0)
+                return;
+
+            _backgroundHero.BackgroundImageCaptionDesignMode = mode;
+        }
+
+        private void SetBackgroundTransitionDuration(int durationMs)
+        {
+            if (_backgroundHero == null)
+                return;
+
+            _backgroundTransitionDurationPreset = durationMs;
+            _backgroundHero.BackgroundImageTransitionDurationMs = durationMs;
+            SyncWindowBackgroundWithShowcase();
+            UpdateBackgroundShowcaseStatus();
+        }
+
+        private void SetBackgroundInterval(int intervalMs)
+        {
+            if (_backgroundHero == null)
+                return;
+
+            _backgroundIntervalPreset = intervalMs;
+            _backgroundHero.BackgroundImageSlideshowIntervalMs = intervalMs;
+            UpdateBackgroundShowcaseStatus();
+        }
+
+        private void InitializeWindowBackgroundMenu()
+        {
+            if (menuStrip == null)
+                return;
+
+            var windowBackgroundMenu = menuStrip.AddMenuItem("Window Background");
+
+            _windowBackgroundEnabledMenuItem = windowBackgroundMenu.AddMenuItem("Active");
+            _windowBackgroundEnabledMenuItem.CheckOnClick = true;
+            _windowBackgroundEnabledMenuItem.Checked = _windowBackgroundEnabled;
+            _windowBackgroundEnabledMenuItem.CheckedChanged += (_, _) => SetWindowBackgroundEnabled(_windowBackgroundEnabledMenuItem.Checked);
+
+            windowBackgroundMenu.AddSeparator();
+
+            var modeMenu = windowBackgroundMenu.AddMenuItem("Mode");
+            var normalItem = modeMenu.AddMenuItem("Normal", (_, _) => SetWindowBackgroundMode(WindowBackgroundMode.Normal));
+            RegisterWindowBackgroundModeItem(normalItem, WindowBackgroundMode.Normal);
+            var slideItem = modeMenu.AddMenuItem("Slide", (_, _) => SetWindowBackgroundMode(WindowBackgroundMode.Slide));
+            RegisterWindowBackgroundModeItem(slideItem, WindowBackgroundMode.Slide);
+
+            var blurMenu = windowBackgroundMenu.AddMenuItem("Blur");
+            var blurAmountMenu = blurMenu.AddMenuItem("Amount");
+            RegisterWindowBackgroundBlurAmountItem(blurAmountMenu.AddMenuItem("Off  (0 px)", (_, _) => SetWindowBackgroundBlurAmount(0)), 0);
+            RegisterWindowBackgroundBlurAmountItem(blurAmountMenu.AddMenuItem("Soft  (4 px)", (_, _) => SetWindowBackgroundBlurAmount(4)), 4);
+            RegisterWindowBackgroundBlurAmountItem(blurAmountMenu.AddMenuItem("Balanced  (8 px)", (_, _) => SetWindowBackgroundBlurAmount(8)), 8);
+            RegisterWindowBackgroundBlurAmountItem(blurAmountMenu.AddMenuItem("Strong  (14 px)", (_, _) => SetWindowBackgroundBlurAmount(14)), 14);
+            RegisterWindowBackgroundBlurAmountItem(blurAmountMenu.AddMenuItem("Heavy  (22 px)", (_, _) => SetWindowBackgroundBlurAmount(22)), 22);
+
+            var blurModeMenu = blurMenu.AddMenuItem("Mode");
+            foreach (BackgroundImageBlurMode mode in Enum.GetValues(typeof(BackgroundImageBlurMode)))
+            {
+                var item = blurModeMenu.AddMenuItem(mode.ToString(), (_, _) => SetWindowBackgroundBlurMode(mode));
+                RegisterWindowBackgroundBlurModeItem(item, mode);
+            }
+
+            RefreshWindowBackgroundMenuChecks();
+        }
+
+        private void RegisterWindowBackgroundModeItem(MenuItem item, WindowBackgroundMode mode)
+        {
+            item.CheckOnClick = false;
+            if (!_windowBackgroundModeMenuItems.TryGetValue(mode, out var list))
+            {
+                list = new List<MenuItem>();
+                _windowBackgroundModeMenuItems[mode] = list;
+            }
+
+            list.Add(item);
+        }
+
+        private void RegisterWindowBackgroundBlurAmountItem(MenuItem item, int amount)
+        {
+            item.CheckOnClick = false;
+            if (!_windowBackgroundBlurAmountMenuItems.TryGetValue(amount, out var list))
+            {
+                list = new List<MenuItem>();
+                _windowBackgroundBlurAmountMenuItems[amount] = list;
+            }
+
+            list.Add(item);
+        }
+
+        private void RegisterWindowBackgroundBlurModeItem(MenuItem item, BackgroundImageBlurMode mode)
+        {
+            item.CheckOnClick = false;
+            if (!_windowBackgroundBlurModeMenuItems.TryGetValue(mode, out var list))
+            {
+                list = new List<MenuItem>();
+                _windowBackgroundBlurModeMenuItems[mode] = list;
+            }
+
+            list.Add(item);
+        }
+
+        private void RefreshWindowBackgroundMenuChecks()
+        {
+            if (_windowBackgroundEnabledMenuItem != null)
+                _windowBackgroundEnabledMenuItem.Checked = _windowBackgroundEnabled;
+
+            foreach (var pair in _windowBackgroundModeMenuItems)
+            {
+                var isSelected = pair.Key == _windowBackgroundMode;
+                for (var i = 0; i < pair.Value.Count; i++)
+                    pair.Value[i].Checked = isSelected;
+            }
+
+            foreach (var pair in _windowBackgroundBlurAmountMenuItems)
+            {
+                var isSelected = pair.Key == _windowBackgroundBlurAmountPreset;
+                for (var i = 0; i < pair.Value.Count; i++)
+                    pair.Value[i].Checked = isSelected;
+            }
+
+            foreach (var pair in _windowBackgroundBlurModeMenuItems)
+            {
+                var isSelected = pair.Key == BackgroundImageBlurMode;
+                for (var i = 0; i < pair.Value.Count; i++)
+                    pair.Value[i].Checked = isSelected;
+            }
+        }
+
+        private void SetWindowBackgroundEnabled(bool enabled)
+        {
+            if (_windowBackgroundEnabled == enabled)
+            {
+                RefreshWindowBackgroundMenuChecks();
+                return;
+            }
+
+            _windowBackgroundEnabled = enabled;
+            if (enabled && _windowBackgroundMode == WindowBackgroundMode.Normal)
+                CaptureWindowBackgroundNormalImage();
+
+            SyncWindowBackgroundWithShowcase();
+            UpdateBackgroundShowcaseStatus();
+        }
+
+        private void SetWindowBackgroundBlurAmount(int amount)
+        {
+            var normalizedAmount = Math.Max(0, amount);
+            _windowBackgroundBlurAmountPreset = normalizedAmount;
+            BackgroundImageBlurAmount = normalizedAmount;
+            RefreshWindowBackgroundMenuChecks();
+            UpdateBackgroundShowcaseStatus();
+            Invalidate();
+        }
+
+        private void SetWindowBackgroundBlurMode(BackgroundImageBlurMode mode)
+        {
+            if (BackgroundImageBlurMode == mode)
+            {
+                RefreshWindowBackgroundMenuChecks();
+                return;
+            }
+
+            BackgroundImageBlurMode = mode;
+            RefreshWindowBackgroundMenuChecks();
+            UpdateBackgroundShowcaseStatus();
+            Invalidate();
+        }
+
+        private void SetWindowBackgroundMode(WindowBackgroundMode mode)
+        {
+            if (_windowBackgroundMode == mode)
+            {
+                if (mode == WindowBackgroundMode.Normal)
+                {
+                    CaptureWindowBackgroundNormalImage();
+                    SyncWindowBackgroundWithShowcase();
+                    UpdateBackgroundShowcaseStatus();
+                }
+
+                RefreshWindowBackgroundMenuChecks();
+                return;
+            }
+
+            _windowBackgroundMode = mode;
+            if (mode == WindowBackgroundMode.Normal)
+                CaptureWindowBackgroundNormalImage();
+
+            SyncWindowBackgroundWithShowcase();
+            UpdateBackgroundShowcaseStatus();
+        }
+
+        private void CaptureWindowBackgroundNormalImage()
+        {
+            if (_backgroundHero == null || _backgroundSlides.Count == 0)
+                return;
+
+            var index = Math.Clamp(_backgroundHero.BackgroundImageIndex, 0, _backgroundSlides.Count - 1);
+            var activeFrame = _backgroundHero.CurrentBackgroundImageFrame ?? _backgroundSlides[index];
+            _windowBackgroundNormalImage = activeFrame.Image;
+        }
+
+        private void SyncWindowBackgroundWithShowcase()
+        {
+            if (!_windowBackgroundEnabled || _backgroundHero == null || _backgroundSlides.Count == 0)
+            {
+                _windowBackgroundSlideInitialized = false;
+                BackgroundImageTransitionEffect = BackgroundImageTransitionEffect.None;
+                BackgroundImageTransitionDurationMs = 0;
+                BackgroundImages = Array.Empty<BackgroundImageFrame>();
+                BackgroundImage = null;
+                BackgroundImageSlideshowEnabled = false;
+                BackgroundImageSlideshowRepeat = false;
+                return;
+            }
+
+            var index = Math.Clamp(_backgroundHero.BackgroundImageIndex, 0, _backgroundSlides.Count - 1);
+            var activeFrame = _backgroundHero.CurrentBackgroundImageFrame ?? _backgroundSlides[index];
+
+            BackgroundImageLayout = _backgroundHero.BackgroundImageLayout;
+            if (_windowBackgroundMode == WindowBackgroundMode.Slide)
+            {
+                var slideEffect = _backgroundSlides.Count > 1
+                    ? _backgroundHero.BackgroundImageTransitionEffect
+                    : BackgroundImageTransitionEffect.None;
+                var slideDuration = _backgroundSlides.Count > 1
+                    ? _backgroundHero.BackgroundImageTransitionDurationMs
+                    : 0;
+
+                if (!_windowBackgroundSlideInitialized)
+                {
+                    BackgroundImage = null;
+                    BackgroundImageTransitionEffect = BackgroundImageTransitionEffect.None;
+                    BackgroundImageTransitionDurationMs = 0;
+                    BackgroundImages = _backgroundSlides.ToArray();
+                    BackgroundImageIndex = index;
+                    _windowBackgroundSlideInitialized = true;
+                }
+
+                BackgroundImageTransitionEffect = slideEffect;
+                BackgroundImageTransitionDurationMs = slideDuration;
+
+                if (BackgroundImageIndex != index)
+                    BackgroundImageIndex = index;
+            }
+            else
+            {
+                _windowBackgroundSlideInitialized = false;
+                if (_windowBackgroundNormalImage == null)
+                    CaptureWindowBackgroundNormalImage();
+
+                BackgroundImageTransitionEffect = BackgroundImageTransitionEffect.None;
+                BackgroundImageTransitionDurationMs = 0;
+                BackgroundImages = Array.Empty<BackgroundImageFrame>();
+                BackgroundImage = _windowBackgroundNormalImage ?? activeFrame.Image;
+            }
+
+            BackgroundImageSlideshowEnabled = false;
+            BackgroundImageSlideshowRepeat = false;
+        }
+
+        private void InitializeBackgroundImageShowcase()
+        {
+            if (windowPageControl == null)
+                return;
+
+            _backgroundPanel = new Container
+            {
+                Name = "backgroundPanel",
+                Text = "Backgrounds",
+                Dock = DockStyle.Fill,
+                Padding = new Thickness(28),
+                Radius = new Radius(0),
+                Border = new Thickness(0),
+            };
+
+            var tabIcon = CreateGridListIcon(new SKColor(0x06, 0xB6, 0xD4), GridListIconKind.Pulse);
+            _backgroundPanel.Image = tabIcon;
+
+            var header = new Element
+            {
+                Dock = DockStyle.Top,
+                Height = 92,
+                Margin = new Thickness(0, 0, 0, 18),
+                Padding = new Thickness(18),
+                BackColor = SKColors.Transparent,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Text = "Background Image Showcase\nAsset-backed imagery, caption metadata, transition duration, slideshow interval and repeat behavior are all driven directly by ElementBase.",
+            };
+
+            _backgroundHero = new Container
+            {
+                Name = "backgroundHero",
+                Dock = DockStyle.Top,
+                Height = 292,
+                BackColor = SKColors.Transparent,
+                Margin = new Thickness(0, 0, 0, 18),
+                Padding = new Thickness(18),
+                Radius = new Radius(22),
+                Border = new Thickness(0),
+                BorderColor = ColorScheme.BackColor.WithAlpha(25),
+                BackgroundImageLayout = ImageLayout.Zoom,
+                BackgroundImageTransitionEffect = BackgroundImageTransitionEffect.ScaleFade,
+                BackgroundImageTransitionDurationMs = _backgroundTransitionDurationPreset,
+                BackgroundImageSlideshowEnabled = true,
+                BackgroundImageSlideshowRepeat = true,
+                BackgroundImageSlideshowIntervalMs = _backgroundIntervalPreset,
+            };
+
+            _backgroundHero.ConfigureVisualStyles(s => s.Base(b => b
+                .Background(ColorScheme.SurfaceContainerHigh)
+                .BorderColor(ColorScheme.Outline.WithAlpha(110))
+                .Radius(22)
+                .Shadow(new BoxShadow(0f, 14f, 28f, 0, ColorScheme.ShadowColor.WithAlpha(30)))));
+
+            _backgroundHeroCaption = new Element
+            {
+                Name = "backgroundHeroCaption",
+                Dock = DockStyle.Bottom,
+                Height = 108,
+                Padding = new Thickness(16),
+                Radius = new Radius(18),
+                Border = new Thickness(1),
+                BackColor = SKColors.Black.WithAlpha(118),
+                BorderColor = SKColors.White.WithAlpha(42),
+                ForeColor = SKColors.White,
+                TextAlign = ContentAlignment.MiddleLeft,
+            };
+
+            _backgroundHero.Controls.Add(_backgroundHeroCaption);
+
+            var actionRow = new Container
+            {
+                Dock = DockStyle.Top,
+                Height = 46,
+                Margin = new Thickness(0, 0, 0, 14),
+                Radius = new Radius(0),
+                Border = new Thickness(0),
+                BackColor = SKColors.Transparent,
+            };
+
+            var previousButton = new Button
+            {
+                Text = "Previous",
+                Dock = DockStyle.Left,
+                Width = 128,
+                Height = 38,
+                Margin = new Thickness(0, 0, 10, 0),
+            };
+            previousButton.Click += BackgroundPreviousButton_Click;
+
+            _backgroundPlayPauseButton = new Button
+            {
+                Text = "Pause Slideshow",
+                Dock = DockStyle.Left,
+                Width = 168,
+                Height = 38,
+                Margin = new Thickness(0, 0, 10, 0),
+            };
+            _backgroundPlayPauseButton.Click += BackgroundPlayPauseButton_Click;
+
+            var nextButton = new Button
+            {
+                Text = "Next",
+                Dock = DockStyle.Left,
+                Width = 112,
+                Height = 38,
+            };
+            nextButton.Click += BackgroundNextButton_Click;
+
+            actionRow.Controls.Add(previousButton);
+            actionRow.Controls.Add(_backgroundPlayPauseButton);
+            actionRow.Controls.Add(nextButton);
+
+            _backgroundStatusCard = new Element
+            {
+                Name = "backgroundStatusCard",
+                Dock = DockStyle.Top,
+                Height = 108,
+                Padding = new Thickness(18),
+                Radius = new Radius(18),
+                Border = new Thickness(1),
+                TextAlign = ContentAlignment.MiddleLeft,
+            };
+            _backgroundStatusCard.ConfigureVisualStyles(s => s.Base(b => b
+                .Background(ColorScheme.SurfaceContainer)
+                .Foreground(ColorScheme.ForeColor)
+                .BorderColor(ColorScheme.Outline.WithAlpha(94))
+                .Radius(18)));
+
+            _backgroundPanel.Controls.Add(_backgroundStatusCard);
+            _backgroundPanel.Controls.Add(actionRow);
+            _backgroundPanel.Controls.Add(_backgroundHero);
+            _backgroundPanel.Controls.Add(header);
+
+            var slides = LoadBackgroundShowcaseSlides();
+            for (var i = 0; i < slides.Count; i++)
+                _backgroundSlides.Add(slides[i]);
+
+            if (_backgroundSlides.Count > 0)
+                _backgroundHero.BackgroundImages = _backgroundSlides.ToArray();
+
+            _backgroundHero.BackgroundImageChanged += BackgroundHero_BackgroundImageChanged;
+            _backgroundHero.BackgroundImageCaptionChanged += BackgroundHero_BackgroundImageCaptionChanged;
+
+            windowPageControl.Controls.Add(_backgroundPanel);
+            SyncWindowBackgroundWithShowcase();
+            UpdateBackgroundShowcaseStatus();
+        }
+
+        private List<BackgroundImageFrame> LoadBackgroundShowcaseSlides()
+        {
+            var assetDirectory = Path.Combine(AppContext.BaseDirectory, "assets", "images");
+            if (Directory.Exists(assetDirectory))
+            {
+                var candidateFiles = Directory.GetFiles(assetDirectory, "*.*", SearchOption.TopDirectoryOnly);
+                Array.Sort(candidateFiles, StringComparer.OrdinalIgnoreCase);
+
+                var assetSlides = new List<BackgroundImageFrame>(candidateFiles.Length);
+                for (var i = 0; i < candidateFiles.Length; i++)
+                {
+                    if (!IsSupportedBackgroundImageAsset(candidateFiles[i]))
+                        continue;
+
+                    var image = LoadBackgroundShowcaseAssetImage(candidateFiles[i]);
+                    if (image == null)
+                        continue;
+
+                    assetSlides.Add(CreateBackgroundShowcaseFrame(image, candidateFiles[i], assetSlides.Count));
+                }
+
+                if (assetSlides.Count > 0)
+                    return assetSlides;
+            }
+
+            return new List<BackgroundImageFrame>();
+        }
+
+        private static bool IsSupportedBackgroundImageAsset(string path)
+        {
+            var extension = Path.GetExtension(path);
+            return string.Equals(extension, ".jpg", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".jpeg", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".png", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".webp", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static SKImage? LoadBackgroundShowcaseAssetImage(string path)
+        {
+            var sourceImage = SKImage.FromEncodedData(path);
+            if (sourceImage == null)
+                return null;
+
+            var targetSize = GetBackgroundAssetTargetSize(sourceImage.Width, sourceImage.Height);
+            if (targetSize.Width >= sourceImage.Width && targetSize.Height >= sourceImage.Height)
+                return sourceImage;
+
+            using (sourceImage)
+            using (var surface = SKSurface.Create(new SKImageInfo(targetSize.Width, targetSize.Height, SKColorType.Bgra8888, SKAlphaType.Premul)))
+            {
+                if (surface == null)
+                    return null;
+
+                surface.Canvas.Clear(SKColors.Transparent);
+                surface.Canvas.DrawImage(sourceImage, SKRect.Create(targetSize.Width, targetSize.Height));
+                return surface.Snapshot();
+            }
+        }
+
+        private static SKSizeI GetBackgroundAssetTargetSize(int sourceWidth, int sourceHeight)
+        {
+            if (sourceWidth <= 0 || sourceHeight <= 0)
+                return new SKSizeI(1, 1);
+
+            var scale = Math.Min(
+                1f,
+                Math.Min(
+                    BackgroundAssetMaxWidth / (float)sourceWidth,
+                    BackgroundAssetMaxHeight / (float)sourceHeight));
+
+            var width = Math.Max(1, (int)Math.Round(sourceWidth * scale));
+            var height = Math.Max(1, (int)Math.Round(sourceHeight * scale));
+            return new SKSizeI(width, height);
+        }
+
+        private static BackgroundImageFrame CreateBackgroundShowcaseFrame(SKImage image, string imagePath, int index)
+        {
+            var fileName = Path.GetFileNameWithoutExtension(imagePath);
+            return fileName.ToLowerInvariant() switch
+            {
+                "bg1" => new BackgroundImageFrame(
+                    image,
+                    new BackgroundImageCaption(
+                        "Gallery Entrance",
+                        "Warm highlights and layered foreground depth establish the opening scene for the asset-backed slideshow.\n\nThe caption is now defined directly in code, so sample content stays deterministic."),
+                    ContentAlignment.MiddleLeft,
+                    BackgroundImageCaptionDesignMode.Overlay),
+                "bg2" => new BackgroundImageFrame(
+                    image,
+                    new BackgroundImageCaption(
+                        "Material Study",
+                        "A denser frame helps verify caption overlays and transition pacing against a real-world composition.\n\nGlass mode keeps the panel readable while still preserving the image beneath it."),
+                    ContentAlignment.MiddleCenter,
+                    BackgroundImageCaptionDesignMode.Glass),
+                "bg3" => new BackgroundImageFrame(
+                    image,
+                    new BackgroundImageCaption(
+                        "Studio Corridor",
+                        "Long horizontal structure makes slide motion and zoom cropping easier to judge.\n\nSolid mode gives stronger separation for brighter photography and busier image regions."),
+                    ContentAlignment.MiddleRight,
+                    BackgroundImageCaptionDesignMode.Solid),
+                "bg4" => new BackgroundImageFrame(
+                    image,
+                    new BackgroundImageCaption(
+                        "Ambient Lounge",
+                        "Soft contrast is useful when checking readability of caption and summary text over photos.\n\nMinimal mode keeps the content light and unobtrusive while preserving more of the scene."),
+                    ContentAlignment.BottomLeft,
+                    BackgroundImageCaptionDesignMode.Minimal),
+                "bg5" => new BackgroundImageFrame(
+                    image,
+                    new BackgroundImageCaption(
+                        "Night Passage",
+                        "The final frame gives repeat mode a clear end-state before the slideshow loops back to the start.\n\nHidden mode suppresses the caption panel entirely so the image can stand on its own."),
+                    ContentAlignment.BottomRight,
+                    BackgroundImageCaptionDesignMode.Hidden),
+                _ => new BackgroundImageFrame(
+                    image,
+                    CreateDefaultBackgroundCaption(imagePath, index),
+                    GetDefaultBackgroundCaptionLayout(index),
+                    GetDefaultBackgroundCaptionDesignMode(index))
+            };
+        }
+
+        private static BackgroundImageCaptionDesignMode GetDefaultBackgroundCaptionDesignMode(int index)
+        {
+            return (index % 4) switch
+            {
+                1 => BackgroundImageCaptionDesignMode.Glass,
+                2 => BackgroundImageCaptionDesignMode.Solid,
+                3 => BackgroundImageCaptionDesignMode.Minimal,
+                _ => BackgroundImageCaptionDesignMode.Overlay,
+            };
+        }
+
+        private static ContentAlignment GetDefaultBackgroundCaptionLayout(int index)
+        {
+            return (index % 4) switch
+            {
+                1 => ContentAlignment.MiddleCenter,
+                2 => ContentAlignment.MiddleRight,
+                3 => ContentAlignment.BottomLeft,
+                _ => ContentAlignment.MiddleLeft,
+            };
+        }
+
+        private static BackgroundImageCaption CreateDefaultBackgroundCaption(string imagePath, int index)
+        {
+            return new BackgroundImageCaption($"Scene {index + 1}", $"Loaded from assets/images/{Path.GetFileName(imagePath)}.");
+        }
+
+        private void BackgroundHero_BackgroundImageChanged(object? sender, EventArgs e)
+        {
+            SyncActiveBackgroundFrameFromHero();
+            SyncWindowBackgroundWithShowcase();
+            UpdateBackgroundShowcaseStatus();
+        }
+
+        private void BackgroundHero_BackgroundImageCaptionChanged(object? sender, EventArgs e)
+        {
+            SyncActiveBackgroundFrameFromHero();
+            SyncWindowBackgroundWithShowcase();
+            UpdateBackgroundShowcaseStatus();
+        }
+
+        private void SyncActiveBackgroundFrameFromHero()
+        {
+            if (_backgroundHero == null || _backgroundSlides.Count == 0)
+                return;
+
+            var activeFrame = _backgroundHero.CurrentBackgroundImageFrame;
+            if (activeFrame == null)
+                return;
+
+            var index = Math.Clamp(_backgroundHero.BackgroundImageIndex, 0, _backgroundSlides.Count - 1);
+            _backgroundSlides[index] = activeFrame;
+        }
+
+        private void ApplyBackgroundCaptionVisuals(BackgroundImageFrame activeFrame)
+        {
+            if (_backgroundHeroCaption == null)
+                return;
+
+            var hasCaption = !activeFrame.Caption.IsEmpty;
+            var designMode = activeFrame.CaptionDesignMode;
+            _backgroundHeroCaption.Visible = hasCaption && designMode != BackgroundImageCaptionDesignMode.Hidden;
+
+            if (!hasCaption || designMode == BackgroundImageCaptionDesignMode.Hidden)
+                return;
+
+            _backgroundHeroCaption.TextAlign = activeFrame.CaptionLayout;
+            _backgroundHeroCaption.Height = designMode == BackgroundImageCaptionDesignMode.Minimal ? 82 : 108;
+            _backgroundHeroCaption.Padding = designMode == BackgroundImageCaptionDesignMode.Minimal ? new Thickness(4) : new Thickness(16);
+            _backgroundHeroCaption.Radius = designMode == BackgroundImageCaptionDesignMode.Minimal ? new Radius(0) : new Radius(18);
+
+            switch (designMode)
+            {
+                case BackgroundImageCaptionDesignMode.Glass:
+                    _backgroundHeroCaption.BackColor = ColorScheme.Surface.WithAlpha(ColorScheme.IsDarkMode ? (byte)154 : (byte)194);
+                    _backgroundHeroCaption.Border = new Thickness(1);
+                    _backgroundHeroCaption.BorderColor = SKColors.White.WithAlpha(ColorScheme.IsDarkMode ? (byte)72 : (byte)112);
+                    _backgroundHeroCaption.ForeColor = ColorScheme.ForeColor;
+                    _backgroundHeroCaption.Shadow = new BoxShadow(0f, 10f, 24f, 0, ColorScheme.ShadowColor.WithAlpha(24));
+                    break;
+
+                case BackgroundImageCaptionDesignMode.Solid:
+                    _backgroundHeroCaption.BackColor = ColorScheme.SurfaceContainerHigh.WithAlpha(236);
+                    _backgroundHeroCaption.Border = new Thickness(1);
+                    _backgroundHeroCaption.BorderColor = ColorScheme.Outline.WithAlpha(116);
+                    _backgroundHeroCaption.ForeColor = ColorScheme.ForeColor;
+                    _backgroundHeroCaption.Shadow = new BoxShadow(0f, 8f, 18f, 0, ColorScheme.ShadowColor.WithAlpha(22));
+                    break;
+
+                case BackgroundImageCaptionDesignMode.Minimal:
+                    _backgroundHeroCaption.BackColor = SKColors.Transparent;
+                    _backgroundHeroCaption.Border = new Thickness(0);
+                    _backgroundHeroCaption.BorderColor = SKColors.Transparent;
+                    _backgroundHeroCaption.ForeColor = SKColors.White.WithAlpha(236);
+                    _backgroundHeroCaption.Shadow = BoxShadow.None;
+                    break;
+
+                default:
+                    _backgroundHeroCaption.BackColor = SKColors.Black.WithAlpha(118);
+                    _backgroundHeroCaption.Border = new Thickness(1);
+                    _backgroundHeroCaption.BorderColor = SKColors.White.WithAlpha(42);
+                    _backgroundHeroCaption.ForeColor = SKColors.White;
+                    _backgroundHeroCaption.Shadow = BoxShadow.None;
+                    break;
+            }
+        }
+
+        private void BackgroundPreviousButton_Click(object? sender, EventArgs e)
+        {
+            MoveBackgroundSlide(-1);
+        }
+
+        private void BackgroundNextButton_Click(object? sender, EventArgs e)
+        {
+            MoveBackgroundSlide(1);
+        }
+
+        private void BackgroundPlayPauseButton_Click(object? sender, EventArgs e)
+        {
+            if (_backgroundHero == null)
+                return;
+
+            SetBackgroundSlideshowEnabled(!_backgroundHero.BackgroundImageSlideshowEnabled);
+        }
+
+        private void MoveBackgroundSlide(int delta)
+        {
+            if (_backgroundHero == null || _backgroundSlides.Count == 0)
+                return;
+
+            var nextIndex = _backgroundHero.BackgroundImageIndex + delta;
+            if (_backgroundHero.BackgroundImageSlideshowRepeat)
+            {
+                nextIndex = (nextIndex % _backgroundSlides.Count + _backgroundSlides.Count) % _backgroundSlides.Count;
+            }
+            else
+            {
+                nextIndex = Math.Clamp(nextIndex, 0, _backgroundSlides.Count - 1);
+            }
+
+            _backgroundHero.BackgroundImageIndex = nextIndex;
+            UpdateBackgroundShowcaseStatus();
+        }
+
+        private void UpdateBackgroundShowcaseStatus()
+        {
+            if (_backgroundHero == null || _backgroundHeroCaption == null || _backgroundStatusCard == null)
+                return;
+
+            if (_backgroundSlides.Count == 0)
+            {
+                _backgroundHeroCaption.Visible = true;
+                _backgroundHeroCaption.Text = "No background assets were loaded from assets/images.";
+                _backgroundHeroCaption.TextAlign = ContentAlignment.MiddleCenter;
+                _backgroundHeroCaption.BackColor = SKColors.Black.WithAlpha(118);
+                _backgroundHeroCaption.Border = new Thickness(1);
+                _backgroundHeroCaption.BorderColor = SKColors.White.WithAlpha(42);
+                _backgroundHeroCaption.ForeColor = SKColors.White;
+                _backgroundHeroCaption.Padding = new Thickness(16);
+                _backgroundHeroCaption.Radius = new Radius(18);
+                _backgroundHeroCaption.Shadow = BoxShadow.None;
+                _backgroundStatusCard.Text =
+                    "Background Slideshow\nNo background assets are available. Add images under assets/images to populate the showcase and window background mirror.";
+
+                if (_backgroundPlayPauseButton != null)
+                    _backgroundPlayPauseButton.Text = "No Assets";
+
+                RefreshBackgroundMenuChecks();
+                return;
+            }
+
+            var index = Math.Clamp(_backgroundHero.BackgroundImageIndex, 0, _backgroundSlides.Count - 1);
+            var activeFrame = _backgroundHero.CurrentBackgroundImageFrame ?? _backgroundSlides[index];
+            var caption = activeFrame.Caption;
+
+            _backgroundHeroCaption.Text = caption.ToString();
+            ApplyBackgroundCaptionVisuals(activeFrame);
+            _backgroundStatusCard.Text =
+                $"Background Slideshow\nScene {index + 1}/{_backgroundSlides.Count}  •  Layout: {_backgroundHero.BackgroundImageLayout}  •  Effect: {_backgroundHero.BackgroundImageTransitionEffect}  •  Duration: {_backgroundTransitionDurationPreset} ms\nCaption: {activeFrame.CaptionDesignMode}  •  Align: {activeFrame.CaptionLayout}  •  Slideshow: {(_backgroundHero.BackgroundImageSlideshowEnabled ? "Active" : "Passive")}  •  Repeat: {(_backgroundHero.BackgroundImageSlideshowRepeat ? "Active" : "Passive")}  •  Interval: {_backgroundIntervalPreset} ms  •  Window Background: {(_windowBackgroundEnabled ? "Active" : "Passive")} ({_windowBackgroundMode})\nWindow Blur: {_windowBackgroundBlurAmountPreset} px  •  Mode: {BackgroundImageBlurMode}\nUse the Backgrounds menu to switch layout, effect, duration, caption design and slideshow mode in real time. Use the Window Background menu to mirror the active scene across the window and test blur modes on the root window surface.";
+
+            if (_backgroundPlayPauseButton != null)
+                _backgroundPlayPauseButton.Text = _backgroundHero.BackgroundImageSlideshowEnabled ? "Pause Slideshow" : "Start Slideshow";
+
+            RefreshBackgroundMenuChecks();
         }
 
         private void NotifBtnInfo_Click(object sender, EventArgs e)
-            => Notifications.Show(
+            => NotificationToast.Show(
                 "Information",
-                "The operation completed successfully. No further action is required.",
+                "The operation completed successfully. No further action is required. This is a longer message to demonstrate text wrapping behavior in the notification layout.",
                 NotificationKind.Info);
 
         private void NotifBtnSuccess_Click(object sender, EventArgs e)
-            => Notifications.Show(
+            => NotificationToast.Show(
                 "Deployment Successful",
                 "The build artifact has been deployed to the staging environment and all health probes are green.",
                 NotificationKind.Success);
 
         private void NotifBtnWarning_Click(object sender, EventArgs e)
-            => Notifications.Show(
+            => NotificationToast.Show(
                 "High Latency Detected",
                 "Response times on the Telemetry workload have exceeded the 40 ms threshold for the last three checks.",
                 NotificationKind.Warning);
 
         private void NotifBtnError_Click(object sender, EventArgs e)
-            => Notifications.Show(
+            => NotificationToast.Show(
                 "Connection Failed",
                 "Unable to establish a connection to the remote endpoint. Check network configuration and try again.",
                 NotificationKind.Error);
 
         private void NotifBtnAllFour_Click(object sender, EventArgs e)
         {
-            Notifications.Show("Information",         "Background sync completed with no conflicts detected.",                         NotificationKind.Info,    4000);
-            Notifications.Show("Changes Saved",       "Your configuration has been written to disk and is active immediately.",         NotificationKind.Success, 5000);
-            Notifications.Show("Token Expiring Soon", "Your session token will expire in 15 minutes. Save your work before it does.",   NotificationKind.Warning, 6000);
-            Notifications.Show("Render Error",        "The DirectX 11 context was lost. The renderer has fallen back to software mode.", NotificationKind.Error,   7000);
+            NotificationToast.Show("Information", "Background sync completed with no conflicts detected.", NotificationKind.Info, 4000);
+            NotificationToast.Show("Changes Saved", "Your configuration has been written to disk and is active immediately.", NotificationKind.Success, 5000);
+            NotificationToast.Show("Token Expiring Soon", "Your session token will expire in 15 minutes. Save your work before it does.", NotificationKind.Warning, 6000);
+            NotificationToast.Show("Render Error", "The DirectX 11 context was lost. The renderer has fallen back to software mode.", NotificationKind.Error, 7000);
         }
 
         private void NotifBtnDismissAll_Click(object sender, EventArgs e)
-            => Notifications.DismissAll();
+            => NotificationToast.DismissAll();
 
         private void NotifBtnLongMessage_Click(object sender, EventArgs e)
-            => Notifications.Show(
+            => NotificationToast.Show(
                 "Audit Trail Delayed",
                 "The retention sweep has been postponed because the archive lane is warming up.\nEstimated completion: 3–5 minutes.\nNo data will be lost during this window.",
                 NotificationKind.Warning,
                 6000);
 
         private void NotifBtnLongDuration_Click(object sender, EventArgs e)
-            => Notifications.Show(
+            => NotificationToast.Show(
                 "Background Task Running",
                 "An 8-second background task is in progress. Hover to pause the countdown.",
                 NotificationKind.Info,
@@ -221,7 +1154,7 @@ namespace Orivy.Example
 
         private async void NotifBtnConfirm_Click(object sender, EventArgs e)
         {
-            var result = await Notifications.ConfirmAsync(
+            var result = await NotificationToast.ConfirmAsync(
                 "Delete Workload",
                 "This will permanently remove the selected workload. This action cannot be undone.",
                 NotificationKind.Warning,
@@ -229,25 +1162,25 @@ namespace Orivy.Example
                 "Delete", "Cancel");
 
             if (result == "Delete")
-                Notifications.Show("Deleted", "The workload has been permanently removed.", NotificationKind.Success, 3000);
+                NotificationToast.Show("Deleted", "The workload has been permanently removed.", NotificationKind.Success, 3000);
             else if (result == "Cancel")
-                Notifications.Show("Cancelled", "No changes were made.", NotificationKind.Info, 2500);
+                NotificationToast.Show("Cancelled", "No changes were made.", NotificationKind.Info, 2500);
         }
 
         private void NotifBtnActions_Click(object sender, EventArgs e)
-            => Notifications.Show(
+            => NotificationToast.Show(
                 "Update Available",
                 "Version 2.4.1 is ready to install. It includes performance improvements and security patches.",
                 NotificationKind.Info,
                 0,
                 new NotificationAction("Install Now", () =>
-                    Notifications.Show("Installing", "Updating to v2.4.1 in the background…", NotificationKind.Info, 3000)),
+                    NotificationToast.Show("Installing", "Updating to v2.4.1 in the background…", NotificationKind.Info, 3000)),
                 new NotificationAction("Later"));
 
         private async void NotifBtnManualProgress_Click(object sender, EventArgs e)
         {
             _manualProgressToast?.Dismiss();
-            _manualProgressToast = Notifications.Show(
+            _manualProgressToast = NotificationToast.Show(
                 "Publishing Build",
                 "Pushing artifacts to the release channel and verifying checksum state.",
                 NotificationKind.Info,
@@ -256,7 +1189,7 @@ namespace Orivy.Example
                     DurationMs = 0,
                     ShowProgressBar = true,
                     Progress = 0f,
-                    Actions = new[] { new NotificationAction("Hide", () => _manualProgressToast?.Dismiss()) }
+                    Actions = [new NotificationAction("Hide", () => _manualProgressToast?.Dismiss())]
                 });
 
             for (var i = 1; i <= 10; i++)
@@ -268,12 +1201,12 @@ namespace Orivy.Example
             await Task.Delay(180);
             _manualProgressToast?.Dismiss();
             _manualProgressToast = null;
-            Notifications.Show("Release Ready", "Build publishing completed successfully.", NotificationKind.Success, 2600);
+            NotificationToast.Show("Release Ready", "Build publishing completed successfully.", NotificationKind.Success, 2600);
         }
 
         private async void NotifBtnProgressToggle_Click(object sender, EventArgs e)
         {
-            var toast = Notifications.Show(
+            var toast = NotificationToast.Show(
                 "Background Indexing",
                 "Collecting symbols and warming the query cache in the background.",
                 NotificationKind.Info,
@@ -295,6 +1228,86 @@ namespace Orivy.Example
 
             await Task.Delay(320);
             toast.Dismiss();
+        }
+
+        private void NotifBtnThemeAuto_Click(object sender, EventArgs e)
+            => ShowNotificationThemeModeExample(
+                NotificationToastThemeMode.Auto,
+                "Auto Theme",
+                "This toast resolves its palette from the current application theme. Toggle dark mode and trigger it again to compare the result.");
+
+        private void NotifBtnThemeLight_Click(object sender, EventArgs e)
+            => ShowNotificationThemeModeExample(
+                NotificationToastThemeMode.Light,
+                "Light Theme",
+                "This toast forces the light palette regardless of the current window theme.");
+
+        private void NotifBtnThemeDark_Click(object sender, EventArgs e)
+            => ShowNotificationThemeModeExample(
+                NotificationToastThemeMode.Dark,
+                "Dark Theme",
+                "This toast forces the dark palette even if the rest of the sample window is currently light.");
+
+        private void NotifBtnThemeCustom_Click(object sender, EventArgs e)
+            => NotificationToast.Show(
+                "Custom Theme",
+                "Custom mode uses an explicit NotificationToastPalette so background, accent and foreground colors can be branded per toast.",
+                NotificationKind.Info,
+                new NotificationOptions
+                {
+                    DurationMs = 5200,
+                    ShowProgressBar = true,
+                    ThemeMode = NotificationToastThemeMode.Custom,
+                    CustomPalette = CreateNotificationThemeModePalette(),
+                    Actions = new[]
+                    {
+                        new NotificationAction("Apply Globally", ApplyCustomNotificationThemeMode),
+                        new NotificationAction("Reset", ResetNotificationThemeModeDefaults),
+                    }
+                });
+
+        private void ShowNotificationThemeModeExample(NotificationToastThemeMode mode, string title, string message)
+        {
+            NotificationToast.Show(
+                title,
+                message,
+                NotificationKind.Info,
+                new NotificationOptions
+                {
+                    DurationMs = 4600,
+                    ShowProgressBar = true,
+                    ThemeMode = mode,
+                });
+        }
+
+        private static NotificationToastPalette CreateNotificationThemeModePalette()
+            => new(
+                new SKColor(12, 33, 60),
+                new SKColor(56, 189, 248),
+                new SKColor(240, 249, 255));
+
+        private void ApplyCustomNotificationThemeMode()
+        {
+            NotificationToast.CustomPalette = CreateNotificationThemeModePalette();
+            NotificationToast.ThemeMode = NotificationToastThemeMode.Custom;
+
+            NotificationToast.Show(
+                "Custom Default Active",
+                "NotificationToast.ThemeMode and NotificationToast.CustomPalette now point to the custom sample palette for subsequent toasts.",
+                NotificationKind.Success,
+                4200);
+        }
+
+        private void ResetNotificationThemeModeDefaults()
+        {
+            NotificationToast.CustomPalette = null;
+            NotificationToast.ThemeMode = NotificationToastThemeMode.Auto;
+
+            NotificationToast.Show(
+                "Theme Defaults Reset",
+                "Notification toasts now resolve from Auto mode again.",
+                NotificationKind.Success,
+                3200);
         }
 
         private void VisualStyleDangerToggle_Click(object sender, EventArgs e)
@@ -331,8 +1344,8 @@ namespace Orivy.Example
         {
             var healthyIcon = CreateGridListIcon(new SKColor(34, 197, 94), GridListIconKind.Healthy);
             var warningIcon = CreateGridListIcon(new SKColor(245, 158, 11), GridListIconKind.Warning);
-            var lockedIcon  = CreateGridListIcon(new SKColor(239, 68, 68),  GridListIconKind.Locked);
-            var pulseIcon   = CreateGridListIcon(new SKColor(59, 130, 246), GridListIconKind.Pulse);
+            var lockedIcon = CreateGridListIcon(new SKColor(239, 68, 68), GridListIconKind.Locked);
+            var pulseIcon = CreateGridListIcon(new SKColor(59, 130, 246), GridListIconKind.Pulse);
 
             ConfigurePrimaryGridList(healthyIcon, warningIcon, lockedIcon, pulseIcon);
             ConfigureCompactGridList(healthyIcon, pulseIcon, warningIcon);
@@ -349,32 +1362,32 @@ namespace Orivy.Example
             gridListPrimary.Items.Clear();
 
             gridListPrimary.Columns.Add(new GridListColumn { Name = "workload", HeaderText = "Workload", Width = 220f, MinWidth = 150f, SizeMode = GridListColumnSizeMode.Auto });
-            gridListPrimary.Columns.Add(new GridListColumn { Name = "live",     HeaderText = "Live",     Width = 92f,  MinWidth = 72f,  MaxWidth = 108f, ShowCheckBox = true, CellTextAlign = ContentAlignment.MiddleCenter, SizeMode = GridListColumnSizeMode.Auto });
-            gridListPrimary.Columns.Add(new GridListColumn { Name = "owner",    HeaderText = "Owner",    Width = 138f, MinWidth = 110f, SizeMode = GridListColumnSizeMode.Auto });
-            gridListPrimary.Columns.Add(new GridListColumn { Name = "latency",  HeaderText = "Latency",  Width = 110f, MinWidth = 88f,  CellTextAlign = ContentAlignment.MiddleRight, SizeMode = GridListColumnSizeMode.Auto });
-            gridListPrimary.Columns.Add(new GridListColumn { Name = "summary",  HeaderText = "Summary",  Width = 320f, MinWidth = 220f, Sortable = false, SizeMode = GridListColumnSizeMode.Fill, FillWeight = 1.65f });
+            gridListPrimary.Columns.Add(new GridListColumn { Name = "live", HeaderText = "Live", Width = 92f, MinWidth = 72f, MaxWidth = 108f, ShowCheckBox = true, CellTextAlign = ContentAlignment.MiddleCenter, SizeMode = GridListColumnSizeMode.Auto });
+            gridListPrimary.Columns.Add(new GridListColumn { Name = "owner", HeaderText = "Owner", Width = 138f, MinWidth = 110f, SizeMode = GridListColumnSizeMode.Auto });
+            gridListPrimary.Columns.Add(new GridListColumn { Name = "latency", HeaderText = "Latency", Width = 110f, MinWidth = 88f, CellTextAlign = ContentAlignment.MiddleRight, SizeMode = GridListColumnSizeMode.Auto });
+            gridListPrimary.Columns.Add(new GridListColumn { Name = "summary", HeaderText = "Summary", Width = 320f, MinWidth = 220f, Sortable = false, SizeMode = GridListColumnSizeMode.Fill, FillWeight = 1.65f });
 
-            AddPrimaryRow("core",   "Core Systems",    healthyIcon, "Renderer",     true,  "Graphics",   "14 ms", "DirectX11 path is stable; cache hit ratio above target.");
-            AddPrimaryRow("core",   "Core Systems",    pulseIcon,   "Layout",       true,  "UI",         "18 ms", "Measure/arrange pass includes nested cards and sticky regions.");
-            AddPrimaryRow("core",   "Core Systems",    healthyIcon, "Input Hub",    true,  "Platform",   "16 ms", "Pointer capture and wheel routing stay deterministic through overlays.");
-            AddPrimaryRow("core",   "Core Systems",    pulseIcon,   "Theme Engine", true,  "Design",     "19 ms", "Palette interpolation is synchronized with visual-state transitions.");
-            AddPrimaryRow("diag",   "Diagnostics",     warningIcon, "Telemetry",    false, "Platform",   "41 ms", "Event batcher is backpressured; investigate queue saturation.");
-            AddPrimaryRow("diag",   "Diagnostics",     pulseIcon,   "Scroll Lab",   true,  "QA",         "22 ms", "Wheel routing and thumb drag stay stable under nested hosts.");
-            AddPrimaryRow("diag",   "Diagnostics",     warningIcon, "Frame Trace",  true,  "Rendering",  "27 ms", "GPU timings are sampled, but capture export is still warming the pipeline.");
-            AddPrimaryRow("diag",   "Diagnostics",     healthyIcon, "Crash Watch",  true,  "Ops",        "13 ms", "Guard rails are live and no fatal exceptions were observed in the last pass.");
-            AddPrimaryRow("secure", "Security",        lockedIcon,  "Session Guard",true,  "Identity",   "11 ms", "Lock escalation rules loaded and group policy sync is complete.");
-            AddPrimaryRow("secure", "Security",        warningIcon, "Audit Trail",  false, "Compliance", "35 ms", "Retention sweep delayed because archive lane is warming up.");
-            AddPrimaryRow("secure", "Security",        lockedIcon,  "Vault Mirror", true,  "Storage",    "17 ms", "Encrypted snapshots are mirrored and signature verification passed.");
-            AddPrimaryRow("secure", "Security",        pulseIcon,   "Access Review",true,  "Risk",       "24 ms", "Review queue is active and staged approvals refresh every minute.");
-            AddPrimaryRow("ship",   "Release Channel", pulseIcon,   "Preview Ring", true,  "Release",    "21 ms", "Preview users received the latest package and rollback marker is set.");
-            AddPrimaryRow("ship",   "Release Channel", warningIcon, "Canary Ring",  false, "Release",    "38 ms", "Canary deployment paused because health probes dipped below threshold.");
-            AddPrimaryRow("ship",   "Release Channel", healthyIcon, "Stable Ring",  true,  "Release",    "12 ms", "Stable channel remains green with no pending incidents.");
+            AddPrimaryRow("core", "Core Systems", healthyIcon, "Renderer", true, "Graphics", "14 ms", "DirectX11 path is stable; cache hit ratio above target.");
+            AddPrimaryRow("core", "Core Systems", pulseIcon, "Layout", true, "UI", "18 ms", "Measure/arrange pass includes nested cards and sticky regions.");
+            AddPrimaryRow("core", "Core Systems", healthyIcon, "Input Hub", true, "Platform", "16 ms", "Pointer capture and wheel routing stay deterministic through overlays.");
+            AddPrimaryRow("core", "Core Systems", pulseIcon, "Theme Engine", true, "Design", "19 ms", "Palette interpolation is synchronized with visual-state transitions.");
+            AddPrimaryRow("diag", "Diagnostics", warningIcon, "Telemetry", false, "Platform", "41 ms", "Event batcher is backpressured; investigate queue saturation.");
+            AddPrimaryRow("diag", "Diagnostics", pulseIcon, "Scroll Lab", true, "QA", "22 ms", "Wheel routing and thumb drag stay stable under nested hosts.");
+            AddPrimaryRow("diag", "Diagnostics", warningIcon, "Frame Trace", true, "Rendering", "27 ms", "GPU timings are sampled, but capture export is still warming the pipeline.");
+            AddPrimaryRow("diag", "Diagnostics", healthyIcon, "Crash Watch", true, "Ops", "13 ms", "Guard rails are live and no fatal exceptions were observed in the last pass.");
+            AddPrimaryRow("secure", "Security", lockedIcon, "Session Guard", true, "Identity", "11 ms", "Lock escalation rules loaded and group policy sync is complete.");
+            AddPrimaryRow("secure", "Security", warningIcon, "Audit Trail", false, "Compliance", "35 ms", "Retention sweep delayed because archive lane is warming up.");
+            AddPrimaryRow("secure", "Security", lockedIcon, "Vault Mirror", true, "Storage", "17 ms", "Encrypted snapshots are mirrored and signature verification passed.");
+            AddPrimaryRow("secure", "Security", pulseIcon, "Access Review", true, "Risk", "24 ms", "Review queue is active and staged approvals refresh every minute.");
+            AddPrimaryRow("ship", "Release Channel", pulseIcon, "Preview Ring", true, "Release", "21 ms", "Preview users received the latest package and rollback marker is set.");
+            AddPrimaryRow("ship", "Release Channel", warningIcon, "Canary Ring", false, "Release", "38 ms", "Canary deployment paused because health probes dipped below threshold.");
+            AddPrimaryRow("ship", "Release Channel", healthyIcon, "Stable Ring", true, "Release", "12 ms", "Stable channel remains green with no pending incidents.");
 
             gridListPrimary.SortByColumn(0, GridListSortDirection.Ascending);
             gridListPrimary.SelectionChanged += GridListPrimary_SelectionChanged;
             gridListPrimary.CellCheckChanged += GridListPrimary_CellCheckChanged;
-            gridListPrimary.ColumnClick      += GridListPrimary_ColumnClick;
-            gridListPrimary.CellClick        += GridListPrimary_CellClick;
+            gridListPrimary.ColumnClick += GridListPrimary_ColumnClick;
+            gridListPrimary.CellClick += GridListPrimary_CellClick;
         }
 
         private void ConfigureCompactGridList(SKImage healthyIcon, SKImage pulseIcon, SKImage warningIcon)
@@ -383,12 +1396,12 @@ namespace Orivy.Example
             gridListCompact.Items.Clear();
 
             gridListCompact.Columns.Add(new GridListColumn { Name = "stream", HeaderText = "Stream", Width = 220f, MinWidth = 150f, SizeMode = GridListColumnSizeMode.Auto });
-            gridListCompact.Columns.Add(new GridListColumn { Name = "state",  HeaderText = "State",  Width = 100f, MinWidth = 80f,  CellTextAlign = ContentAlignment.MiddleCenter, SizeMode = GridListColumnSizeMode.Auto });
-            gridListCompact.Columns.Add(new GridListColumn { Name = "note",   HeaderText = "Note",   Width = 420f, MinWidth = 220f, Sortable = false, SizeMode = GridListColumnSizeMode.Fill, FillWeight = 1.4f });
+            gridListCompact.Columns.Add(new GridListColumn { Name = "state", HeaderText = "State", Width = 100f, MinWidth = 80f, CellTextAlign = ContentAlignment.MiddleCenter, SizeMode = GridListColumnSizeMode.Auto });
+            gridListCompact.Columns.Add(new GridListColumn { Name = "note", HeaderText = "Note", Width = 420f, MinWidth = 220f, Sortable = false, SizeMode = GridListColumnSizeMode.Fill, FillWeight = 1.4f });
 
             AddCompactRow(healthyIcon, "Commit Watcher", "Live", "High-frequency feed without a header bar.");
-            AddCompactRow(pulseIcon,   "Animation Bus",  "Sync", "Transition snapshots update while list selection remains stable.");
-            AddCompactRow(warningIcon, "Alert Stream",   "Warn", "Compact list mode still paints icons and supports selection.");
+            AddCompactRow(pulseIcon, "Animation Bus", "Sync", "Transition snapshots update while list selection remains stable.");
+            AddCompactRow(warningIcon, "Alert Stream", "Warn", "Compact list mode still paints icons and supports selection.");
         }
 
         private void AddPrimaryRow(string groupKey, string groupText, SKImage icon, string workload,
@@ -419,7 +1432,7 @@ namespace Orivy.Example
             var canvas = surface.Canvas;
             canvas.Clear(SKColors.Transparent);
 
-            using var fill   = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = accent };
+            using var fill = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = accent };
             using var stroke = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.6f, Color = SKColors.White.WithAlpha(220) };
 
             switch (kind)
@@ -530,8 +1543,8 @@ namespace Orivy.Example
         private void GridListToggleGridLinesButton_Click(object sender, EventArgs e)
         {
             var next = !gridListPrimary.ShowGridLines;
-            gridListPrimary.ShowGridLines  = next;
-            gridListCompact.ShowGridLines  = next;
+            gridListPrimary.ShowGridLines = next;
+            gridListCompact.ShowGridLines = next;
             UpdateGridListButtons();
             UpdateGridListStatus("Grid Lines", next ? "Row and column separators are visible." : "Grid lines hidden for a cleaner card-like presentation.");
         }
@@ -547,11 +1560,11 @@ namespace Orivy.Example
 
         private void UpdateGridListButtons()
         {
-            gridListToggleHeaderButton.Text    = gridListPrimary.HeaderVisible   ? "Header: On"     : "Header: Off";
-            gridListToggleStickyButton.Text    = gridListPrimary.StickyHeader    ? "Sticky: On"     : "Sticky: Off";
-            gridListToggleGroupingButton.Text  = gridListPrimary.GroupingEnabled ? "Grouping: On"   : "Grouping: Off";
-            gridListToggleGridLinesButton.Text = gridListPrimary.ShowGridLines   ? "Grid Lines: On" : "Grid Lines: Off";
-            gridListToggleRowResizeButton.Text = gridListPrimary.AllowRowResize  ? "Row Resize: On" : "Row Resize: Off";
+            gridListToggleHeaderButton.Text = gridListPrimary.HeaderVisible ? "Header: On" : "Header: Off";
+            gridListToggleStickyButton.Text = gridListPrimary.StickyHeader ? "Sticky: On" : "Sticky: Off";
+            gridListToggleGroupingButton.Text = gridListPrimary.GroupingEnabled ? "Grouping: On" : "Grouping: Off";
+            gridListToggleGridLinesButton.Text = gridListPrimary.ShowGridLines ? "Grid Lines: On" : "Grid Lines: Off";
+            gridListToggleRowResizeButton.Text = gridListPrimary.AllowRowResize ? "Row Resize: On" : "Row Resize: Off";
         }
 
         private void UpdateGridListStatus(string title, string body)
@@ -578,6 +1591,16 @@ namespace Orivy.Example
         {
             if (disposing)
             {
+                if (_backgroundHero != null)
+                {
+                    _backgroundHero.BackgroundImageChanged -= BackgroundHero_BackgroundImageChanged;
+                    _backgroundHero.BackgroundImageCaptionChanged -= BackgroundHero_BackgroundImageCaptionChanged;
+                }
+
+                for (var i = 0; i < _backgroundSlides.Count; i++)
+                    _backgroundSlides[i].Image.Dispose();
+                _backgroundSlides.Clear();
+
                 for (var i = 0; i < _gridListImages.Count; i++)
                     _gridListImages[i].Dispose();
                 _gridListImages.Clear();

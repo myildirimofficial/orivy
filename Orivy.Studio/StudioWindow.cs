@@ -43,8 +43,8 @@ public sealed class StudioWindow : Window
 
         // Window page tab system (Figma-style sekmeler) için bağlıyoruz.
         WindowPageControl = _pageControl;
-        DrawTabIcons = true;
-        TabCloseButton = false;
+        _pageControl.DrawTabIcons = true;
+        _pageControl.TabCloseButton = false;
 
         Controls.Add(CreateToolbar());
         Controls.Add(_pageControl);

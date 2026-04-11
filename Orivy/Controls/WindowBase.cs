@@ -198,7 +198,7 @@ public partial class WindowBase : ElementBase
         }
     }
 
-    public NotificationManager Notifications
+    internal NotificationManager Notifications
     {
         get
         {

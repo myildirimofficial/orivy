@@ -31,14 +31,12 @@ Useful APIs:
 - `ColorScheme.StartThemeTransition(SKColor targetBackground)`
 - `ColorScheme.SetPrimarySeedColor(SKColor seed)`
 - `ColorScheme.ThemeChanged`
-- `ColorScheme.FlatDesign`
 - `ColorScheme.DrawDebugBorders`
 
 Notes:
 
 - `ForeColor` is derived from the current surface color, so controls usually do not need to hard-code text contrast.
 - `Primary` is seeded independently and can be changed without replacing the whole theme.
-- `FlatDesign` disables elevation shadows and glass-like styling helpers for flatter UI surfaces.
 
 ## 2. State-Driven Control Styling
 
@@ -157,7 +155,6 @@ Key behaviors:
 - `DrawElevation(...)` renders theme-aware elevation shadows and dark-mode tinting
 - `DrawGlassEffect(...)` adds a gradient overlay for glass-like surfaces
 - `DrawStateLayer(...)` paints hover or pressed overlays
-- these helpers are effectively disabled when `ColorScheme.FlatDesign` is `true`
 
 Use these helpers when a custom control needs manual paint logic but still wants to match the shared theme vocabulary.
 

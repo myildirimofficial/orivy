@@ -12,5 +12,10 @@ public enum WindowPageTransitionEffect
     Reveal,
     Uncover,
     Flip,
-    Iris
+    Iris,
+    Morph,
+    Zoom,
+    CrossZoom,
+    Split,
+    Wipe
 }

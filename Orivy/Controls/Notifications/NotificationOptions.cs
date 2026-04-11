@@ -8,4 +8,6 @@ public sealed class NotificationOptions
     public bool ShowProgressBar { get; set; } = true;
     public float? Progress { get; set; }
     public NotificationAction[] Actions { get; set; } = Array.Empty<NotificationAction>();
+    public NotificationToastThemeMode? ThemeMode { get; set; }
+    public NotificationToastPalette? CustomPalette { get; set; }
 }

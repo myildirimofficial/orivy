@@ -18,27 +18,6 @@ internal partial class MainWindow
     internal void InitializeComponent()
     {
         this.SuspendLayout();
-
-        //
-        // panel
-        this.panel = new()
-        {
-            Text = "Backend Renderer",
-            Name = "panel",
-            Padding = new(5),
-            Dock = Orivy.DockStyle.Fill
-        };
-
-        
-        this.panel2 = new()
-        {
-            Text = "Config",
-            Name = "panel2",
-            Padding = new(5),
-            Dock = Orivy.DockStyle.Fill,
-            Radius = new(0),
-            Border = new(0)
-        };
         
         this.panel3 = new()
         {
@@ -87,61 +66,6 @@ internal partial class MainWindow
             AutoScroll = true,
             AutoScrollMargin = new(0, 24)
         };
-
-        this.buttonOpenGL = new()
-        {
-            Name = "buttonOpenGL",
-            Text = "OpenGL",
-            BackColor = SKColors.Red,
-            Dock = Orivy.DockStyle.Bottom,
-            Size = new(100, 32),
-            Radius = new(6),
-        };
-
-        buttonOpenGL.Click += ButtonOpenGL_Click;
-
-        this.buttonSoftware = new()
-        {
-            Name = "buttonSoftware",
-            Text = "Software",
-            BackColor = SKColors.Green,
-            Size = new(100, 32),
-            Dock = Orivy.DockStyle.Left,
-            Radius = new(4),
-            Border = new(1)
-        };
-
-        buttonSoftware.Click += ButtonSoftware_Click;
-
-        this.buttonDirectX = new()
-        {
-            Name = "buttonDirectX",
-            Text = "DirectX",
-            BackColor = SKColors.Green,
-            Size = new(100, 32),
-            Dock = Orivy.DockStyle.Right,
-            Radius = new(4),
-            Border = new(1),
-            Shadows = new[] {
-                new BoxShadow(0, 1, 3, 0, ColorScheme.ShadowColor),           // soft outer
-                new BoxShadow(0, 4, 12, new Radius(2), ColorScheme.ShadowColor), // wide spread
-                new BoxShadow(0, 1, 2, 0, ColorScheme.ShadowColor, inset: true)     // subtle inset
-            }
-        };
-
-        buttonDirectX.Click += ButtonDirectX_Click;
-
-        this.buttonDarkMode = new()
-        {
-            Name = "buttonDarkMode",
-            Text = "Toggle Mode",
-            BackColor = SKColors.Blue,
-            Dock = Orivy.DockStyle.Bottom,
-            Size = new(100, 32),
-            Radius = new(6),
-        };
-
-        buttonDarkMode.Click += ButtonDarkMode_Click;
 
         this.visualStyleHeader = new()
         {
@@ -539,14 +463,9 @@ internal partial class MainWindow
             MaxDropDownItems = 6,
             DropDownItemHeight = 34
         };
-        designerMotionCombo.Items.AddRange(new object[]
-        {
-            new ComboBoxItem("Pop Fade", OpeningEffectType.PopFade),
-            new ComboBoxItem("Scale Fade", OpeningEffectType.ScaleFade),
-            new ComboBoxItem("Slide Down Fade", OpeningEffectType.SlideDownFade),
-            new ComboBoxItem("Slide Up Fade", OpeningEffectType.SlideUpFade),
-            new ComboBoxItem("Fade", OpeningEffectType.Fade)
-        });
+        OpeningEffectType[] motionPresets = (OpeningEffectType[])Enum.GetValues(typeof(OpeningEffectType));
+        designerMotionCombo.Items.AddRange(motionPresets.Select(effect => new ComboBoxItem(effect.ToString(), effect)).ToArray());
+
         designerMotionCombo.SelectedValue = OpeningEffectType.PopFade;
 
         var designerModulesCombo = new ComboBox
@@ -1110,11 +1029,25 @@ internal partial class MainWindow
         {
             Name = "windowPageControl",
             Dock = Orivy.DockStyle.Fill,
+            TabMode = WindowPageTabMode.WindowChrome,
+            DrawTabIcons = true,
             TransitionEffect = WindowPageTransitionEffect.ScaleFade,
             TransitionAnimationType = AnimationType.QuarticEaseOut,
             TransitionDurationMs = 350,
             LockInputDuringTransition = true,
         };
+
+        var designerTabIcon = CreateGridListIcon(new SKColor(0xF5, 0x9E, 0x0B), GridListIconKind.Pulse);
+        var stylesTabIcon = CreateGridListIcon(new SKColor(0xEC, 0x48, 0x99), GridListIconKind.Healthy);
+        var scrollTabIcon = CreateGridListIcon(new SKColor(0x14, 0xB8, 0xA6), GridListIconKind.Pulse);
+        var gridTabIcon = CreateGridListIcon(new SKColor(0x8B, 0x5C, 0xF6), GridListIconKind.Warning);
+        var notificationsTabIcon = CreateGridListIcon(new SKColor(0xEF, 0x44, 0x44), GridListIconKind.Warning);
+        var bindingTabIcon = CreateGridListIcon(new SKColor(0x10, 0xB9, 0x81), GridListIconKind.Healthy);
+
+        this.panel3.Image = designerTabIcon;
+        this.panel4.Image = stylesTabIcon;
+        this.panel5.Image = scrollTabIcon;
+        this.panel6.Image = gridTabIcon;
 
         // build example menu strip demonstrating top‑level menus and submenus
         this.menuStrip = new MenuStrip
@@ -1166,14 +1099,7 @@ internal partial class MainWindow
         this.ExtendMenu = this.extendMenu;
         this.ShowMenuInsteadOfIcon = true;
         this.FormMenu = this.extendMenu;
-
-        this.panel.Controls.Add(this.buttonOpenGL);
-        this.panel.Controls.Add(this.buttonSoftware);
-        this.panel.Controls.Add(this.buttonDirectX);
-        this.panel.Controls.Add(this.buttonDarkMode);
         
-        windowPageControl.Controls.Add(panel);
-        windowPageControl.Controls.Add(panel2);
         windowPageControl.Controls.Add(panel3);
         windowPageControl.Controls.Add(panel4);
         windowPageControl.Controls.Add(panel5);
@@ -1182,6 +1108,13 @@ internal partial class MainWindow
         InitializeBindingDemoPage();
         InitializeGridListDemo();
         InitializeNotificationsPage();
+        InitializeEmbeddedTabsPage();
+
+        if (_bindingPanel != null)
+            _bindingPanel.Image = bindingTabIcon;
+
+        if (panel7 != null)
+            panel7.Image = notificationsTabIcon;
 
         extendMenu.ShowShortcutKeys = true;
         menuStrip.ShowShortcutKeys = true;
@@ -1195,7 +1128,7 @@ internal partial class MainWindow
         this.Height = 650;
         this.DwmMargin = 1000;
         this.Padding = new(10);
-        this.WindowThemeType = WindowThemeType.Mica;
+        this.WindowThemeType = WindowThemeType.Tabbed;
         this.ContextMenuStrip = this.extendMenu;
         this.WindowPageControl = windowPageControl;
         this.FormStartPosition = Orivy.FormStartPosition.CenterScreen;
@@ -1220,7 +1153,7 @@ internal partial class MainWindow
 
         var notifHeader = new Element
         {
-            Text      = "Notification Surface\nAlert-style toasts, inline actions, confirmation flow and the new manual progress API are all demonstrated on this page.",
+            Text      = "Notification Surface\nAlert-style toasts, inline actions, confirmation flow, theme modes and the manual progress API are all demonstrated on this page.",
             Dock      = DockStyle.Top,
             Height    = 88,
             Padding   = new Thickness(18),
@@ -1462,6 +1395,81 @@ internal partial class MainWindow
         notifRow5.Controls.Add(notifBtnManualProgress);
         notifRow5.Controls.Add(notifBtnProgressToggle);
 
+        var notifRow6 = new Container
+        {
+            Dock      = DockStyle.Top,
+            Height    = 46,
+            Margin    = new Thickness(0, 0, 0, 10),
+            Radius    = new Radius(0),
+            Border    = new Thickness(0),
+            BackColor = SkiaSharp.SKColors.Transparent,
+        };
+
+        notifBtnThemeAuto = new Button
+        {
+            Text   = "Auto Mode",
+            Dock   = DockStyle.Left,
+            Width  = 124,
+            Height = 38,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+
+        notifBtnThemeLight = new Button
+        {
+            Text   = "Light Mode",
+            Dock   = DockStyle.Left,
+            Width  = 124,
+            Height = 38,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+        notifBtnThemeLight.ConfigureVisualStyles(s => s
+            .Base(b => b
+                .Background(new SkiaSharp.SKColor(248, 250, 252))
+                .Foreground(new SkiaSharp.SKColor(15, 23, 42))
+                .Border(1)
+                .BorderColor(new SkiaSharp.SKColor(203, 213, 225))
+                .Radius(12)));
+
+        notifBtnThemeDark = new Button
+        {
+            Text   = "Dark Mode",
+            Dock   = DockStyle.Left,
+            Width  = 124,
+            Height = 38,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+        notifBtnThemeDark.ConfigureVisualStyles(s => s
+            .Base(b => b
+                .Background(new SkiaSharp.SKColor(30, 41, 59))
+                .Foreground(SkiaSharp.SKColors.White)
+                .Border(1)
+                .BorderColor(new SkiaSharp.SKColor(71, 85, 105))
+                .Radius(12)));
+
+        notifBtnThemeCustom = new Button
+        {
+            Text   = "Custom Mode",
+            Dock   = DockStyle.Left,
+            Width  = 132,
+            Height = 38,
+        };
+        notifBtnThemeCustom.ConfigureVisualStyles(s => s
+            .Base(b => b
+                .Background(new SkiaSharp.SKColor(14, 116, 144))
+                .Foreground(SkiaSharp.SKColors.White)
+                .Border(1)
+                .BorderColor(new SkiaSharp.SKColor(21, 94, 117))
+                .Radius(12))
+            .OnHover(r => r
+                .Background(new SkiaSharp.SKColor(8, 145, 178))
+                .BorderColor(new SkiaSharp.SKColor(14, 116, 144))));
+
+        notifRow6.Controls.Add(notifBtnThemeAuto);
+        notifRow6.Controls.Add(notifBtnThemeLight);
+        notifRow6.Controls.Add(notifBtnThemeDark);
+        notifRow6.Controls.Add(notifBtnThemeCustom);
+
+        panel7.Controls.Add(notifRow6);
         panel7.Controls.Add(notifRow5);
         panel7.Controls.Add(notifRow4);
         panel7.Controls.Add(notifRow3);
@@ -1485,6 +1493,528 @@ internal partial class MainWindow
         notifBtnActions.Click      += NotifBtnActions_Click;
         notifBtnManualProgress.Click += NotifBtnManualProgress_Click;
         notifBtnProgressToggle.Click += NotifBtnProgressToggle_Click;
+        notifBtnThemeAuto.Click    += NotifBtnThemeAuto_Click;
+        notifBtnThemeLight.Click   += NotifBtnThemeLight_Click;
+        notifBtnThemeDark.Click    += NotifBtnThemeDark_Click;
+        notifBtnThemeCustom.Click  += NotifBtnThemeCustom_Click;
+    }
+
+    private void InitializeEmbeddedTabsPage()
+    {
+        var embeddedTabsPage = new Container
+        {
+            Name    = "panelEmbeddedTabs",
+            Text    = "Tab Control",
+            Image   = CreateGridListIcon(new SKColor(0x06, 0xB6, 0xD4), GridListIconKind.Pulse),
+            Padding = new Thickness(24),
+            Dock    = DockStyle.Fill,
+            Radius  = new Radius(0),
+            Border  = new Thickness(0),
+        };
+
+        // ── Main embedded tab control ─────────────────────────────────────────
+        var embeddedPageControl = new WindowPageControl
+        {
+            Name                      = "embeddedPageControl",
+            Dock                      = DockStyle.Fill,
+            Padding                   = new Thickness(0),
+            Radius                    = new Radius(14),
+            Border                    = new Thickness(1),
+            TabMode                   = WindowPageTabMode.Embedded,
+            TabDesignMode             = WindowPageTabDesignMode.RoundedCompact,
+            TabAlignment              = WindowPageTabAlignment.Start,
+            TabCloseButton            = true,
+            NewTabButton              = true,
+            DrawTabIcons              = true,
+            TabStripHeight            = 44,
+            TransitionEffect          = WindowPageTransitionEffect.Fade,
+            TransitionAnimationType   = AnimationType.Linear,
+            TransitionDurationMs      = 300,
+            LockInputDuringTransition = true,
+            TextAlign                   = ContentAlignment.MiddleCenter,
+        };
+
+        // ── Toolbar shell ─────────────────────────────────────────────────────
+        var embeddedToolbar = new Container
+        {
+            Name       = "embeddedTabToolbar",
+            Dock       = DockStyle.Top,
+            Height     = 344,
+            Margin     = new Thickness(0, 0, 0, 16),
+            Padding    = new Thickness(16),
+            Radius     = new Radius(16),
+            Border     = new Thickness(1),
+            BorderColor = ColorScheme.Outline.WithAlpha(88),
+            BackColor  = ColorScheme.SurfaceContainerHigh,
+        };
+
+        // ── Status bar ────────────────────────────────────────────────────────
+        var embeddedModeStatus = new Element
+        {
+            Name      = "embeddedModeStatus",
+            Dock      = DockStyle.Fill,
+            Padding   = new Thickness(12, 0, 12, 0),
+            Radius    = new Radius(10),
+            Border    = new Thickness(1),
+            BorderColor = ColorScheme.Primary.WithAlpha(80),
+            BackColor = ColorScheme.Primary.WithAlpha(20),
+            ForeColor = ColorScheme.ForeColor,
+            TextAlign = ContentAlignment.MiddleLeft,
+        };
+
+        // ── Row 1 label ───────────────────────────────────────────────────────
+        var designModeLabel = new Element
+        {
+            Text      = "Design Mode",
+            Dock      = DockStyle.Top,
+            Height    = 22,
+            Margin    = new Thickness(0, 0, 0, 6),
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+            ForeColor = ColorScheme.ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)180 : (byte)160),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
+        };
+
+        // ── Row 1: design mode buttons ────────────────────────────────────────
+        var embeddedModeButtons = new Container
+        {
+            Name      = "embeddedModeButtons",
+            Dock      = DockStyle.Top,
+            Height    = 36,
+            Margin    = new Thickness(0, 0, 0, 12),
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+        };
+
+        // ── Row 2 label ───────────────────────────────────────────────────────
+        var alignmentLabel = new Element
+        {
+            Text      = "Tab Alignment",
+            Dock      = DockStyle.Top,
+            Height    = 22,
+            Margin    = new Thickness(0, 0, 0, 6),
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+            ForeColor = ColorScheme.ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)180 : (byte)160),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
+        };
+
+        // ── Row 2: alignment buttons ──────────────────────────────────────────
+        var embeddedAlignmentButtons = new Container
+        {
+            Name      = "embeddedAlignmentButtons",
+            Dock      = DockStyle.Top,
+            Height    = 36,
+            Margin    = new Thickness(0, 0, 0, 10),
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+        };
+
+        // ── Row 3 label ───────────────────────────────────────────────────────
+        var textAlignmentLabel = new Element
+        {
+            Text      = "Text Alignment",
+            Dock      = DockStyle.Top,
+            Height    = 22,
+            Margin    = new Thickness(0, 0, 0, 6),
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+            ForeColor = ColorScheme.ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)180 : (byte)160),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
+        };
+
+        // ── Row 3: text alignment buttons ─────────────────────────────────────
+        var embeddedTextAlignButtons = new Container
+        {
+            Name      = "embeddedTextAlignButtons",
+            Dock      = DockStyle.Top,
+            Height    = 124,
+            Margin    = new Thickness(0, 0, 0, 10),
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+        };
+
+        var embeddedTextAlignTopButtons = new Container
+        {
+            Name      = "embeddedTextAlignTopButtons",
+            Dock      = DockStyle.Top,
+            Height    = 36,
+            Margin    = new Thickness(0, 0, 0, 8),
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+        };
+
+        var embeddedTextAlignMiddleButtons = new Container
+        {
+            Name      = "embeddedTextAlignMiddleButtons",
+            Dock      = DockStyle.Top,
+            Height    = 36,
+            Margin    = new Thickness(0, 0, 0, 8),
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+        };
+
+        var embeddedTextAlignBottomButtons = new Container
+        {
+            Name      = "embeddedTextAlignBottomButtons",
+            Dock      = DockStyle.Top,
+            Height    = 36,
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+        };
+
+        // ── Design mode buttons ───────────────────────────────────────────────
+        Button MakeToolButton(string name, string text) => new Button
+        {
+            Name                = name,
+            Text                = text,
+            Dock                = DockStyle.Left,
+            Width               = 88,
+            Height              = 36,
+            Margin              = new Thickness(0, 0, 8, 0),
+            Radius              = new Radius(8),
+            AccentMotionEnabled = false,
+        };
+
+        Button MakeTextAlignButton(string name, string text) => new Button
+        {
+            Name                = name,
+            Text                = text,
+            Dock                = DockStyle.Left,
+            Width               = 108,
+            Height              = 36,
+            Margin              = new Thickness(0, 0, 8, 0),
+            Radius              = new Radius(8),
+            AccentMotionEnabled = false,
+        };
+
+        var roundedCompactModeButton = MakeToolButton("roundedCompactModeButton", "RoundedCompact");
+        var rectangleModeButton      = MakeToolButton("rectangleModeButton",      "Rectangle");
+        var roundedModeButton        = MakeToolButton("roundedModeButton",        "Rounded");
+        var chromedModeButton        = MakeToolButton("chromedModeButton",        "Chromed");
+        var pillModeButton           = MakeToolButton("pillModeButton",           "Pill");
+        var outlinedModeButton       = MakeToolButton("outlinedModeButton",       "Outlined");
+        var minimalModeButton        = MakeToolButton("minimalModeButton",        "Minimal");
+
+        var startAlignButton  = MakeToolButton("startAlignButton",  "· Start");
+        var centerAlignButton = MakeToolButton("centerAlignButton", "· Center");
+        var endAlignButton    = MakeToolButton("endAlignButton",    "· End");
+
+        var textAlignTopLeftButton      = MakeTextAlignButton("textAlignTopLeftButton",      "Top Left");
+        var textAlignTopCenterButton    = MakeTextAlignButton("textAlignTopCenterButton",    "Top Center");
+        var textAlignTopRightButton     = MakeTextAlignButton("textAlignTopRightButton",     "Top Right");
+        var textAlignMiddleLeftButton   = MakeTextAlignButton("textAlignMiddleLeftButton",   "Middle Left");
+        var textAlignMiddleCenterButton = MakeTextAlignButton("textAlignMiddleCenterButton", "Middle Center");
+        var textAlignMiddleRightButton  = MakeTextAlignButton("textAlignMiddleRightButton",  "Middle Right");
+        var textAlignBottomLeftButton   = MakeTextAlignButton("textAlignBottomLeftButton",   "Bottom Left");
+        var textAlignBottomCenterButton = MakeTextAlignButton("textAlignBottomCenterButton", "Bottom Center");
+        var textAlignBottomRightButton  = MakeTextAlignButton("textAlignBottomRightButton",  "Bottom Right");
+        var textAlignButtons = new[]
+        {
+            textAlignTopLeftButton,
+            textAlignTopCenterButton,
+            textAlignTopRightButton,
+            textAlignMiddleLeftButton,
+            textAlignMiddleCenterButton,
+            textAlignMiddleRightButton,
+            textAlignBottomLeftButton,
+            textAlignBottomCenterButton,
+            textAlignBottomRightButton,
+        };
+
+        // ── Helper: visual active/inactive state for tool buttons ─────────────
+        void SetButtonActive(Button btn, bool active)
+        {
+            btn.BackColor   = active ? ColorScheme.Primary : ColorScheme.Surface;
+            btn.ForeColor   = active ? SKColors.White : ColorScheme.ForeColor;
+            btn.BorderColor = active ? ColorScheme.Primary : ColorScheme.Outline.WithAlpha(100);
+            btn.Invalidate();
+        }
+
+        // ── Apply design mode ─────────────────────────────────────────────────
+        void ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode mode)
+        {
+            embeddedPageControl.TabDesignMode = mode;
+            windowPageControl.TabDesignMode   = mode;
+
+            var modeDesc = mode switch
+            {
+                WindowPageTabDesignMode.RoundedCompact => "RoundedCompact — muted full-width container, elevated card on selected tab.",
+                WindowPageTabDesignMode.Rectangle      => "Rectangle — no container, subtle ghost hover, full-width primary indicator.",
+                WindowPageTabDesignMode.Rounded        => "Rounded — muted segmented container, Surface card on selected.",
+                WindowPageTabDesignMode.Pill           => "Pill — filled Primary pill on selected, no container background.",
+                WindowPageTabDesignMode.Outlined       => "Outlined — classic 3-sided border tab, open bottom merges with content.",
+                WindowPageTabDesignMode.Minimal        => "Minimal — no chrome, Primary left-accent bar and tint on selected.",
+                _                                      => "Chromed — browser-style top-rounded tabs, Surface elevated on selected.",
+            };
+            var alignDesc = embeddedPageControl.TabAlignment switch
+            {
+                WindowPageTabAlignment.Center => "Center",
+                WindowPageTabAlignment.End    => "End",
+                _                             => "Start",
+            };
+            embeddedModeStatus.Text = $"Mode: {modeDesc}\nAlignment: {alignDesc}";
+
+            SetButtonActive(roundedCompactModeButton, mode == WindowPageTabDesignMode.RoundedCompact);
+            SetButtonActive(rectangleModeButton,      mode == WindowPageTabDesignMode.Rectangle);
+            SetButtonActive(roundedModeButton,        mode == WindowPageTabDesignMode.Rounded);
+            SetButtonActive(chromedModeButton,        mode == WindowPageTabDesignMode.Chromed);
+            SetButtonActive(pillModeButton,           mode == WindowPageTabDesignMode.Pill);
+            SetButtonActive(outlinedModeButton,       mode == WindowPageTabDesignMode.Outlined);
+            SetButtonActive(minimalModeButton,        mode == WindowPageTabDesignMode.Minimal);
+        }
+
+        // ── Apply alignment ───────────────────────────────────────────────────
+        void ApplyEmbeddedTabAlignment(WindowPageTabAlignment alignment)
+        {
+            embeddedPageControl.TabAlignment = alignment;
+            windowPageControl.TabAlignment = alignment;
+            ApplyEmbeddedTabDesignMode(embeddedPageControl.TabDesignMode);
+
+            SetButtonActive(startAlignButton,  alignment == WindowPageTabAlignment.Start);
+            SetButtonActive(centerAlignButton, alignment == WindowPageTabAlignment.Center);
+            SetButtonActive(endAlignButton,    alignment == WindowPageTabAlignment.End);
+        }
+
+        // ── Apply text alignment ──────────────────────────────────────────────
+        void ApplyEmbeddedTextAlign(ContentAlignment align)
+        {
+            embeddedPageControl.TextAlign = align;
+            windowPageControl.TextAlign = align;
+
+            for (var buttonIndex = 0; buttonIndex < textAlignButtons.Length; buttonIndex++)
+                SetButtonActive(textAlignButtons[buttonIndex], false);
+
+            var activeButton = align switch
+            {
+                ContentAlignment.TopLeft => textAlignTopLeftButton,
+                ContentAlignment.TopCenter => textAlignTopCenterButton,
+                ContentAlignment.TopRight => textAlignTopRightButton,
+                ContentAlignment.MiddleLeft => textAlignMiddleLeftButton,
+                ContentAlignment.MiddleCenter => textAlignMiddleCenterButton,
+                ContentAlignment.MiddleRight => textAlignMiddleRightButton,
+                ContentAlignment.BottomLeft => textAlignBottomLeftButton,
+                ContentAlignment.BottomCenter => textAlignBottomCenterButton,
+                ContentAlignment.BottomRight => textAlignBottomRightButton,
+                _ => textAlignMiddleRightButton,
+            };
+
+            SetButtonActive(activeButton, true);
+        }
+
+        roundedCompactModeButton.Click += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.RoundedCompact);
+        rectangleModeButton.Click      += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Rectangle);
+        roundedModeButton.Click        += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Rounded);
+        chromedModeButton.Click        += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Chromed);
+        pillModeButton.Click           += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Pill);
+        outlinedModeButton.Click       += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Outlined);
+        minimalModeButton.Click        += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Minimal);
+
+        startAlignButton.Click  += (_, _) => ApplyEmbeddedTabAlignment(WindowPageTabAlignment.Start);
+        centerAlignButton.Click += (_, _) => ApplyEmbeddedTabAlignment(WindowPageTabAlignment.Center);
+        endAlignButton.Click    += (_, _) => ApplyEmbeddedTabAlignment(WindowPageTabAlignment.End);
+
+        textAlignTopLeftButton.Click      += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.TopLeft);
+        textAlignTopCenterButton.Click    += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.TopCenter);
+        textAlignTopRightButton.Click     += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.TopRight);
+        textAlignMiddleLeftButton.Click   += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.MiddleLeft);
+        textAlignMiddleCenterButton.Click += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.MiddleCenter);
+        textAlignMiddleRightButton.Click  += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.MiddleRight);
+        textAlignBottomLeftButton.Click   += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.BottomLeft);
+        textAlignBottomCenterButton.Click += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.BottomCenter);
+        textAlignBottomRightButton.Click  += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.BottomRight);
+
+        embeddedModeButtons.Controls.Add(minimalModeButton);
+        embeddedModeButtons.Controls.Add(outlinedModeButton);
+        embeddedModeButtons.Controls.Add(pillModeButton);
+        embeddedModeButtons.Controls.Add(minimalModeButton);
+        embeddedModeButtons.Controls.Add(outlinedModeButton);
+        embeddedModeButtons.Controls.Add(pillModeButton);
+        embeddedModeButtons.Controls.Add(chromedModeButton);
+        embeddedModeButtons.Controls.Add(roundedModeButton);
+        embeddedModeButtons.Controls.Add(rectangleModeButton);
+        embeddedModeButtons.Controls.Add(roundedCompactModeButton);
+
+        embeddedAlignmentButtons.Controls.Add(endAlignButton);
+        embeddedAlignmentButtons.Controls.Add(centerAlignButton);
+        embeddedAlignmentButtons.Controls.Add(startAlignButton);
+
+        embeddedTextAlignTopButtons.Controls.Add(textAlignTopRightButton);
+        embeddedTextAlignTopButtons.Controls.Add(textAlignTopCenterButton);
+        embeddedTextAlignTopButtons.Controls.Add(textAlignTopLeftButton);
+
+        embeddedTextAlignMiddleButtons.Controls.Add(textAlignMiddleRightButton);
+        embeddedTextAlignMiddleButtons.Controls.Add(textAlignMiddleCenterButton);
+        embeddedTextAlignMiddleButtons.Controls.Add(textAlignMiddleLeftButton);
+
+        embeddedTextAlignBottomButtons.Controls.Add(textAlignBottomRightButton);
+        embeddedTextAlignBottomButtons.Controls.Add(textAlignBottomCenterButton);
+        embeddedTextAlignBottomButtons.Controls.Add(textAlignBottomLeftButton);
+
+        embeddedTextAlignButtons.Controls.Add(embeddedTextAlignBottomButtons);
+        embeddedTextAlignButtons.Controls.Add(embeddedTextAlignMiddleButtons);
+        embeddedTextAlignButtons.Controls.Add(embeddedTextAlignTopButtons);
+
+        embeddedToolbar.Controls.Add(embeddedModeStatus);
+        embeddedToolbar.Controls.Add(embeddedTextAlignButtons);
+        embeddedToolbar.Controls.Add(textAlignmentLabel);
+        embeddedToolbar.Controls.Add(embeddedAlignmentButtons);
+        embeddedToolbar.Controls.Add(alignmentLabel);
+        embeddedToolbar.Controls.Add(embeddedModeButtons);
+        embeddedToolbar.Controls.Add(designModeLabel);
+
+        // ── Tab page factory ──────────────────────────────────────────────────
+        var overviewTabIcon    = CreateGridListIcon(new SKColor(0x22, 0xC5, 0x5E), GridListIconKind.Healthy);
+        var workflowTabIcon    = CreateGridListIcon(new SKColor(0xF5, 0x9E, 0x0B), GridListIconKind.Pulse);
+        var compositionTabIcon = CreateGridListIcon(new SKColor(0xA8, 0x55, 0xF7), GridListIconKind.Locked);
+        var settingsTabIcon    = CreateGridListIcon(new SKColor(0xEF, 0x44, 0x44), GridListIconKind.Warning);
+
+        Container CreateEmbeddedTabPage(
+            string name, string title, SKImage icon,
+            SKColor accentColor,
+            string headlineText, string bodyText,
+            params (string label, string value)[] stats)
+        {
+            var page = new Container
+            {
+                Name    = name,
+                Text    = title,
+                Image   = icon,
+                Dock    = DockStyle.Fill,
+                Padding = new Thickness(14),
+                Radius  = new Radius(0),
+                Border  = new Thickness(0),
+            };
+
+            // Hero card
+            var hero = new Element
+            {
+                Text      = headlineText,
+                Dock      = DockStyle.Top,
+                Height    = 80,
+                Padding   = new Thickness(18),
+                Margin    = new Thickness(0, 0, 0, 12),
+                Radius    = new Radius(12),
+                Border    = new Thickness(1),
+                BorderColor = accentColor.WithAlpha(130),
+                BackColor = accentColor.WithAlpha(22),
+                ForeColor = ColorScheme.ForeColor,
+                TextAlign = ContentAlignment.MiddleLeft,
+            };
+
+            // Body card
+            var body = new Element
+            {
+                Text      = bodyText,
+                Dock      = DockStyle.Top,
+                Height    = 72,
+                Padding   = new Thickness(16),
+                Margin    = new Thickness(0, 0, 0, 12),
+                Radius    = new Radius(10),
+                Border    = new Thickness(1),
+                BorderColor = ColorScheme.Outline.WithAlpha(90),
+                BackColor = ColorScheme.Surface,
+                ForeColor = ColorScheme.ForeColor,
+                TextAlign = ContentAlignment.MiddleLeft,
+            };
+
+            // Stats row
+            if (stats.Length > 0)
+            {
+                var statsRow = new Container
+                {
+                    Dock      = DockStyle.Top,
+                    Height    = 64,
+                    Margin    = new Thickness(0, 0, 0, 0),
+                    BackColor = SKColors.Transparent,
+                    Border    = new Thickness(0),
+                };
+
+                foreach (var (label, value) in stats)
+                {
+                    var statCard = new Element
+                    {
+                        Text      = $"{value}\n{label}",
+                        Dock      = DockStyle.Left,
+                        Width     = 140,
+                        Margin    = new Thickness(0, 0, 10, 0),
+                        Padding   = new Thickness(14, 10, 14, 10),
+                        Radius    = new Radius(10),
+                        Border    = new Thickness(1),
+                        BorderColor = ColorScheme.Outline.WithAlpha(80),
+                        BackColor = ColorScheme.SurfaceContainerHigh,
+                        ForeColor = ColorScheme.ForeColor,
+                        TextAlign = ContentAlignment.MiddleLeft,
+                    };
+                    statsRow.Controls.Add(statCard);
+                }
+
+                page.Controls.Add(statsRow);
+            }
+
+            page.Controls.Add(body);
+            page.Controls.Add(hero);
+            return page;
+        }
+
+        embeddedPageControl.Controls.Add(CreateEmbeddedTabPage(
+            "embeddedTabOverview", "Overview", overviewTabIcon,
+            new SKColor(0x22, 0xC5, 0x5E),
+            "Tab Strip — Embedded Mode\nThe control owns hit-testing, layout and rendering. No dependency on window chrome.",
+            "Tab alignment (Start / Center / End) shifts the whole strip. Close and new-tab buttons adjust automatically. All four design modes share the same hit-test and animation pipeline.",
+            ("Design Modes", "4"), ("Alignments", "3"), ("Transitions", "11")));
+
+        embeddedPageControl.Controls.Add(CreateEmbeddedTabPage(
+            "embeddedTabWorkflow", "Workflow", workflowTabIcon,
+            new SKColor(0xF5, 0x9E, 0x0B),
+            "Animated Page Transitions\nEvery tab switch goes through the snapshot-based transition engine.",
+            "ScaleFade, Push, Cover, Reveal, Iris and six more effects work identically in Embedded mode. Switch a design mode and the tab strip redraws on the next frame with zero layout recalculation.",
+            ("Effects", "11"), ("Easing Curves", "10"), ("Duration Range", "100 – 1 000 ms")));
+
+        embeddedPageControl.Controls.Add(CreateEmbeddedTabPage(
+            "embeddedTabComposition", "Composition", compositionTabIcon,
+            new SKColor(0xA8, 0x55, 0xF7),
+            "Nested Page Controls\nAn embedded strip can live inside any Container, panel or inspector rail.",
+            "The outer window here uses WindowChrome tabs. This inner control uses Embedded mode — both run inside the same render loop with no coordination overhead.",
+            ("Nesting Depth", "Unlimited"), ("DPI Aware", "Yes"), ("ScaleFactor", "1 × – 4 ×")));
+
+        embeddedPageControl.Controls.Add(CreateEmbeddedTabPage(
+            "embeddedTabSettings", "Settings", settingsTabIcon,
+            new SKColor(0xEF, 0x44, 0x44),
+            "Runtime Configuration\nDesign mode and alignment update live — no rebuild, no layout pass.",
+            "RoundedCompact renders a card-lift effect. Rectangle draws a full-width primary indicator. Rounded builds a segmented control. Chromed uses a top-rounded browser-tab silhouette.",
+            ("Live Swap", "Yes"), ("Repaint", "1 Frame"), ("CPU Alloc", "~0 B/frame")));
+
+        // ── Seed initial state ────────────────────────────────────────────────
+        ApplyEmbeddedTabDesignMode(embeddedPageControl.TabDesignMode);
+        ApplyEmbeddedTabAlignment(embeddedPageControl.TabAlignment);
+        ApplyEmbeddedTextAlign(embeddedPageControl.TextAlign);
+
+        embeddedPageControl.NewTabButtonClick += (_, _) =>
+            NotificationToast.Show(
+                "New Tab",
+                "A new tab was requested from the embedded tab strip.",
+                NotificationKind.Info);
+
+        embeddedPageControl.TabCloseButtonClick += (_, tabIndex) =>
+        {
+            var page         = embeddedPageControl.GetPageAt(tabIndex);
+            var tabTitle     = page?.Text ?? $"Tab {tabIndex + 1}";
+            NotificationToast.Show(
+                "Tab Closed",
+                $"\u201c{tabTitle}\u201d tab close was requested.",
+                NotificationKind.Warning);
+        };
+
+        embeddedTabsPage.Controls.Add(embeddedPageControl);
+        embeddedTabsPage.Controls.Add(embeddedToolbar);
+
+        windowPageControl.Controls.Add(embeddedTabsPage);
+        windowPageControl.PerformLayout();
+        windowPageControl.Invalidate();
     }
 
     private Button notifBtnInfo;
@@ -1499,6 +2029,10 @@ internal partial class MainWindow
     private Button notifBtnActions;
     private Button notifBtnManualProgress;
     private Button notifBtnProgressToggle;
+    private Button notifBtnThemeAuto;
+    private Button notifBtnThemeLight;
+    private Button notifBtnThemeDark;
+    private Button notifBtnThemeCustom;
 
     private void InitializeBindingDemoPage()
     {
@@ -1909,31 +2443,11 @@ internal partial class MainWindow
         };
     }
 
-    private static GridListItem CreateBindingTaskItem(BindingTaskRow row)
-    {
-        var item = new GridListItem
-        {
-            Tag = row
-        };
-
-        item.Cells.Add(new GridListCell { Text = row.Name });
-        item.Cells.Add(new GridListCell { Text = row.State });
-        item.Cells.Add(new GridListCell { Text = row.Lane });
-        item.Cells.Add(new GridListCell { Text = row.Summary });
-        return item;
-    }
-
-    private Container panel;
-    private Container panel2;
     private Container panel3;
     private Container panel4;
     private Container panel5;
     private Container panel6;
     private Container panel7;
-    private Element buttonOpenGL;
-    private Element buttonSoftware;
-    private Element buttonDirectX;
-    private Element buttonDarkMode;
     private Element visualStyleHeader;
     private Element visualStyleMotionHero;
     private Element visualStyleInteractiveCard;

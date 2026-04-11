@@ -60,32 +60,34 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         InitializeScrollBars();
         InitializeVisualStyleSystem();
         InitializeMotionEffectsSystem();
+        InitializeBackgroundImageTransitionSystem();
 
         ColorScheme.ThemeChanged += OnColorSchemeChanged;
     }
 
-    private SKImage _backgroundImage;
-    public SKImage BackgroundImage
+    private SKImage? _backgroundImage;
+    [Category("Appearance")]
+    [DefaultValue(null)]
+    public SKImage? BackgroundImage
     {
-        get => _backgroundImage;
+        get => GetDisplayedBackgroundImage();
         set
         {
-            if (_backgroundImage == value) return;
-            _backgroundImage = value;
-            OnBackgroundImageChanged(EventArgs.Empty);
-            Invalidate();
-        }
-    }
+            if (!_useBackgroundImageCollection && ReferenceEquals(_backgroundImage, value))
+                return;
 
-    private ContentAlignment _imageAlign = ContentAlignment.MiddleCenter;
-    public ContentAlignment ImageAlign
-    {
-        get => _imageAlign;
-        set
-        {
-            if (_imageAlign == value) return;
-            _imageAlign = value;
-            OnImageAlignChanged(EventArgs.Empty);
+            var previousImage = GetDisplayedBackgroundImage();
+            var previousFrame = GetDisplayedBackgroundImageFrame();
+            _backgroundImage = value;
+
+            _backgroundImages = Array.Empty<BackgroundImageFrame>();
+            _backgroundImageIndex = 0;
+            _useBackgroundImageCollection = false;
+
+            ApplyBackgroundImageChange(previousImage, _backgroundImage, 1, allowTransition: false);
+            OnBackgroundImageChanged(EventArgs.Empty);
+            NotifyBackgroundImageMetadataChange(previousFrame);
+            UpdateBackgroundImageSlideshowState();
             Invalidate();
         }
     }
@@ -103,30 +105,6 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
-    private bool _rightToLeft = false;
-    public bool RightToLeft
-    {
-        get => _rightToLeft;
-        set
-        {
-            if (_rightToLeft == value) return;
-            _rightToLeft = value;
-            OnRightToLeftChanged(EventArgs.Empty);
-            Invalidate();
-        }
-    }
-
-    private SKSize _autoScaleDimensions;
-    public SKSize AutoScaleDimensions
-    {
-        get => _autoScaleDimensions;
-        set
-        {
-            if (_autoScaleDimensions == value) return;
-            _autoScaleDimensions = value;
-        }
-    }
-
     private AutoScaleMode _autoScaleMode = AutoScaleMode.None;
     public AutoScaleMode AutoScaleMode
     {
@@ -139,8 +117,6 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
     public bool Disposing { get; set; }
-    public bool CheckForIllegalCrossThreadCalls { get; set; }
-    public bool InvokeRequired => false;
 
     protected ScrollBar? _vScrollBar;
     protected ScrollBar? _hScrollBar;
@@ -168,6 +144,19 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             if (_autoScrollMargin == value) return;
             _autoScrollMargin = value;
             PerformLayout();
+        }
+    }
+
+    private ContentAlignment _imageAlign = ContentAlignment.MiddleCenter;
+    public ContentAlignment ImageAlign
+    {
+        get => _imageAlign;
+        set
+        {
+            if (_imageAlign == value) return;
+            _imageAlign = value;
+            OnImageAlignChanged(EventArgs.Empty);
+            Invalidate();
         }
     }
 
@@ -567,7 +556,6 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     internal static IDisposable PushGpuContext(GRContext? context)
     {
         var prior = s_currentGpuContext;
-        s_currentGpuContext = context;
         return new GpuContextScope(prior);
     }
 
@@ -1425,6 +1413,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     public event EventHandler? DpiChanged;
     public event EventHandler? BackgroundImageChanged;
+    public event EventHandler? BackgroundImageCaptionChanged;
     public event EventHandler? BackgroundImageLayoutChanged;
     public event EventHandler? ImageAlignChanged;
     public event EventHandler? RightToLeftChanged;
@@ -2060,6 +2049,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                     targetCanvas.DrawRect(elementRect, paint);
             }
 
+            RenderBackgroundImages(targetCanvas, elementRect);
+
             RenderMotionEffects(targetCanvas, elementRect);
 
             OnPaint(targetCanvas);
@@ -2458,6 +2449,11 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     protected virtual void OnBackgroundImageChanged(EventArgs e)
     {
         BackgroundImageChanged?.Invoke(this, e);
+    }
+
+    protected virtual void OnBackgroundImageCaptionChanged(EventArgs e)
+    {
+        BackgroundImageCaptionChanged?.Invoke(this, e);
     }
 
     protected virtual void OnBackgroundImageLayoutChanged(EventArgs e)
@@ -2899,6 +2895,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     internal virtual void OnVisibleChanged(EventArgs e)
     {
         VisibleChanged?.Invoke(this, e);
+        UpdateBackgroundImageSlideshowState();
         RefreshVisualStylesForStateChange();
         Invalidate();
         if (Parent is WindowBase parentWindow) parentWindow.PerformLayout();
@@ -3358,6 +3355,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         if (IsDisposed)
             return;
 
+        Disposing = true;
+
         if (disposing)
         {
             // Dispose managed resources.
@@ -3371,6 +3370,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
             DisposeMotionEffectsSystem();
             DisposeVisualStyleSystem();
+            DisposeBackgroundImageTransitionSystem();
             _font?.Dispose();
             _cursor?.Dispose();
 
@@ -3383,6 +3383,10 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     public void Dispose()
     {
+        if (IsDisposed)
+            return;
+
+        Disposing = true;
         Dispose(true);
         GC.SuppressFinalize(this);
     }
@@ -3394,6 +3398,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     ~ElementBase()
     {
+        Disposing = true;
         Dispose(false);
     }
 

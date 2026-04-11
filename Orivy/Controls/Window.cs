@@ -18,26 +18,11 @@ public partial class Window : WindowBase
 {
     private const float TAB_DRAG_THRESHOLD = 4f;
 
-    public enum TabDesingMode
-    {
-        Rectangle,
-        Rounded,
-        Chromed
-    }
-
-    private const int TAB_HEADER_PADDING = 9;
-    private const int TAB_INDICATOR_HEIGHT = 3;
-
     private const float HOVER_ANIMATION_SPEED = 0.1f;
-    private const double TAB_INDICATOR_ANIMATION_SPEED = 0.10; // hız artırıldı, gecikme azaltıldı
 
     // Hot-path caches (avoid per-frame LINQ allocations)
     private readonly Dictionary<string, SKPaint> _paintCache = new();
     private readonly Dictionary<string, SKFont> _fontCache = new();
-    // scratch buffer used by UpdateTabRects
-    private readonly List<float> _tabWidthBuffer = new();
-    // reusable temporary path for rounded rectangles
-    private readonly SKPath _tempPath = new SKPath();
 
 
     /// <summary>
@@ -70,28 +55,8 @@ public partial class Window : WindowBase
     /// </summary>
     private readonly AnimationManager minBoxHoverAnimationManager;
 
-    /// <summary>
-    ///     new Tab hover animation manager
-    /// </summary>
-    private readonly AnimationManager newTabHoverAnimationManager;
-
-    /// <summary>
-    ///     Tab Area hover animation manager
-    /// </summary>
-    private readonly AnimationManager pageAreaAnimationManager;
-
-    /// <summary>
-    ///     tab area animation manager
-    /// </summary>
-    private readonly AnimationManager tabCloseHoverAnimationManager;
-
     // Collection of hover animation managers to simplify bulk operations
     private readonly List<AnimationManager> _hoverAnimationManagers = new();
-
-    /// <summary>
-    ///     The rectangle of extend box
-    /// </summary>
-    private SkiaSharp.SKRect _closeTabBoxRect;
 
     /// <summary>
     ///     The control box left value
@@ -102,8 +67,6 @@ public partial class Window : WindowBase
     ///     The rectangle of control box
     /// </summary>
     private SkiaSharp.SKRect _controlBoxRect;
-
-    private bool _drawTabIcons;
 
     /// <summary>
     ///     Whether to show the title bar of the form
@@ -141,7 +104,7 @@ public partial class Window : WindowBase
 
     private float _iconWidth = 44;
 
-    private bool _inCloseBox, _inMaxBox, _inMinBox, _inExtendBox, _inTabCloseBox, _inNewTabBox, _inFormMenuBox;
+    private bool _inCloseBox, _inMaxBox, _inMinBox, _inExtendBox, _inFormMenuBox;
 
     /// <summary>
     ///     The starting location when form drag begins
@@ -174,27 +137,14 @@ public partial class Window : WindowBase
     /// </summary>
     private SKPoint _mouseOffset;
 
-    /// <summary>
-    ///     The rectangle of extend box
-    /// </summary>
-    private SkiaSharp.SKRect _newTabBoxRect;
-
-    private bool _newTabButton;
     private bool _popupMouseInteractionActive;
     private bool _suppressNextPopupClick;
 
     private long _stickyBorderTime = 5000000;
 
     private float _symbolSize = 24;
-
-    private bool _tabCloseButton;
     private int _pendingTabSelectionIndex = -1;
     private SKPoint _pendingTabMouseDownScreen;
-
-    /// <summary>
-    ///     Tab desing mode
-    /// </summary>
-    private TabDesingMode _tabDesingMode = TabDesingMode.Rectangle;
 
     /// <summary>
     ///     The title height
@@ -204,14 +154,17 @@ public partial class Window : WindowBase
     private WindowPageControl _windowPageControl;
     private SKPoint animationSource;
 
+    private bool UsesWindowChromeTabs =>
+        _windowPageControl != null &&
+        _windowPageControl.Count > 0 &&
+        _windowPageControl.TabMode == WindowPageTabMode.WindowChrome;
+
+    private bool ShowWindowPageTabCloseButton => UsesWindowChromeTabs && _windowPageControl.TabCloseButton;
+
     /// <summary>
     ///     Whether to trigger the stay event on the edge of the display
     /// </summary>
     private bool IsStayAtTopBorder;
-
-    private List<SkiaSharp.SKRect> pageRect;
-
-    private int previousSelectedPageIndex;
 
     /// <summary>
     ///     Whether to show the title bar of the form
@@ -242,28 +195,19 @@ public partial class Window : WindowBase
         enableFullDraggable = false;
         ColorScheme.ThemeChanged += OnThemeChanged;
 
-        // allocate pageRect once to avoid repeated allocations
-        pageRect = [];
-
         // create individual hover managers then register for bulk operations
-        pageAreaAnimationManager = CreateHoverAnimation(TAB_INDICATOR_ANIMATION_SPEED);
         minBoxHoverAnimationManager = CreateHoverAnimation();
         maxBoxHoverAnimationManager = CreateHoverAnimation();
         closeBoxHoverAnimationManager = CreateHoverAnimation();
         extendBoxHoverAnimationManager = CreateHoverAnimation();
-        tabCloseHoverAnimationManager = CreateHoverAnimation();
-        newTabHoverAnimationManager = CreateHoverAnimation();
         formMenuHoverAnimationManager = CreateHoverAnimation();
 
         _hoverAnimationManagers.AddRange(
         [
-            pageAreaAnimationManager,
             minBoxHoverAnimationManager,
             maxBoxHoverAnimationManager,
             closeBoxHoverAnimationManager,
             extendBoxHoverAnimationManager,
-            tabCloseHoverAnimationManager,
-            newTabHoverAnimationManager,
             formMenuHoverAnimationManager
         ]);
 
@@ -324,41 +268,6 @@ public partial class Window : WindowBase
         set
         {
             _extendBox = value;
-            CalcSystemBoxPos();
-            Invalidate();
-        }
-    }
-
-    [DefaultValue(false)]
-    public bool DrawTabIcons
-    {
-        get => _drawTabIcons;
-        set
-        {
-            _drawTabIcons = value;
-            Invalidate();
-        }
-    }
-
-    [DefaultValue(false)]
-    public bool TabCloseButton
-    {
-        get => _tabCloseButton;
-        set
-        {
-            _tabCloseButton = value;
-            CalcSystemBoxPos();
-            Invalidate();
-        }
-    }
-
-    [DefaultValue(false)]
-    public bool NewTabButton
-    {
-        get => _newTabButton;
-        set
-        {
-            _newTabButton = value;
             CalcSystemBoxPos();
             Invalidate();
         }
@@ -519,19 +428,6 @@ public partial class Window : WindowBase
         }
     }
 
-    public TabDesingMode TitleTabDesingMode
-    {
-        get => _tabDesingMode;
-        set
-        {
-            if (_tabDesingMode == value)
-                return;
-
-            _tabDesingMode = value;
-            Invalidate();
-        }
-    }
-
     /// <summary>
     ///     Draw hatch brush on form
     /// </summary>
@@ -571,13 +467,12 @@ public partial class Window : WindowBase
             if (_windowPageControl == null)
                 return;
 
-            previousSelectedPageIndex = _windowPageControl.SelectedIndex;
-
             _windowPageControl.SelectedIndexChanged += (sender, previousIndex) =>
             {
-                previousSelectedPageIndex = previousIndex;
-                pageAreaAnimationManager.SetProgress(0);
-                pageAreaAnimationManager.StartNewAnimation(AnimationDirection.In);
+                if (_windowPageControl == null)
+                    return;
+
+                _windowPageControl.HandleWindowChromeSelectionChanged(previousIndex);
             };
             _windowPageControl.ControlAdded += delegate { Invalidate(); };
             _windowPageControl.ControlRemoved += delegate { Invalidate(); };
@@ -596,16 +491,6 @@ public partial class Window : WindowBase
     ///     If extend box clicked invoke the event
     /// </summary>
     public event EventHandler OnExtendBoxClick;
-
-    /// <summary>
-    ///     If extend box clicked invoke the event
-    /// </summary>
-    public event EventHandler<int> OnCloseTabBoxClick;
-
-    /// <summary>
-    ///     If extend box clicked invoke the event
-    /// </summary>
-    public event EventHandler OnNewTabBoxClick;
 
     protected override bool ShouldScaleSizeOnDpiChange(float newDpi, float oldDpi)
     {
@@ -635,8 +520,8 @@ public partial class Window : WindowBase
 
             // Step 3: Update window chrome (title bar buttons, tabs)
             CalcSystemBoxPos();
-            if (_windowPageControl != null && _windowPageControl.Count > 0)
-                UpdateTabRects();
+            if (UsesWindowChromeTabs)
+                _windowPageControl.InvalidateWindowChromeLayout();
 
             // Step 4: Final invalidation to ensure complete redraw
             NeedsFullChildRedraw = true;
@@ -709,8 +594,8 @@ public partial class Window : WindowBase
             InvalidateMeasureRecursive();
             PerformLayout();
             CalcSystemBoxPos();
-            if (_windowPageControl != null && _windowPageControl.Count > 0)
-                UpdateTabRects();
+            if (UsesWindowChromeTabs)
+                _windowPageControl.InvalidateWindowChromeLayout();
             Invalidate();
         }
         catch
@@ -750,7 +635,7 @@ public partial class Window : WindowBase
         if (clientPt.Y >= _titleBarBottomDPI)
             return false;
 
-        if (IsPointOverTabHeader(clientPt))
+        if (UsesWindowChromeTabs && IsPointOverTabHeader(clientPt))
             return false;
 
         // ignore control button areas
@@ -766,10 +651,10 @@ public partial class Window : WindowBase
         if (_extendBoxRect.Contains(clientPt))
             return false;
 
-        if (_tabCloseButton && _closeTabBoxRect.Contains(clientPt))
+        if (UsesWindowChromeTabs && _windowPageControl.IsPointOverWindowChromeCloseButton(clientPt, CreateWindowChromeLayoutContext()))
             return false;
 
-        if (_newTabButton && _newTabBoxRect.Contains(clientPt))
+        if (UsesWindowChromeTabs && _windowPageControl.IsPointOverWindowChromeNewTabButton(clientPt, CreateWindowChromeLayoutContext()))
             return false;
 
         // if the menu glyph is visible we must exclude its bounds from the
@@ -848,21 +733,10 @@ public partial class Window : WindowBase
     {
         tabIndex = -1;
 
-        if (_windowPageControl == null || _windowPageControl.Count == 0)
+        if (!UsesWindowChromeTabs)
             return false;
 
-        UpdateTabRects();
-
-        for (var i = 0; i < pageRect.Count; i++)
-        {
-            if (pageRect[i].Contains(point))
-            {
-                tabIndex = i;
-                return true;
-            }
-        }
-
-        return false;
+        return _windowPageControl.TryGetWindowChromeTabIndexAtPoint(point, CreateWindowChromeLayoutContext(), out tabIndex);
     }
 
     private bool IsPointOverTabHeader(SKPoint point)
@@ -1008,25 +882,21 @@ public partial class Window : WindowBase
                 OnFormMenuClick?.Invoke(this, EventArgs.Empty);
         }
 
-        if (_inTabCloseBox)
+        if (UsesWindowChromeTabs && _windowPageControl.IsPointOverWindowChromeCloseButton(e.Location, CreateWindowChromeLayoutContext()))
         {
-            _inTabCloseBox = false;
-
-            OnCloseTabBoxClick?.Invoke(this, _windowPageControl.SelectedIndex);
+            _windowPageControl.RaiseTabCloseButtonClick(_windowPageControl.SelectedIndex);
         }
 
-        if (_inNewTabBox)
+        if (UsesWindowChromeTabs && _windowPageControl.IsPointOverWindowChromeNewTabButton(e.Location, CreateWindowChromeLayoutContext()))
         {
-            _inNewTabBox = false;
-
-            OnNewTabBoxClick?.Invoke(this, EventArgs.Empty);
+            _windowPageControl.RaiseNewTabButtonClick();
         }
 
         if (_formMoveMouseDown && !CursorScreenPosition.Equals(_mouseOffset))
             return;
 
-        if (_tabCloseButton && e.Button == MouseButtons.Middle && TryGetTabIndexAtPoint(e.Location, out var middleClickTabIndex))
-            OnCloseTabBoxClick?.Invoke(null, middleClickTabIndex);
+        if (UsesWindowChromeTabs && ShowWindowPageTabCloseButton && e.Button == MouseButtons.Middle && TryGetTabIndexAtPoint(e.Location, out var middleClickTabIndex))
+            _windowPageControl.RaiseTabCloseButtonClick(middleClickTabIndex);
     }
 
     internal override void OnMouseDown(MouseEventArgs e)
@@ -1045,9 +915,12 @@ public partial class Window : WindowBase
         // Check this BEFORE hit-testing children so that a misplaced child
         // (e.g. during the first layout pass) cannot steal the drag.
         var inTitleArea = ShowTitle && e.Y < Padding.Top;
-        var inTabHeader = TryGetTabIndexAtPoint(e.Location, out var clickedTabIndex);
+        var clickedTabIndex = -1;
+        var inTabHeader = UsesWindowChromeTabs && TryGetTabIndexAtPoint(e.Location, out clickedTabIndex);
         var inControlBox = _inCloseBox || _inMaxBox || _inMinBox || _inExtendBox
-                           || _inTabCloseBox || _inNewTabBox || _inFormMenuBox;
+                   || (UsesWindowChromeTabs && (_windowPageControl.IsPointOverWindowChromeCloseButton(e.Location, CreateWindowChromeLayoutContext()) ||
+                                               _windowPageControl.IsPointOverWindowChromeNewTabButton(e.Location, CreateWindowChromeLayoutContext())))
+                   || _inFormMenuBox;
 
         if (e.Button == MouseButtons.Left && inTabHeader && !inControlBox)
         {
@@ -1095,13 +968,13 @@ public partial class Window : WindowBase
         var inTitleAreaDbl = ShowTitle && MaximizeBox && e.Y < Padding.Top;
         if (inTitleAreaDbl)
         {
-            var inTabHeaderDbl = IsPointOverTabHeader(e.Location);
+            var inTabHeaderDbl = UsesWindowChromeTabs && IsPointOverTabHeader(e.Location);
             var inControlBoxDbl = _controlBoxRect.Contains(e.Location)
                                   || _maximizeBoxRect.Contains(e.Location)
                                   || _minimizeBoxRect.Contains(e.Location)
                                   || _extendBoxRect.Contains(e.Location)
-                                  || (_tabCloseButton && _closeTabBoxRect.Contains(e.Location))
-                                  || (_newTabButton && _newTabBoxRect.Contains(e.Location))
+                                  || (UsesWindowChromeTabs && _windowPageControl.IsPointOverWindowChromeCloseButton(e.Location, CreateWindowChromeLayoutContext()))
+                                  || (UsesWindowChromeTabs && _windowPageControl.IsPointOverWindowChromeNewTabButton(e.Location, CreateWindowChromeLayoutContext()))
                                   || (showMenuInsteadOfIcon && _formMenuRect.Contains(e.Location));
 
             if (!inControlBoxDbl && !inTabHeaderDbl)
@@ -1174,7 +1047,7 @@ public partial class Window : WindowBase
         ReleaseCapture();
         _formMoveMouseDown = false;
 
-        if (shouldSelectPendingTab && _windowPageControl != null && pendingTabSelectionIndex < _windowPageControl.Count)
+        if (shouldSelectPendingTab && UsesWindowChromeTabs && _windowPageControl != null && pendingTabSelectionIndex < _windowPageControl.Count)
         {
             _windowPageControl.SelectedIndex = pendingTabSelectionIndex;
         }
@@ -1294,10 +1167,8 @@ public partial class Window : WindowBase
             var inMinBox = _minimizeBoxRect.Contains(e.Location.X, e.Location.Y);
             var inExtendBox = _extendBoxRect.Contains(e.Location.X, e.Location.Y);
             var inFormMenuBox = showMenuInsteadOfIcon && _formMenuRect.Contains(e.Location.X, e.Location.Y);
-            var inCloseTabBox = _tabCloseButton && _closeTabBoxRect.Contains(e.Location.X, e.Location.Y);
-            var inNewTabBox = _newTabButton && _newTabBoxRect.Contains(e.Location.X, e.Location.Y);
 
-            var isChange = false;
+            var isChange = UsesWindowChromeTabs && _windowPageControl.UpdateWindowChromeHoverState(e.Location, CreateWindowChromeLayoutContext());
 
             if (inCloseBox != _inCloseBox)
             {
@@ -1327,20 +1198,6 @@ public partial class Window : WindowBase
                 SetHoverState(extendBoxHoverAnimationManager, inExtendBox);
             }
 
-            if (inCloseTabBox != _inTabCloseBox)
-            {
-                _inTabCloseBox = inCloseTabBox;
-                isChange = true;
-                SetHoverState(tabCloseHoverAnimationManager, inCloseTabBox);
-            }
-
-            if (inNewTabBox != _inNewTabBox)
-            {
-                _inNewTabBox = inNewTabBox;
-                isChange = true;
-                SetHoverState(newTabHoverAnimationManager, inNewTabBox);
-            }
-
             if (inFormMenuBox != _inFormMenuBox)
             {
                 _inFormMenuBox = inFormMenuBox;
@@ -1359,7 +1216,10 @@ public partial class Window : WindowBase
     internal override void OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
-        _inExtendBox = _inCloseBox = _inMaxBox = _inMinBox = _inTabCloseBox = _inNewTabBox = _inFormMenuBox = false;
+        _inExtendBox = _inCloseBox = _inMaxBox = _inMinBox = _inFormMenuBox = false;
+
+        if (UsesWindowChromeTabs)
+            _windowPageControl.ResetWindowChromeHoverState();
 
         // End all hover animations in a single loop to avoid repetition
         EndAllHoverAnimations();
@@ -1444,6 +1304,8 @@ public partial class Window : WindowBase
             canvas.Clear(ColorScheme.Surface);
         }
 
+        RenderBackgroundImages(canvas, SKRect.Create(0f, 0f, Width, Height));
+
         if (!ShowTitle)
         {
             return;
@@ -1451,6 +1313,21 @@ public partial class Window : WindowBase
 
         var foreColor = ColorScheme.ForeColor;
         var hoverColor = ColorScheme.BorderColor;
+        var effectiveWindowChromeTitleColor = titleColor;
+        var hasGradientTitle = _gradient.Length == 2 &&
+                               !(_gradient[0] == SKColors.Transparent && _gradient[1] == SKColors.Transparent);
+
+        if (effectiveWindowChromeTitleColor == SKColor.Empty && !hasGradientTitle)
+        {
+            var fullBounds = SKRect.Create(0f, 0f, Width, Height);
+            var titleSampleBounds = SKRect.Create(0f, _titleBarTopDPI, Width, _titleHeightDPI);
+            if (TryGetBackgroundImageSampleColor(fullBounds, titleSampleBounds, out var sampledTitleColor))
+            {
+                effectiveWindowChromeTitleColor = sampledTitleColor;
+                foreColor = sampledTitleColor.Determine();
+                hoverColor = foreColor.WithAlpha(20);
+            }
+        }
 
         if (FullDrawHatch)
         {
@@ -1467,8 +1344,7 @@ public partial class Window : WindowBase
             using var paint = new SKPaint { Color = titleColor };
             canvas.DrawRect(0, _titleBarTopDPI, Width, _titleHeightDPI, paint);
         }
-        else if (_gradient.Length == 2 &&
-                 !(_gradient[0] == SKColors.Transparent && _gradient[1] == SKColors.Transparent))
+        else if (hasGradientTitle)
         {
             // Gradient mode
             using var shader = SKShader.CreateLinearGradient(
@@ -1692,7 +1568,7 @@ public partial class Window : WindowBase
             canvas.DrawImage(image, iconRect);
         }
 
-        if (_windowPageControl == null || _windowPageControl.Count == 0)
+        if (!UsesWindowChromeTabs)
         {
             var baseFont = Font;
             var font = GetOrCreateFont("title", () => new SKFont(baseFont.Typeface ?? SKTypeface.Default)
@@ -1716,247 +1592,11 @@ public partial class Window : WindowBase
             TextRenderer.DrawText(canvas, Text, textX, textY, SKTextAlign.Left, font, textPaint);
         }
 
-        if (_windowPageControl != null && _windowPageControl.Count > 0)
+        WindowPageChromeLayoutContext? windowChromeLayoutContext = null;
+        if (UsesWindowChromeTabs)
         {
-            var isPageTransitionAnimating = pageAreaAnimationManager.IsAnimating();
-
-            if (!isPageTransitionAnimating || pageRect == null ||
-                pageRect.Count != _windowPageControl.Count)
-                UpdateTabRects();
-
-            var transitionProgress = isPageTransitionAnimating ? pageAreaAnimationManager.GetProgress() : 1d;
-
-            // fix desing time error
-            if (_windowPageControl.SelectedIndex <= -1 || _windowPageControl.SelectedIndex >= _windowPageControl.Count)
-                return;
-
-            // Animate page indicator
-            if (!isPageTransitionAnimating)
-            {
-                previousSelectedPageIndex = _windowPageControl.SelectedIndex;
-            }
-            else if (previousSelectedPageIndex >= pageRect.Count)
-            {
-                previousSelectedPageIndex = _windowPageControl.SelectedIndex;
-            }
-
-            var previousSelectedPageIndexIfHasOne = previousSelectedPageIndex == -1
-                ? _windowPageControl.SelectedIndex
-                : previousSelectedPageIndex;
-            var previousActivePageRect = pageRect[previousSelectedPageIndexIfHasOne];
-            var activePageRect = pageRect[_windowPageControl.SelectedIndex];
-
-            var y = activePageRect.Bottom - 2;
-            var x = previousActivePageRect.Left + (activePageRect.Left - previousActivePageRect.Left) * (float)transitionProgress;
-            var width = previousActivePageRect.Width +
-                        (activePageRect.Width - previousActivePageRect.Width) * (float)transitionProgress;
-
-            if (_tabDesingMode == TabDesingMode.Rectangle)
-            {
-                var tabPaint = GetOrCreatePaint("tabBg", () => new SKPaint { IsAntialias = true });
-                tabPaint.Color = ColorScheme.Surface.InterpolateColor(hoverColor, 0.15f);
-
-                canvas.DrawRect(x, _titleBarTopDPI, width, _titleHeightDPI, tabPaint);
-
-                var indicatorPaint = GetOrCreatePaint("tabIndicator", () => new SKPaint { Color = SKColors.DodgerBlue, IsAntialias = true });
-                canvas.DrawRect(x, _titleBarBottomDPI - TAB_INDICATOR_HEIGHT, width, TAB_INDICATOR_HEIGHT, indicatorPaint);
-            }
-            else if (_tabDesingMode == TabDesingMode.Rounded)
-            {
-                if (titleColor != SKColor.Empty && !titleColor.IsDark())
-                    hoverColor = foreColor.WithAlpha(60);
-
-                var tabPaint = GetOrCreatePaint("tabBg", () => new SKPaint { IsAntialias = true });
-                tabPaint.Color = ColorScheme.Surface.InterpolateColor(hoverColor, 0.2f);
-
-                var tabRect = new SKRect(x, _titleBarTopDPI + 6, x + width, _titleBarBottomDPI);
-                var radius = 9 * ScaleFactor;
-
-                _tempPath.Reset();
-                _tempPath.AddRoundRect(tabRect, radius, radius);
-                canvas.DrawPath(_tempPath, tabPaint);
-            }
-            else // Chromed
-            {
-                if (titleColor != SKColor.Empty && !titleColor.IsDark())
-                    hoverColor = foreColor.WithAlpha(60);
-
-                var tabPaint = GetOrCreatePaint("tabBg", () => new SKPaint { IsAntialias = true });
-                tabPaint.Color = ColorScheme.Surface.InterpolateColor(hoverColor, 0.2f);
-
-                var tabRect = new SKRect(x, _titleBarTopDPI + 5, x + width, _titleBarBottomDPI - 7);
-                var radius = 12;
-
-                _tempPath.Reset();
-                _tempPath.AddRoundRect(tabRect, radius, radius);
-                canvas.DrawPath(_tempPath, tabPaint);
-            }
-            // Draw tab headers
-            for (var currentTabIndex = 0; currentTabIndex < _windowPageControl.Count; currentTabIndex++)
-            {
-                var page = _windowPageControl.GetPageAt(currentTabIndex);
-                if (page == null)
-                    continue;
-
-                var rect = pageRect[currentTabIndex];
-                var closeIconSize = 24 * ScaleFactor;
-
-                if (_drawTabIcons)
-                {
-                    var baseFont = Font;
-                    var font = GetOrCreateFont("tabIcon", () => new SKFont(baseFont.Typeface ?? SKTypeface.Default)
-                    {
-                        Subpixel = true,
-                        Edging = SKFontEdging.SubpixelAntialias,
-                        Hinting = SKFontHinting.Full
-                    });
-                    font.Size = 12f.Topx(this);
-
-                    var textPaint = GetOrCreatePaint("tabText", () => new SKPaint { IsAntialias = true });
-                    textPaint.Color = foreColor;
-
-                    var textY = _titleBarCenterYDPI + Math.Abs(font.Metrics.Ascent + font.Metrics.Descent) / 2;
-                    var iconSize = 16f * ScaleFactor;
-                    var iconSpacing = 8f * ScaleFactor;
-                    var leadingInset = TAB_HEADER_PADDING * ScaleFactor;
-                    var trailingInset = _tabCloseButton ? closeIconSize : 0f;
-                    var hasPageIcon = page.Image != null;
-
-                    if (hasPageIcon)
-                    {
-                        var iconRect = SKRect.Create(
-                            rect.Left + leadingInset,
-                            _titleBarCenterYDPI - iconSize / 2f,
-                            iconSize,
-                            iconSize);
-                        canvas.DrawImage(page.Image, iconRect);
-                        leadingInset += iconSize + iconSpacing;
-                    }
-
-                    var textX = rect.MidX;
-                    if (hasPageIcon || _tabCloseButton)
-                    {
-                        var textWidth = Math.Max(0, rect.Width - leadingInset - trailingInset - TAB_HEADER_PADDING * ScaleFactor);
-                        var adjustedRect = SKRect.Create(rect.Left + leadingInset, rect.Top, textWidth, rect.Height);
-                        textX = adjustedRect.Width > 0 ? adjustedRect.MidX : rect.MidX;
-                    }
-
-                    TextRenderer.DrawText(canvas, page.Text, textX, textY, SKTextAlign.Center, font, textPaint);
-                }
-                else
-                {
-                    var baseFont = Font;
-                    var font = GetOrCreateFont("tab", () => new SKFont(baseFont.Typeface ?? SKTypeface.Default)
-                    {
-                        Subpixel = true,
-                        Edging = SKFontEdging.SubpixelAntialias,
-                        Hinting = SKFontHinting.Full
-                    });
-                    font.Size = 9f.Topx(this);
-
-                    var textPaint = GetOrCreatePaint("tabText", () => new SKPaint { IsAntialias = true });
-                    textPaint.Color = foreColor;
-
-                    var bounds = new SKRect();
-                    font.MeasureText(page.Text, out bounds);
-                    var textX = rect.Location.X + rect.Width / 2;
-                    var textY = _titleBarCenterYDPI + Math.Abs(font.Metrics.Ascent + font.Metrics.Descent) / 2;
-                    TextRenderer.DrawText(canvas, page.Text, textX, textY, SKTextAlign.Center, font, textPaint);
-                }
-            }
-
-            // Tab close button
-            if (_tabCloseButton)
-            {
-                var size = 20 * ScaleFactor;
-                var closeHoverColor = hoverColor;
-
-                using var buttonPaint = new SKPaint
-                {
-                    Color = closeHoverColor.WithAlpha((byte)(tabCloseHoverAnimationManager.GetProgress() * 60)),
-                    IsAntialias = true
-                };
-
-                _closeTabBoxRect = SKRect.Create(
-                    x + width - TAB_HEADER_PADDING / 2 - size,
-                    _titleBarCenterYDPI - size / 2,
-                    size,
-                    size);
-                var buttonRect = _closeTabBoxRect;
-
-                canvas.DrawCircle(buttonRect.MidX, buttonRect.MidY, size / 2, buttonPaint);
-
-                using var linePaint = new SKPaint
-                {
-                    Color = foreColor,
-                    StrokeWidth = 1f * ScaleFactor,
-                    StrokeCap = SKStrokeCap.Round
-                };
-
-                size = 4f * ScaleFactor;
-                canvas.DrawLine(
-                    buttonRect.MidX - size,
-                    buttonRect.MidY - size,
-                    buttonRect.MidX + size,
-                    buttonRect.MidY + size,
-                    linePaint);
-
-                canvas.DrawLine(
-                    buttonRect.MidX - size,
-                    buttonRect.MidY + size,
-                    buttonRect.MidX + size,
-                    buttonRect.MidY - size,
-                    linePaint);
-            }
-
-            // New tab button
-            if (_newTabButton)
-            {
-                var size = 24 * ScaleFactor;
-                var newHoverColor = hoverColor.WithAlpha(20);
-
-                using var buttonPaint = new SKPaint
-                {
-                    Color = newHoverColor.WithAlpha((byte)(newTabHoverAnimationManager.GetProgress() *
-                                                           newHoverColor.Alpha)),
-                    IsAntialias = true
-                };
-
-                var lastTabRect = pageRect[pageRect.Count - 1];
-                _newTabBoxRect = SKRect.Create(
-                    lastTabRect.Left + lastTabRect.Width + size / 2,
-                    _titleBarCenterYDPI - size / 2,
-                    size,
-                    size);
-                var buttonRect = _newTabBoxRect;
-
-                using var path = new SKPath();
-                path.AddRoundRect(buttonRect, 4, 4);
-                canvas.DrawPath(path, buttonPaint);
-
-                using var linePaint = new SKPaint
-                {
-                    Color = foreColor,
-                    StrokeWidth = 1.1f * ScaleFactor,
-                    IsAntialias = true,
-                    StrokeCap = SKStrokeCap.Round
-                };
-
-                size = 6 * ScaleFactor;
-                canvas.DrawLine(
-                    buttonRect.MidX - size,
-                    buttonRect.MidY,
-                    buttonRect.MidX + size,
-                    buttonRect.MidY,
-                    linePaint);
-
-                canvas.DrawLine(
-                    buttonRect.MidX,
-                    buttonRect.MidY - size,
-                    buttonRect.MidX,
-                    buttonRect.MidY + size,
-                    linePaint);
-            }
+            windowChromeLayoutContext = CreateWindowChromeLayoutContext();
+            _windowPageControl.DrawWindowChromeTabs(canvas, windowChromeLayoutContext.Value, foreColor, hoverColor, effectiveWindowChromeTitleColor);
         }
 
         // Title border
@@ -1967,11 +1607,12 @@ public partial class Window : WindowBase
                 StrokeWidth = 1,
                 IsAntialias = true
             });
-            borderPaint.Color = titleColor != SKColor.Empty
-                ? titleColor.Determine().WithAlpha(30)
+            borderPaint.Color = effectiveWindowChromeTitleColor != SKColor.Empty
+                ? effectiveWindowChromeTitleColor.Determine().WithAlpha(30)
                 : ColorScheme.BorderColor;
 
-            canvas.DrawLine(Width, _titleBarBottomDPI - 1, 0, _titleBarBottomDPI - 1, borderPaint);
+            var borderY = _titleBarBottomDPI - 1;
+            canvas.DrawLine(Width, borderY, 0, borderY, borderPaint);
         }
     }
 
@@ -2001,17 +1642,8 @@ public partial class Window : WindowBase
         Invalidate();
     }
 
-    private void UpdateTabRects()
+    private WindowPageChromeLayoutContext CreateWindowChromeLayoutContext()
     {
-        // reuse existing list to avoid allocating every time
-        if (pageRect == null)
-            pageRect = new List<SKRect>();
-        else
-            pageRect.Clear();
-
-        if (_windowPageControl == null || _windowPageControl.Count == 0)
-            return;
-
         var leadingInset = _titleBarLeftInsetDPI;
         var trailingInset = _titleBarRightInsetDPI;
         // determine if we actually need the large left inset that was previously hard-coded to 44*scale.
@@ -2038,66 +1670,8 @@ public partial class Window : WindowBase
         var availableWidth = Width - occupiedWidth;
         var maxSize = 250f * ScaleFactor;
 
-        var baseFont = Font;
-        var font = GetOrCreateFont("tabMeasure", () => new SKFont(baseFont.Typeface ?? SKTypeface.Default)
-        {
-            Subpixel = true,
-            Edging = SKFontEdging.SubpixelAntialias,
-            Hinting = SKFontHinting.Full
-        });
-        font.Size = (_drawTabIcons ? 12f : 9f).Topx(this);
-
-        // reuse buffer to avoid allocation every layout pass
-        _tabWidthBuffer.Clear();
-        var desiredWidths = _tabWidthBuffer;
-        float totalDesiredWidth = 0;
-
-        for (var pageIndex = 0; pageIndex < _windowPageControl.Count; pageIndex++)
-        {
-            var page = _windowPageControl.GetPageAt(pageIndex);
-            if (page == null)
-                continue;
-
-            var bounds = new SkiaSharp.SKRect();
-            font.MeasureText(page.Text ?? "", out bounds);
-
-            var width = bounds.Width + (20 * ScaleFactor);
-
-            if (_drawTabIcons && page.Image != null)
-                width += 24 * ScaleFactor;
-
-            if (_tabCloseButton)
-                width += 24 * ScaleFactor;
-
-            desiredWidths.Add(width);
-            totalDesiredWidth += width;
-        }
-
-        float scale = 1.0f;
-        float extraPerTab = 0;
-
-        if (totalDesiredWidth > availableWidth && totalDesiredWidth > 0)
-        {
-            scale = availableWidth / totalDesiredWidth;
-        }
-        else if (totalDesiredWidth < availableWidth && _windowPageControl.Count > 0)
-        {
-            var extra = availableWidth - totalDesiredWidth;
-            extraPerTab = extra / _windowPageControl.Count;
-        }
-
         var currentX = leadingInset + (leftGroupVisible ? 44 * ScaleFactor : 0);
-
-        for (int i = 0; i < desiredWidths.Count; i++)
-        {
-            var finalWidth = (desiredWidths[i] * scale) + extraPerTab;
-
-            if (finalWidth > maxSize)
-                finalWidth = maxSize;
-
-            pageRect.Add(SKRect.Create(currentX, _titleBarTopDPI, finalWidth, _titleHeightDPI));
-            currentX += finalWidth;
-        }
+        return new WindowPageChromeLayoutContext(currentX, availableWidth, _titleBarTopDPI, _titleHeightDPI, _titleBarCenterYDPI, maxSize);
     }
 
     // optimization helpers --------------------------------------------------
@@ -2166,7 +1740,6 @@ public partial class Window : WindowBase
                 font.Dispose();
             _fontCache.Clear();
 
-            _tempPath.Dispose();
         }
 
         base.Dispose(disposing);
