@@ -1232,19 +1232,19 @@ namespace Orivy.Example
 
         private void NotifBtnThemeAuto_Click(object sender, EventArgs e)
             => ShowNotificationThemeModeExample(
-                NotificationToastThemeMode.Auto,
+                NotificationKind.Info,
                 "Auto Theme",
                 "This toast resolves its palette from the current application theme. Toggle dark mode and trigger it again to compare the result.");
 
         private void NotifBtnThemeLight_Click(object sender, EventArgs e)
             => ShowNotificationThemeModeExample(
-                NotificationToastThemeMode.Light,
+                NotificationKind.Light,
                 "Light Theme",
                 "This toast forces the light palette regardless of the current window theme.");
 
         private void NotifBtnThemeDark_Click(object sender, EventArgs e)
             => ShowNotificationThemeModeExample(
-                NotificationToastThemeMode.Dark,
+                NotificationKind.Dark,
                 "Dark Theme",
                 "This toast forces the dark palette even if the rest of the sample window is currently light.");
 
@@ -1252,31 +1252,57 @@ namespace Orivy.Example
             => NotificationToast.Show(
                 "Custom Theme",
                 "Custom mode uses an explicit NotificationToastPalette so background, accent and foreground colors can be branded per toast.",
-                NotificationKind.Info,
+                NotificationKind.Custom,
                 new NotificationOptions
                 {
                     DurationMs = 5200,
                     ShowProgressBar = true,
-                    ThemeMode = NotificationToastThemeMode.Custom,
                     CustomPalette = CreateNotificationThemeModePalette(),
-                    Actions = new[]
-                    {
+                    Actions =
+                    [
                         new NotificationAction("Apply Globally", ApplyCustomNotificationThemeMode),
                         new NotificationAction("Reset", ResetNotificationThemeModeDefaults),
-                    }
+                    ]
                 });
 
-        private void ShowNotificationThemeModeExample(NotificationToastThemeMode mode, string title, string message)
+        private void NotifBtnTopLeft_Click(object sender, EventArgs e)
+            => ShowNotificationAtPosition(ContentAlignment.TopLeft, "Top Left");
+
+        private void NotifBtnTopCenter_Click(object sender, EventArgs e)
+            => ShowNotificationAtPosition(ContentAlignment.TopCenter, "Top Center");
+
+        private void NotifBtnTopRight_Click(object sender, EventArgs e)
+            => ShowNotificationAtPosition(ContentAlignment.TopRight, "Top Right");
+
+        private void NotifBtnBottomLeft_Click(object sender, EventArgs e)
+            => ShowNotificationAtPosition(ContentAlignment.BottomLeft, "Bottom Left");
+
+        private void NotifBtnBottomCenter_Click(object sender, EventArgs e)
+            => ShowNotificationAtPosition(ContentAlignment.BottomCenter, "Bottom Center");
+
+        private void NotifBtnBottomRight_Click(object sender, EventArgs e)
+            => ShowNotificationAtPosition(ContentAlignment.BottomRight, "Bottom Right");
+
+        private static void ShowNotificationAtPosition(ContentAlignment position, string label)
+        {
+            NotificationToast.Show(
+                label,
+                $"Toasts anchored to {label.ToLowerInvariant()}. Concurrent toasts at other positions run in their own tray and do not interfere.",
+                NotificationKind.Info,
+                new NotificationOptions { DurationMs = 4000, ShowProgressBar = true, Position = position });
+        }
+
+        private void ShowNotificationThemeModeExample(NotificationKind kind, string title, string message)
         {
             NotificationToast.Show(
                 title,
                 message,
-                NotificationKind.Info,
+                kind,
                 new NotificationOptions
                 {
                     DurationMs = 4600,
                     ShowProgressBar = true,
-                    ThemeMode = mode,
+                    CustomPalette = kind == NotificationKind.Custom ? CreateNotificationThemeModePalette() : null,
                 });
         }
 
@@ -1289,24 +1315,22 @@ namespace Orivy.Example
         private void ApplyCustomNotificationThemeMode()
         {
             NotificationToast.CustomPalette = CreateNotificationThemeModePalette();
-            NotificationToast.ThemeMode = NotificationToastThemeMode.Custom;
 
             NotificationToast.Show(
                 "Custom Default Active",
-                "NotificationToast.ThemeMode and NotificationToast.CustomPalette now point to the custom sample palette for subsequent toasts.",
-                NotificationKind.Success,
+                "NotificationKind.Custom and NotificationToast.CustomPalette now point to the custom sample palette for subsequent toasts.",
+                NotificationKind.Custom,
                 4200);
         }
 
         private void ResetNotificationThemeModeDefaults()
         {
             NotificationToast.CustomPalette = null;
-            NotificationToast.ThemeMode = NotificationToastThemeMode.Auto;
 
             NotificationToast.Show(
                 "Theme Defaults Reset",
                 "Notification toasts now resolve from Auto mode again.",
-                NotificationKind.Success,
+                NotificationKind.Info,
                 3200);
         }
 

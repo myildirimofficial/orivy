@@ -5,5 +5,8 @@ public enum NotificationKind
     Info,
     Success,
     Warning,
-    Error
+    Error,
+    Light,
+    Dark,
+    Custom
 }

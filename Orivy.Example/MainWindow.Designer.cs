@@ -1099,7 +1099,7 @@ internal partial class MainWindow
         this.ExtendMenu = this.extendMenu;
         this.ShowMenuInsteadOfIcon = true;
         this.FormMenu = this.extendMenu;
-        
+
         windowPageControl.Controls.Add(panel3);
         windowPageControl.Controls.Add(panel4);
         windowPageControl.Controls.Add(panel5);
@@ -1469,6 +1469,106 @@ internal partial class MainWindow
         notifRow6.Controls.Add(notifBtnThemeDark);
         notifRow6.Controls.Add(notifBtnThemeCustom);
 
+        var notifPositionLabel = new Element
+        {
+            Text      = "Toast Position",
+            Dock      = DockStyle.Top,
+            Height    = 22,
+            Margin    = new Thickness(0, 10, 0, 6),
+            BackColor = SkiaSharp.SKColors.Transparent,
+            Border    = new Thickness(0),
+            ForeColor = ColorScheme.ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)180 : (byte)160),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
+        };
+
+        var notifRow7 = new Container
+        {
+            Dock      = DockStyle.Top,
+            Height    = 46,
+            Margin    = new Thickness(0, 0, 0, 10),
+            Radius    = new Radius(0),
+            Border    = new Thickness(0),
+            BackColor = SkiaSharp.SKColors.Transparent,
+        };
+
+        notifBtnTopLeft = new Button
+        {
+            Text   = "Top Left",
+            Dock   = DockStyle.Left,
+            Width  = 112,
+            Height = 38,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+
+        notifBtnTopCenter = new Button
+        {
+            Text   = "Top Center",
+            Dock   = DockStyle.Left,
+            Width  = 120,
+            Height = 38,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+
+        notifBtnTopRight = new Button
+        {
+            Text   = "Top Right",
+            Dock   = DockStyle.Left,
+            Width  = 112,
+            Height = 38,
+        };
+
+        var notifRow8 = new Container
+        {
+            Dock      = DockStyle.Top,
+            Height    = 46,
+            Margin    = new Thickness(0, 0, 0, 10),
+            Radius    = new Radius(0),
+            Border    = new Thickness(0),
+            BackColor = SkiaSharp.SKColors.Transparent,
+        };
+
+        notifBtnBottomLeft = new Button
+        {
+            Text   = "Bottom Left",
+            Dock   = DockStyle.Left,
+            Width  = 120,
+            Height = 38,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+
+        notifBtnBottomCenter = new Button
+        {
+            Text   = "Bottom Center",
+            Dock   = DockStyle.Left,
+            Width  = 134,
+            Height = 38,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+
+        notifBtnBottomRight = new Button
+        {
+            Text   = "Bottom Right",
+            Dock   = DockStyle.Left,
+            Width  = 128,
+            Height = 38,
+        };
+        notifBtnBottomRight.ConfigureVisualStyles(s => s
+            .Base(b => b
+                .Background(ColorScheme.Primary)
+                .Foreground(SkiaSharp.SKColors.White)));
+
+        notifRow7.Controls.Add(notifBtnTopLeft);
+        notifRow7.Controls.Add(notifBtnTopCenter);
+        notifRow7.Controls.Add(notifBtnTopRight);
+
+        notifRow8.Controls.Add(notifBtnBottomLeft);
+        notifRow8.Controls.Add(notifBtnBottomCenter);
+        notifRow8.Controls.Add(notifBtnBottomRight);
+
+        panel7.Controls.Add(notifRow8);
+        panel7.Controls.Add(notifRow7);
+        panel7.Controls.Add(notifPositionLabel);
         panel7.Controls.Add(notifRow6);
         panel7.Controls.Add(notifRow5);
         panel7.Controls.Add(notifRow4);
@@ -1497,6 +1597,12 @@ internal partial class MainWindow
         notifBtnThemeLight.Click   += NotifBtnThemeLight_Click;
         notifBtnThemeDark.Click    += NotifBtnThemeDark_Click;
         notifBtnThemeCustom.Click  += NotifBtnThemeCustom_Click;
+        notifBtnTopLeft.Click      += NotifBtnTopLeft_Click;
+        notifBtnTopCenter.Click    += NotifBtnTopCenter_Click;
+        notifBtnTopRight.Click     += NotifBtnTopRight_Click;
+        notifBtnBottomLeft.Click   += NotifBtnBottomLeft_Click;
+        notifBtnBottomCenter.Click += NotifBtnBottomCenter_Click;
+        notifBtnBottomRight.Click  += NotifBtnBottomRight_Click;
     }
 
     private void InitializeEmbeddedTabsPage()
@@ -2033,6 +2139,12 @@ internal partial class MainWindow
     private Button notifBtnThemeLight;
     private Button notifBtnThemeDark;
     private Button notifBtnThemeCustom;
+    private Button notifBtnTopLeft;
+    private Button notifBtnTopCenter;
+    private Button notifBtnTopRight;
+    private Button notifBtnBottomLeft;
+    private Button notifBtnBottomCenter;
+    private Button notifBtnBottomRight;
 
     private void InitializeBindingDemoPage()
     {

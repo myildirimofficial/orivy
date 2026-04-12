@@ -1,5 +1,7 @@
+using Orivy;
 using Orivy.Animation;
 using Orivy.Helpers;
+using Orivy.Styling;
 using SkiaSharp;
 using System;
 using System.Threading;
@@ -9,12 +11,6 @@ namespace Orivy.Controls;
 
 public sealed class NotificationToast : ElementBase
 {
-	public static NotificationToastThemeMode ThemeMode
-	{
-		get => ResolveCurrentManager().ThemeMode;
-		set => ResolveCurrentManager().ThemeMode = value;
-	}
-
 	public static NotificationToastPalette? CustomPalette
 	{
 		get => ResolveCurrentManager().CustomPalette;
@@ -99,9 +95,6 @@ public sealed class NotificationToast : ElementBase
 	private float ActionGap => 6f * ScaleFactor;
 	private float ProgressHeight => 3f * ScaleFactor;
 	private const int MaxMessageLines = 4;
-	private float EnterDurationMs => 120f;
-	private float ExitDurationMs => 180f;
-
 	private float ContentLeft => PaddingH + IconDiameter + IconGap;
 	private float ContentRight => ToastWidth - PaddingH - CloseSize - CloseRightGap;
 	private float ContentWidth => ContentRight - ContentLeft;
@@ -114,17 +107,16 @@ public sealed class NotificationToast : ElementBase
 	private string? _cachedTypefaceName;
 
 	private readonly AnimationManager _countdownAnimation;
-	private readonly AnimationManager _visibilityAnimation;
-	private readonly AnimationManager _slideAnimation;
 	private readonly NotificationAction[] _actions;
 	private readonly SKRect[] _actionRects;
 	private readonly NotificationToastPalette? _customPalette;
-	private readonly NotificationToastThemeMode _themeMode;
+	internal readonly ContentAlignment _alignment;
+	private bool IsTopPosition => _alignment is ContentAlignment.TopLeft or ContentAlignment.TopCenter or ContentAlignment.TopRight;
+	private ToastTransitionPhase _transitionPhase = ToastTransitionPhase.Enter;
 	private NotificationHandle? _handle;
 
 	internal float _targetX;
 	internal float _targetY;
-	private float _startY;
 
 	private float _remainingMs;
 	private float? _manualProgress;
@@ -139,51 +131,14 @@ public sealed class NotificationToast : ElementBase
 	private int _pressedAction = -1;
 	private Action? _deferredCompletionAction;
 	private SKRect _closeRect;
-	private ToastPalette _palette;
-	private ToastVisualState _visualState;
-
+	private NotificationToastPalette _palette = new NotificationToastPalette(SKColors.White, SKColors.Black, SKColors.Black);
 	internal Action? OnDismissWithoutAction;
 
-	private enum ToastVisualState
+	private enum ToastTransitionPhase
 	{
-		Entering,
 		Steady,
-		Exiting,
-	}
-
-	private readonly struct ToastPalette
-	{
-		public ToastPalette(SKColor backgroundColor, SKColor accentColor, SKColor foregroundColor)
-		{
-			BackgroundColor = backgroundColor;
-			AccentColor = accentColor;
-			ForegroundColor = foregroundColor;
-			IsDarkSurface = backgroundColor.IsDark();
-
-			var baseSurface = IsDarkSurface
-				? backgroundColor.Brightness(0.08f).WithAlpha(216)
-				: backgroundColor.Brightness(-0.05f).WithAlpha(164);
-
-			SurfaceVariantColor = baseSurface;
-			OutlineColor = foregroundColor.WithAlpha(IsDarkSurface ? (byte)96 : (byte)72);
-			PrimaryActionBackgroundColor = accentColor;
-			PrimaryActionForegroundColor = accentColor.Determine().WithAlpha(255);
-			SecondaryActionForegroundColor = foregroundColor;
-			CloseButtonIdleForegroundColor = foregroundColor.WithAlpha(IsDarkSurface ? (byte)160 : (byte)148);
-			CloseButtonActiveForegroundColor = foregroundColor.WithAlpha(228);
-		}
-
-		public SKColor BackgroundColor { get; }
-		public SKColor AccentColor { get; }
-		public SKColor ForegroundColor { get; }
-		public SKColor OutlineColor { get; }
-		public SKColor PrimaryActionBackgroundColor { get; }
-		public SKColor PrimaryActionForegroundColor { get; }
-		public SKColor SecondaryActionForegroundColor { get; }
-		public SKColor SurfaceVariantColor { get; }
-		public SKColor CloseButtonIdleForegroundColor { get; }
-		public SKColor CloseButtonActiveForegroundColor { get; }
-		public bool IsDarkSurface { get; }
+		Enter,
+		StackReflow,
 	}
 
 
@@ -209,7 +164,10 @@ public sealed class NotificationToast : ElementBase
 		Size = new SKSize(ToastWidth, height);
 		ApplyTheme();
 		LayoutInteractiveElements();
+		if (_dismissState == 0)
+			_transitionPhase = ToastTransitionPhase.Steady;
 		SnapTo(_targetY);
+		ConfigureEntryExitStyles();
 		Invalidate();
 	}
 
@@ -255,22 +213,22 @@ public sealed class NotificationToast : ElementBase
 	}
 
 
-	public NotificationToast(
+	internal NotificationToast(
 		string title,
 		string message,
 		NotificationKind kind,
 		int durationMs,
 		bool showProgressBar,
 		float? progress,
-		NotificationToastThemeMode themeMode,
 		NotificationToastPalette? customPalette,
-		NotificationAction[]? actions = null)
+		NotificationAction[]? actions = null,
+		ContentAlignment alignment = ContentAlignment.BottomRight)
 	{
+		_alignment = alignment;
 		Title = title;
 		Message = message;
 		Kind = kind;
 		DurationMs = durationMs;
-		_themeMode = themeMode;
 		_customPalette = customPalette;
 		_showProgressBar = showProgressBar;
 		_manualProgress = progress;
@@ -291,15 +249,7 @@ public sealed class NotificationToast : ElementBase
 		Opacity = 0f;
 		ColorScheme.ThemeChanged += OnThemeChanged;
 
-		_visibilityAnimation = new AnimationManager(true)
-		{
-			AnimationType = AnimationType.CubicEaseOut,
-			InterruptAnimation = true,
-			Increment = Math.Max(0.01, 16d / EnterDurationMs),
-			SecondaryIncrement = Math.Max(0.01, 16d / ExitDurationMs),
-		};
-		_visibilityAnimation.OnAnimationProgress += HandleVisibilityAnimationProgress;
-		_visibilityAnimation.OnAnimationFinished += HandleVisibilityAnimationFinished;
+		ConfigureEntryExitStyles();
 
 		_countdownAnimation = new AnimationManager(true)
 		{
@@ -311,65 +261,60 @@ public sealed class NotificationToast : ElementBase
 		_countdownAnimation.OnAnimationProgress += HandleCountdownAnimationProgress;
 		_countdownAnimation.OnAnimationFinished += HandleCountdownAnimationFinished;
 
-		_slideAnimation = new AnimationManager(true)
-		{
-			AnimationType = AnimationType.CubicEaseOut,
-			InterruptAnimation = true,
-			Increment = Math.Max(0.01, 16d / 150d), // 150ms sliding up
-			SecondaryIncrement = Math.Max(0.01, 16d / 150d),
-		};
-		_slideAnimation.OnAnimationProgress += HandleSlideAnimationProgress;
-
 		LayoutInteractiveElements();
 
 		_remainingMs = durationMs;
-		_visualState = ToastVisualState.Entering;
 	}
 
 	internal void Place(float targetX, float targetY)
 	{
 		_targetX = targetX;
 		_targetY = targetY;
-		_startY = targetY;
 		_hasBeenPlaced = true;
-		SetAnimatedOpacity(0f);
+		_transitionPhase = ToastTransitionPhase.Enter;
 		SetAnimatedLocation(new SKPoint(targetX, targetY));
 		_remainingMs = DurationMs;
-		_visualState = ToastVisualState.Entering;
-		_visibilityAnimation.AnimationType = AnimationType.CubicEaseOut;
-		_visibilityAnimation.Increment = Math.Max(0.01, 16d / EnterDurationMs);
-		_visibilityAnimation.SecondaryIncrement = _visibilityAnimation.Increment;
-		_visibilityAnimation.SetProgress(0d);
-		_visibilityAnimation.StartNewAnimation(AnimationDirection.In);
+		ReevaluateVisualStyles();
 	}
 
 
 	internal void SnapTo(float newTargetY)
 	{
-		_startY = newTargetY;
 		_targetY = newTargetY;
-		_slideAnimation.Stop();
+		if (_dismissState == 0)
+			_transitionPhase = ToastTransitionPhase.Steady;
 		SetAnimatedLocation(new SKPoint(_targetX, newTargetY));
 	}
 
-	internal void MoveTo(float newTargetY)
+	internal void MoveTo(float newTargetY, float previousScreenY, float newScreenY)
 	{
-		if (Math.Abs(newTargetY - _targetY) < 0.5f)
+		var sameTarget = Math.Abs(newTargetY - _targetY) < 0.5f;
+		if (sameTarget && Math.Abs(previousScreenY - newScreenY) < 0.5f)
 			return;
 
-		_startY = Location.Y;
 		_targetY = newTargetY;
+		
+		SetAnimatedLocation(new SKPoint(_targetX, newTargetY));
 
-		if (_visualState == ToastVisualState.Steady && !_visibilityAnimation.IsAnimating())
+		if (_hasBeenPlaced && _dismissState == 0)
 		{
-			_slideAnimation.SetProgress(0d);
-			_slideAnimation.StartNewAnimation(AnimationDirection.In);
-		}
-		else
-		{
-			// If it's already entering or exiting, we just update targetY and it will glide there.
+			// FLIP against actual screen-space movement so bottom-anchored trays
+			// animate correctly when the tray itself shifts after removal.
+			var screenDelta = previousScreenY - newScreenY;
+			if (Math.Abs(screenDelta) < 0.5f)
+			{
+				_transitionPhase = ToastTransitionPhase.Steady;
+				return;
+			}
+
+			_transitionPhase = ToastTransitionPhase.StackReflow;
+			OffsetEffectiveTranslateY(screenDelta);
+			ReevaluateVisualStyles();
 		}
 	}
+
+	internal float GetVisualScreenY(float trayY, float scrollOffset)
+		=> trayY + Location.Y - scrollOffset + _renderTranslateY;
 
 	internal void BeginDismiss()
 	{
@@ -382,11 +327,7 @@ public sealed class NotificationToast : ElementBase
 		_pressedAction = -1;
 		Cursor = Cursors.Default;
 		_countdownAnimation.Stop();
-		_visualState = ToastVisualState.Exiting;
-		_visibilityAnimation.AnimationType = AnimationType.CubicEaseIn;
-		_visibilityAnimation.Increment = Math.Max(0.01, 16d / ExitDurationMs);
-		_visibilityAnimation.SecondaryIncrement = _visibilityAnimation.Increment;
-		_visibilityAnimation.StartNewAnimation(AnimationDirection.Out);
+		ReevaluateVisualStyles();
 	}
 
 	internal override void OnMouseEnter(EventArgs e)
@@ -532,7 +473,7 @@ public sealed class NotificationToast : ElementBase
 
 		var width = (float)Width;
 		var height = (float)Height;
-		var accent = GetAccentColor();
+		var accent =  _palette.AccentColor;
 
 		//ElevationHelper.DrawStateLayer(canvas, new SKRect(0f, 0f, width, height), CardRadius.TopLeft, GetBackgroundColor().WithAlpha(100));
 		//ElevationHelper.DrawFluentGlass(canvas, new SKRect(0f, 0f, width, height), CardRadius.TopLeft, GetBackgroundColor());
@@ -548,11 +489,68 @@ public sealed class NotificationToast : ElementBase
 
 	private void OnThemeChanged(object? sender, EventArgs e)
 	{
-		if (_themeMode != NotificationToastThemeMode.Auto)
-			return;
-
 		ApplyTheme();
 		Invalidate();
+	}
+
+	private void ConfigureEntryExitStyles()
+	{
+		var directionSign = IsTopPosition ? -1f : 1f;
+		var entranceOffset = directionSign * 16f * ScaleFactor;
+		var exitOffset = directionSign * 8f * ScaleFactor;
+		const float entranceScale = 0.88f;
+		const float exitScale = 0.95f;
+
+		if (!_hasBeenPlaced)
+		{
+			// Establish the before-entry visual state so the animation interpolates FROM it.
+			// ApplyVisualStyleBase updates both the base snapshot and applies immediately
+			// (forceImmediate), ensuring _styleEffectiveSnapshot reflects this state
+			// and the enter animation starts from the correct offset + scale.
+			ApplyVisualStyleBase(new ElementVisualStyle
+			{
+				Opacity = 0f,
+				TranslateY = entranceOffset,
+				ScaleX = entranceScale,
+				ScaleY = entranceScale,
+			});
+		}
+
+		ConfigureVisualStyles(styles => styles
+			.When(
+				(el, _) => el is NotificationToast t && t._dismissState != 0,
+				rule => rule
+					.Opacity(0f)
+					.Scale(exitScale)
+					.TranslateY(exitOffset)
+					.Transition(TimeSpan.FromMilliseconds(180), AnimationType.CubicEaseIn))
+			.When(
+				(el, _) => el is NotificationToast t
+					&& t._hasBeenPlaced
+					&& t._dismissState == 0
+					&& t._transitionPhase == ToastTransitionPhase.Enter,
+				rule => rule
+					.Opacity(1f)
+					.Scale(1f)
+					.TranslateY(0f)
+					.Transition(TimeSpan.FromMilliseconds(320), AnimationType.BackOut))
+			.When(
+				(el, _) => el is NotificationToast t
+					&& t._hasBeenPlaced
+					&& t._dismissState == 0
+					&& t._transitionPhase == ToastTransitionPhase.StackReflow,
+				rule => rule
+					.Opacity(1f)
+					.Scale(1f)
+					.TranslateY(0f)
+					.Transition(TimeSpan.FromMilliseconds(190), AnimationType.QuarticEaseOut, ElementVisualTransitionMode.ReplayOnReevaluate))
+			.When(
+				(el, _) => el is NotificationToast t && t._hasBeenPlaced && t._dismissState == 0,
+				rule => rule
+					.Opacity(1f)
+					.Scale(1f)
+					.TranslateY(0f)),
+			clearExisting: true);
 	}
 
 	private void ApplyTheme()
@@ -839,61 +837,25 @@ public sealed class NotificationToast : ElementBase
 		canvas.DrawRect(barRect, fillPaint);
 	}
 
-	private void HandleSlideAnimationProgress(object _)
+	protected override void OnVisualStyleTransitionCompleted()
 	{
-		var progress = (float)_slideAnimation.GetProgress();
-		var currentY = _startY + (_targetY - _startY) * progress;
-
-		if (SetAnimatedLocation(new SKPoint(_targetX, currentY)))
-			Invalidate();
-	}
-
-	private void HandleVisibilityAnimationProgress(object _)
-	{
-		var progress = (float)_visibilityAnimation.GetProgress();
-
-		var currentY = _targetY;
-		if (_slideAnimation.IsAnimating())
-		{
-			var slideProgress = (float)_slideAnimation.GetProgress();
-			currentY = _startY + (_targetY - _startY) * slideProgress;
-		}
-
-		var changed = false;
-		changed |= SetAnimatedOpacity(progress);
-		changed |= SetAnimatedLocation(new SKPoint(_targetX, currentY));
-
-		if (changed)
-			Invalidate();
-	}
-
-	private void HandleVisibilityAnimationFinished(object _)
-	{
-		if (_visualState == ToastVisualState.Entering)
-		{
-			_visualState = ToastVisualState.Steady;
-			var changed = false;
-			changed |= SetAnimatedOpacity(1f);
-			changed |= SetAnimatedLocation(new SKPoint(_targetX, _targetY));
-			ResumeCountdownIfNeeded();
-			if (changed)
-				Invalidate();
-			return;
-		}
-
-		if (_visualState == ToastVisualState.Exiting)
+		if (_dismissState != 0 && Opacity <= 0.001f)
 		{
 			_hasBeenPlaced = false;
-			SetAnimatedOpacity(0f);
-
 			if (DismissCompleted != null)
 			{
 				DismissCompleted.Invoke(this, EventArgs.Empty);
 				return;
 			}
-
 			Visible = false;
+			return;
 		}
+
+		if (_dismissState == 0)
+			_transitionPhase = ToastTransitionPhase.Steady;
+
+		if (_hasBeenPlaced && _dismissState == 0 && Opacity >= 0.999f)
+			ResumeCountdownIfNeeded();
 	}
 
 	private void HandleCountdownAnimationProgress(object _)
@@ -919,7 +881,7 @@ public sealed class NotificationToast : ElementBase
 
 	private void ResumeCountdownIfNeeded()
 	{
-		if (_dismissState != 0 || _countdownPaused || DurationMs <= 0)
+		if (_dismissState != 0 || _countdownPaused || DurationMs <= 0 || _countdownAnimation.IsAnimating())
 			return;
 
 		var progress = Math.Clamp(DurationMs > 0 ? _remainingMs / DurationMs : 0f, 0f, 1f);
@@ -965,30 +927,10 @@ public sealed class NotificationToast : ElementBase
 		return baseColor.WithAlpha(_palette.IsDarkSurface ? (byte)188 : (byte)144);
 	}
 
-	private ToastPalette ResolvePalette()
+	private NotificationToastPalette ResolvePalette()
 	{
-		var resolvedMode = ResolveThemeMode();
-		var palette = resolvedMode == NotificationToastThemeMode.Custom
-			? _customPalette ?? throw new InvalidOperationException("Custom notification theme requires a CustomPalette.")
-			: NotificationToastPalette.FromKind(Kind, resolvedMode);
-
-		return new ToastPalette(palette.BackgroundColor, palette.AccentColor, palette.ForegroundColor);
+		return NotificationToastPalette.FromKind(Kind, _customPalette);
 	}
-
-	private NotificationToastThemeMode ResolveThemeMode()
-	{
-		return _themeMode switch
-		{
-			NotificationToastThemeMode.Auto => ColorScheme.IsDarkMode ? NotificationToastThemeMode.Dark : NotificationToastThemeMode.Light,
-			_ => _themeMode
-		};
-	}
-
-	private SKColor GetBackgroundColor() => _palette.BackgroundColor;
-
-	private SKColor GetAccentColor() => _palette.AccentColor;
-
-	private SKColor GetTextColor() => _palette.ForegroundColor;
 
 	private float ComputeToastHeight(string message, bool hasActions)
 	{
@@ -1022,12 +964,6 @@ public sealed class NotificationToast : ElementBase
 			_countdownAnimation.OnAnimationProgress -= HandleCountdownAnimationProgress;
 			_countdownAnimation.OnAnimationFinished -= HandleCountdownAnimationFinished;
 			_countdownAnimation.Dispose();
-			_visibilityAnimation.OnAnimationProgress -= HandleVisibilityAnimationProgress;
-			_visibilityAnimation.OnAnimationFinished -= HandleVisibilityAnimationFinished;
-			_visibilityAnimation.Dispose();
-
-			_slideAnimation.OnAnimationProgress -= HandleSlideAnimationProgress;
-			_slideAnimation.Dispose();
 
 			DetachHandle();
 		}

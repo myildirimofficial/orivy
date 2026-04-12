@@ -26,6 +26,12 @@ public readonly record struct ElementVisualStateContext(ElementBase Element, Ele
     public bool IsVisible => !States.HasFlag(ElementVisualStates.Hidden);
 }
 
+public enum ElementVisualTransitionMode
+{
+    TargetChange,
+    ReplayOnReevaluate,
+}
+
 public sealed class ElementVisualTransition
 {
     private TimeSpan _duration = TimeSpan.FromMilliseconds(180);
@@ -40,12 +46,32 @@ public sealed class ElementVisualTransition
 
     public AnimationType AnimationType { get; set; } = AnimationType.EaseInOut;
 
+    public ElementVisualTransitionMode Mode { get; set; } = ElementVisualTransitionMode.TargetChange;
+
     internal double GetIncrement()
     {
         if (!Enabled || _duration <= TimeSpan.Zero)
             return 1d;
 
         return Math.Clamp(16d / Math.Max(16d, _duration.TotalMilliseconds), 0.01d, 1d);
+    }
+
+    internal ElementVisualTransitionDescriptor ToDescriptor()
+        => new(Enabled, Duration, AnimationType, Mode);
+}
+
+internal readonly record struct ElementVisualTransitionDescriptor(
+    bool Enabled,
+    TimeSpan Duration,
+    AnimationType AnimationType,
+    ElementVisualTransitionMode Mode)
+{
+    internal double GetIncrement()
+    {
+        if (!Enabled || Duration <= TimeSpan.Zero)
+            return 1d;
+
+        return Math.Clamp(16d / Math.Max(16d, Duration.TotalMilliseconds), 0.01d, 1d);
     }
 }
 
@@ -60,6 +86,10 @@ public sealed class ElementVisualStyle
     public Radius? Radius { get; set; }
     public BoxShadow[]? Shadows { get; set; }
     public float? Opacity { get; set; }
+    public float? TranslateX { get; set; }
+    public float? TranslateY { get; set; }
+    public float? ScaleX { get; set; }
+    public float? ScaleY { get; set; }
 
     internal void ApplyTo(ref ElementVisualStyleSnapshot snapshot)
     {
@@ -89,6 +119,18 @@ public sealed class ElementVisualStyle
 
         if (Opacity.HasValue)
             snapshot = snapshot.WithOpacity(Math.Clamp(Opacity.Value, 0f, 1f));
+
+        if (TranslateX.HasValue)
+            snapshot = snapshot.WithTranslateX(TranslateX.Value);
+
+        if (TranslateY.HasValue)
+            snapshot = snapshot.WithTranslateY(TranslateY.Value);
+
+        if (ScaleX.HasValue)
+            snapshot = snapshot.WithScaleX(ScaleX.Value);
+
+        if (ScaleY.HasValue)
+            snapshot = snapshot.WithScaleY(ScaleY.Value);
     }
 }
 
@@ -192,7 +234,11 @@ internal readonly struct ElementVisualStyleSnapshot : IEquatable<ElementVisualSt
         SKColor borderColor,
         Radius radius,
         BoxShadow[] shadows,
-        float opacity)
+        float opacity,
+        float translateX = 0f,
+        float translateY = 0f,
+        float scaleX = 1f,
+        float scaleY = 1f)
     {
         Size = size;
         BackColor = backColor;
@@ -202,6 +248,10 @@ internal readonly struct ElementVisualStyleSnapshot : IEquatable<ElementVisualSt
         Radius = radius;
         Shadows = shadows ?? Array.Empty<BoxShadow>();
         Opacity = Math.Clamp(opacity, 0f, 1f);
+        TranslateX = translateX;
+        TranslateY = translateY;
+        ScaleX = scaleX;
+        ScaleY = scaleY;
     }
 
     public SKSize Size { get; }
@@ -212,15 +262,23 @@ internal readonly struct ElementVisualStyleSnapshot : IEquatable<ElementVisualSt
     public Radius Radius { get; }
     public BoxShadow[] Shadows { get; }
     public float Opacity { get; }
+    public float TranslateX { get; }
+    public float TranslateY { get; }
+    public float ScaleX { get; }
+    public float ScaleY { get; }
 
-    public ElementVisualStyleSnapshot WithSize(SKSize size) => new(size, BackColor, ForeColor, Border, BorderColor, Radius, Shadows, Opacity);
-    public ElementVisualStyleSnapshot WithBackColor(SKColor color) => new(Size, color, ForeColor, Border, BorderColor, Radius, Shadows, Opacity);
-    public ElementVisualStyleSnapshot WithForeColor(SKColor color) => new(Size, BackColor, color, Border, BorderColor, Radius, Shadows, Opacity);
-    public ElementVisualStyleSnapshot WithBorder(Thickness border) => new(Size, BackColor, ForeColor, border, BorderColor, Radius, Shadows, Opacity);
-    public ElementVisualStyleSnapshot WithBorderColor(SKColor color) => new(Size, BackColor, ForeColor, Border, color, Radius, Shadows, Opacity);
-    public ElementVisualStyleSnapshot WithRadius(Radius radius) => new(Size, BackColor, ForeColor, Border, BorderColor, radius, Shadows, Opacity);
-    public ElementVisualStyleSnapshot WithShadows(BoxShadow[] shadows) => new(Size, BackColor, ForeColor, Border, BorderColor, Radius, shadows, Opacity);
-    public ElementVisualStyleSnapshot WithOpacity(float opacity) => new(Size, BackColor, ForeColor, Border, BorderColor, Radius, Shadows, opacity);
+    public ElementVisualStyleSnapshot WithSize(SKSize size) => new(size, BackColor, ForeColor, Border, BorderColor, Radius, Shadows, Opacity, TranslateX, TranslateY, ScaleX, ScaleY);
+    public ElementVisualStyleSnapshot WithBackColor(SKColor color) => new(Size, color, ForeColor, Border, BorderColor, Radius, Shadows, Opacity, TranslateX, TranslateY, ScaleX, ScaleY);
+    public ElementVisualStyleSnapshot WithForeColor(SKColor color) => new(Size, BackColor, color, Border, BorderColor, Radius, Shadows, Opacity, TranslateX, TranslateY, ScaleX, ScaleY);
+    public ElementVisualStyleSnapshot WithBorder(Thickness border) => new(Size, BackColor, ForeColor, border, BorderColor, Radius, Shadows, Opacity, TranslateX, TranslateY, ScaleX, ScaleY);
+    public ElementVisualStyleSnapshot WithBorderColor(SKColor color) => new(Size, BackColor, ForeColor, Border, color, Radius, Shadows, Opacity, TranslateX, TranslateY, ScaleX, ScaleY);
+    public ElementVisualStyleSnapshot WithRadius(Radius radius) => new(Size, BackColor, ForeColor, Border, BorderColor, radius, Shadows, Opacity, TranslateX, TranslateY, ScaleX, ScaleY);
+    public ElementVisualStyleSnapshot WithShadows(BoxShadow[] shadows) => new(Size, BackColor, ForeColor, Border, BorderColor, Radius, shadows, Opacity, TranslateX, TranslateY, ScaleX, ScaleY);
+    public ElementVisualStyleSnapshot WithOpacity(float opacity) => new(Size, BackColor, ForeColor, Border, BorderColor, Radius, Shadows, opacity, TranslateX, TranslateY, ScaleX, ScaleY);
+    public ElementVisualStyleSnapshot WithTranslateX(float x) => new(Size, BackColor, ForeColor, Border, BorderColor, Radius, Shadows, Opacity, x, TranslateY, ScaleX, ScaleY);
+    public ElementVisualStyleSnapshot WithTranslateY(float y) => new(Size, BackColor, ForeColor, Border, BorderColor, Radius, Shadows, Opacity, TranslateX, y, ScaleX, ScaleY);
+    public ElementVisualStyleSnapshot WithScaleX(float x) => new(Size, BackColor, ForeColor, Border, BorderColor, Radius, Shadows, Opacity, TranslateX, TranslateY, x, ScaleY);
+    public ElementVisualStyleSnapshot WithScaleY(float y) => new(Size, BackColor, ForeColor, Border, BorderColor, Radius, Shadows, Opacity, TranslateX, TranslateY, ScaleX, y);
 
     public bool Equals(ElementVisualStyleSnapshot other)
     {
@@ -231,6 +289,10 @@ internal readonly struct ElementVisualStyleSnapshot : IEquatable<ElementVisualSt
              BorderColor == other.BorderColor &&
                Radius == other.Radius &&
              Math.Abs(Opacity - other.Opacity) < 0.0001f &&
+             Math.Abs(TranslateX - other.TranslateX) < 0.01f &&
+             Math.Abs(TranslateY - other.TranslateY) < 0.01f &&
+             Math.Abs(ScaleX - other.ScaleX) < 0.001f &&
+             Math.Abs(ScaleY - other.ScaleY) < 0.001f &&
                ElementVisualStyleInterpolator.AreShadowsEqual(Shadows, other.Shadows);
     }
 
@@ -249,6 +311,10 @@ internal readonly struct ElementVisualStyleSnapshot : IEquatable<ElementVisualSt
         hash.Add(BorderColor);
         hash.Add(Radius);
         hash.Add(Opacity);
+        hash.Add(TranslateX);
+        hash.Add(TranslateY);
+        hash.Add(ScaleX);
+        hash.Add(ScaleY);
         for (var i = 0; i < Shadows.Length; i++)
             hash.Add(Shadows[i]);
         return hash.ToHashCode();
@@ -262,19 +328,25 @@ internal static class ElementVisualStyleInterpolator
         in ElementVisualStyleSnapshot to,
         float progress)
     {
-        progress = Math.Clamp(progress, 0f, 1f);
+        // No global clamp — allows easing functions with overshoot (e.g. BackOut) to exceed [0,1].
+        // Color interpolation clamps internally. Opacity is clamped in the snapshot constructor.
+        var clampedProgress = Math.Clamp(progress, 0f, 1f);
 
         return new ElementVisualStyleSnapshot(
             new SKSize(
-                Lerp(from.Size.Width, to.Size.Width, progress),
-                Lerp(from.Size.Height, to.Size.Height, progress)),
-            from.BackColor.InterpolateColor(to.BackColor, progress),
-            from.ForeColor.InterpolateColor(to.ForeColor, progress),
-            InterpolateThickness(from.Border, to.Border, progress),
-            from.BorderColor.InterpolateColor(to.BorderColor, progress),
-            InterpolateRadius(from.Radius, to.Radius, progress),
-            InterpolateShadows(from.Shadows, to.Shadows, progress),
-            Lerp(from.Opacity, to.Opacity, progress));
+                Lerp(from.Size.Width, to.Size.Width, clampedProgress),
+                Lerp(from.Size.Height, to.Size.Height, clampedProgress)),
+            from.BackColor.InterpolateColor(to.BackColor, clampedProgress),
+            from.ForeColor.InterpolateColor(to.ForeColor, clampedProgress),
+            InterpolateThickness(from.Border, to.Border, clampedProgress),
+            from.BorderColor.InterpolateColor(to.BorderColor, clampedProgress),
+            InterpolateRadius(from.Radius, to.Radius, clampedProgress),
+            InterpolateShadows(from.Shadows, to.Shadows, clampedProgress),
+            Lerp(from.Opacity, to.Opacity, clampedProgress),
+            Lerp(from.TranslateX, to.TranslateX, progress),
+            Lerp(from.TranslateY, to.TranslateY, progress),
+            Lerp(from.ScaleX, to.ScaleX, progress),
+            Lerp(from.ScaleY, to.ScaleY, progress));
     }
 
     public static BoxShadow[] CloneShadows(BoxShadow[]? shadows)
@@ -463,6 +535,51 @@ public sealed class ElementVisualStyleValueBuilder
         _style.Opacity = Math.Clamp(opacity, 0f, 1f);
         return this;
     }
+
+    public ElementVisualStyleValueBuilder TranslateX(float x)
+    {
+        _style.TranslateX = x;
+        return this;
+    }
+
+    public ElementVisualStyleValueBuilder TranslateY(float y)
+    {
+        _style.TranslateY = y;
+        return this;
+    }
+
+    public ElementVisualStyleValueBuilder Translate(float x, float y)
+    {
+        _style.TranslateX = x;
+        _style.TranslateY = y;
+        return this;
+    }
+
+    public ElementVisualStyleValueBuilder ScaleX(float x)
+    {
+        _style.ScaleX = x;
+        return this;
+    }
+
+    public ElementVisualStyleValueBuilder ScaleY(float y)
+    {
+        _style.ScaleY = y;
+        return this;
+    }
+
+    public ElementVisualStyleValueBuilder Scale(float uniform)
+    {
+        _style.ScaleX = uniform;
+        _style.ScaleY = uniform;
+        return this;
+    }
+
+    public ElementVisualStyleValueBuilder Scale(float x, float y)
+    {
+        _style.ScaleX = x;
+        _style.ScaleY = y;
+        return this;
+    }
 }
 
 public sealed class ElementVisualStyleRuleBuilder
@@ -494,13 +611,17 @@ public sealed class ElementVisualStyleRuleBuilder
         return this;
     }
 
-    public ElementVisualStyleRuleBuilder Transition(TimeSpan duration, AnimationType animationType = AnimationType.EaseInOut)
+    public ElementVisualStyleRuleBuilder Transition(
+        TimeSpan duration,
+        AnimationType animationType = AnimationType.EaseInOut,
+        ElementVisualTransitionMode mode = ElementVisualTransitionMode.TargetChange)
     {
         _rule.Transition = new ElementVisualTransition
         {
             Duration = duration,
             AnimationType = animationType,
-            Enabled = duration > TimeSpan.Zero
+            Enabled = duration > TimeSpan.Zero,
+            Mode = mode,
         };
         return this;
     }
@@ -525,6 +646,13 @@ public sealed class ElementVisualStyleRuleBuilder
     public ElementVisualStyleRuleBuilder Shadow(BoxShadow shadow) => Style(values => values.Shadow(shadow));
     public ElementVisualStyleRuleBuilder Shadows(params BoxShadow[] shadows) => Style(values => values.Shadows(shadows));
     public ElementVisualStyleRuleBuilder Opacity(float opacity) => Style(values => values.Opacity(opacity));
+    public ElementVisualStyleRuleBuilder TranslateX(float x) => Style(values => values.TranslateX(x));
+    public ElementVisualStyleRuleBuilder TranslateY(float y) => Style(values => values.TranslateY(y));
+    public ElementVisualStyleRuleBuilder Translate(float x, float y) => Style(values => values.Translate(x, y));
+    public ElementVisualStyleRuleBuilder ScaleX(float x) => Style(values => values.ScaleX(x));
+    public ElementVisualStyleRuleBuilder ScaleY(float y) => Style(values => values.ScaleY(y));
+    public ElementVisualStyleRuleBuilder Scale(float uniform) => Style(values => values.Scale(uniform));
+    public ElementVisualStyleRuleBuilder Scale(float x, float y) => Style(values => values.Scale(x, y));
 }
 
 public sealed class ElementVisualStyleBuilder
@@ -542,11 +670,15 @@ public sealed class ElementVisualStyleBuilder
         return this;
     }
 
-    public ElementVisualStyleBuilder DefaultTransition(TimeSpan duration, AnimationType animationType = AnimationType.EaseInOut)
+    public ElementVisualStyleBuilder DefaultTransition(
+        TimeSpan duration,
+        AnimationType animationType = AnimationType.EaseInOut,
+        ElementVisualTransitionMode mode = ElementVisualTransitionMode.TargetChange)
     {
         _owner.VisualTransition.Duration = duration;
         _owner.VisualTransition.AnimationType = animationType;
         _owner.VisualTransition.Enabled = duration > TimeSpan.Zero;
+        _owner.VisualTransition.Mode = mode;
         return this;
     }
 

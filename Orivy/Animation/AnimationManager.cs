@@ -276,6 +276,7 @@ public class AnimationManager : IDisposable
             AnimationType.QuarticEaseIn => EasingMethods.QuarticEaseIn,
             AnimationType.QuarticEaseOut => EasingMethods.QuarticEaseOut,
             AnimationType.QuarticEaseInOut => EasingMethods.QuarticEaseInOut,
+            AnimationType.BackOut => EasingMethods.Extended.BackEaseOut,
             _ => EasingMethods.DefaultEase
         };
     }

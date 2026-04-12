@@ -42,6 +42,8 @@ public class MenuStrip : ElementBase
     private int _defaultSkFontDpi;
     private SKFont? _defaultSkFontSource;
     private SKFont? _shortcutSkFont;
+    private SKTypeface? _shortcutTypeface;
+    private bool _ownsShortcutTypeface;
     private int _shortcutSkFontDpi;
     private SKFont? _shortcutSkFontSource;
     private SKColor _hoverBackColor = SKColor.Empty;
@@ -134,6 +136,10 @@ public class MenuStrip : ElementBase
             Invalidate();
         }
     }
+
+    [Category("Behavior")]
+    [DefaultValue(false)]
+    public bool OpenOnHover { get; set; } = false;
 
     [Category("Behavior")]
     [DefaultValue(true)]
@@ -375,8 +381,17 @@ public class MenuStrip : ElementBase
         _defaultSkFont = null;
         _defaultSkFontSource = null;
         _defaultSkFontDpi = 0;
+        ReleaseShortcutFontResources();
+    }
+
+    private void ReleaseShortcutFontResources()
+    {
         _shortcutSkFont?.Dispose();
         _shortcutSkFont = null;
+        if (_ownsShortcutTypeface)
+            _shortcutTypeface?.Dispose();
+        _shortcutTypeface = null;
+        _ownsShortcutTypeface = false;
         _shortcutSkFontSource = null;
         _shortcutSkFontDpi = 0;
     }
@@ -414,14 +429,15 @@ public class MenuStrip : ElementBase
         var font = Font;
         if (_shortcutSkFont == null || !ReferenceEquals(_shortcutSkFontSource, font) || _shortcutSkFontDpi != dpi)
         {
-            _shortcutSkFont?.Dispose();
+            ReleaseShortcutFontResources();
 
             var shortcutWeight = font.IsBold() ? SKFontStyleWeight.Bold : SKFontStyleWeight.SemiBold;
-            using var shortcutTypeface = SKTypeface.FromFamilyName(
+            _shortcutTypeface = SKTypeface.FromFamilyName(
                 font.GetFamilyName(),
                 new SKFontStyle(shortcutWeight, SKFontStyleWidth.Normal, font.IsItalic() ? SKFontStyleSlant.Italic : SKFontStyleSlant.Upright));
+            _ownsShortcutTypeface = _shortcutTypeface != null;
 
-            _shortcutSkFont = new SKFont(shortcutTypeface ?? SKTypeface.Default)
+            _shortcutSkFont = new SKFont(_shortcutTypeface ?? font.Typeface ?? SKTypeface.Default)
             {
                 Size = 8.Topx(this),
                 Subpixel = true,
@@ -965,7 +981,9 @@ public class MenuStrip : ElementBase
             if (_hoveredItem?.HasDropDown == true && _openedItem != _hoveredItem)
             {
                 CancelPendingSubmenuClose();
-                OpenSubmenu(_hoveredItem);
+                // Open on hover only if OpenOnHover is enabled OR a submenu is already open (switch mode)
+                if (OpenOnHover || _openedItem != null)
+                    OpenSubmenu(_hoveredItem);
             }
             // If hovering over item without dropdown but a submenu is open, close it
             else if (_hoveredItem != null && !_hoveredItem.HasDropDown && _openedItem != null)
@@ -1432,8 +1450,7 @@ public class MenuStrip : ElementBase
             _chevronPath?.Dispose();
             _defaultSkFont?.Dispose();
             _defaultSkFont = null;
-            _shortcutSkFont?.Dispose();
-            _shortcutSkFont = null;
+            ReleaseShortcutFontResources();
         }
 
         base.Dispose(disposing);

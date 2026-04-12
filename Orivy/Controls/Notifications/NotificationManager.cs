@@ -1,3 +1,4 @@
+using Orivy;
 using SkiaSharp;
 using System;
 using System.Collections.Generic;
@@ -7,30 +8,21 @@ namespace Orivy.Controls;
 
 internal sealed class NotificationManager : IDisposable
 {
-	private float MarginRight => 4f * _owner.ScaleFactor;
+	private float MarginRight  => 4f * _owner.ScaleFactor;
+	private float MarginLeft   => 4f * _owner.ScaleFactor;
+	private float MarginTop    => 4f * _owner.ScaleFactor;
 	private float MarginBottom => 4f * _owner.ScaleFactor;
-	private float ToastSpacing => 8f * _owner.ScaleFactor;
+	private float ToastSpacing       => 8f * _owner.ScaleFactor;
 	private float ToastShadowPadding => NotificationToast.BaseShadowPadding * _owner.ScaleFactor;
 
+	private static bool IsTopAlignment(ContentAlignment alignment) =>
+		alignment is ContentAlignment.TopLeft or ContentAlignment.TopCenter or ContentAlignment.TopRight;
+
 	private readonly WindowBase _owner;
-	private readonly NotificationTray _tray;
-	private readonly List<NotificationToast> _active = new();
+	private readonly Dictionary<ContentAlignment, NotificationTray> _trays = new();
+	private readonly Dictionary<ContentAlignment, List<NotificationToast>> _activeByAlignment = new();
 	private bool _disposed;
 	private NotificationToastPalette? _customPalette;
-	private NotificationToastThemeMode _themeMode = NotificationToastThemeMode.Auto;
-
-	public NotificationToastThemeMode ThemeMode
-	{
-		get => _themeMode;
-		set
-		{
-			if (_themeMode == value)
-				return;
-
-			_themeMode = value;
-			RefreshActiveToastThemes();
-		}
-	}
 
 	public NotificationToastPalette? CustomPalette
 	{
@@ -41,27 +33,15 @@ internal sealed class NotificationManager : IDisposable
 				return;
 
 			_customPalette = value;
-			if (_themeMode == NotificationToastThemeMode.Custom)
-				RefreshActiveToastThemes();
+			RefreshActiveToastThemes();
 		}
 	}
 
 	public NotificationManager(WindowBase owner)
 	{
 		_owner = owner ?? throw new ArgumentNullException(nameof(owner));
-
-		_tray = new NotificationTray
-		{
-			Visible = false,
-			Size = new SKSize((NotificationToast.BaseToastWidth * _owner.ScaleFactor) + (ToastShadowPadding * 2f), 1),
-			Location = SKPoint.Empty,
-		};
-
-		_owner.Controls.Add(_tray);
-		EnsureTrayTopMost();
-
-		_owner.SizeChanged += OnOwnerSizeChanged;
-		_owner.DpiChanged += OnOwnerDpiChanged;
+		_owner.SizeChanged  += OnOwnerSizeChanged;
+		_owner.DpiChanged   += OnOwnerDpiChanged;
 		_owner.ControlAdded += OnOwnerControlAdded;
 	}
 
@@ -121,8 +101,9 @@ internal sealed class NotificationManager : IDisposable
 
 	public void DismissAll()
 	{
-		for (var i = _active.Count - 1; i >= 0; i--)
-			_active[i].BeginDismiss();
+		foreach (var list in _activeByAlignment.Values)
+			for (var i = list.Count - 1; i >= 0; i--)
+				list[i].BeginDismiss();
 	}
 
 	private NotificationHandle ShowCore(
@@ -135,8 +116,10 @@ internal sealed class NotificationManager : IDisposable
 		if (_disposed)
 			throw new ObjectDisposedException(nameof(NotificationManager));
 
-		var resolvedThemeMode = options.ThemeMode ?? _themeMode;
+		var alignment           = options.Position ?? ContentAlignment.BottomRight;
 		var resolvedCustomPalette = options.CustomPalette ?? _customPalette;
+
+		var tray = GetOrCreateTray(alignment);
 
 		var toast = new NotificationToast(
 			title,
@@ -145,9 +128,9 @@ internal sealed class NotificationManager : IDisposable
 			options.DurationMs,
 			options.ShowProgressBar,
 			options.Progress,
-			resolvedThemeMode,
 			resolvedCustomPalette,
-			options.Actions)
+			options.Actions,
+			alignment)
 		{
 			OnDismissWithoutAction = onDismissWithoutAction,
 		};
@@ -156,15 +139,22 @@ internal sealed class NotificationManager : IDisposable
 
 		toast.DismissCompleted += OnToastDismissed;
 
-		_tray.Controls.Add(toast);
+		tray.Controls.Add(toast);
 		toast.RefreshForScale();
-		_active.Add(toast);
-		_tray.Controls.SetChildIndex(toast, _tray.Controls.Count - 1);
-		_tray.UpdateZOrder();
+
+		if (!_activeByAlignment.TryGetValue(alignment, out var activeList))
+		{
+			activeList = new List<NotificationToast>();
+			_activeByAlignment[alignment] = activeList;
+		}
+		activeList.Add(toast);
+
+		tray.Controls.SetChildIndex(toast, tray.Controls.Count - 1);
+		tray.UpdateZOrder();
 		toast.BringToFront();
 
-		SyncTray();
-		_tray.Invalidate();
+		SyncTray(alignment);
+		tray.Invalidate();
 		return handle;
 	}
 
@@ -175,15 +165,21 @@ internal sealed class NotificationManager : IDisposable
 
 		dismissed.DismissCompleted -= OnToastDismissed;
 
-		var index = _active.IndexOf(dismissed);
+		var alignment = dismissed._alignment;
+		if (!_activeByAlignment.TryGetValue(alignment, out var activeList))
+			return;
+
+		var index = activeList.IndexOf(dismissed);
 		if (index < 0)
 			return;
 
-		_active.RemoveAt(index);
+		activeList.RemoveAt(index);
 
-		_tray.Controls.Remove(dismissed);
+		if (_trays.TryGetValue(alignment, out var tray))
+			tray.Controls.Remove(dismissed);
+
 		var deferredCompletion = dismissed.TakeDeferredCompletionAction();
-		var activeCountBeforeDeferred = _active.Count;
+		var activeCountBeforeDeferred = activeList.Count;
 		dismissed.DetachHandle();
 		dismissed.Dispose();
 
@@ -192,19 +188,20 @@ internal sealed class NotificationManager : IDisposable
 		if (_disposed)
 			return;
 
-		if (_active.Count == activeCountBeforeDeferred)
-			SyncTray(true);
+		if (activeList.Count == activeCountBeforeDeferred)
+			SyncTray(alignment);
 	}
 
 	private void OnOwnerDpiChanged(object? sender, EventArgs e)
 	{
-			if (_disposed)
-				return;
+		if (_disposed)
+			return;
 
-			foreach (var toast in _active)
+		foreach (var list in _activeByAlignment.Values)
+			foreach (var toast in list)
 				toast.RefreshForScale();
 
-			SyncTray(true);
+		SyncAllTrays(true);
 	}
 
 	private void OnOwnerSizeChanged(object? sender, EventArgs e)
@@ -212,93 +209,181 @@ internal sealed class NotificationManager : IDisposable
 		if (_disposed)
 			return;
 
-		SyncTray();
+		SyncAllTrays();
 	}
 
 	private void OnOwnerControlAdded(object? sender, ElementEventArgs e)
 	{
-		if (_disposed || ReferenceEquals(e.Element, _tray))
+		if (_disposed)
 			return;
 
-		EnsureTrayTopMost();
+		foreach (var tray in _trays.Values)
+		{
+			if (ReferenceEquals(e.Element, tray))
+				return;
+		}
+
+		EnsureAllTraysTopMost();
 	}
 
-	private void SyncTray(bool snap = false)
+	private NotificationTray GetOrCreateTray(ContentAlignment alignment)
 	{
-		if (_active.Count == 0)
+		if (_trays.TryGetValue(alignment, out var existing))
+			return existing;
+
+		var tray = new NotificationTray
 		{
-			_tray.Visible = false;
+			Visible  = false,
+			Size     = new SKSize((NotificationToast.BaseToastWidth * _owner.ScaleFactor) + (ToastShadowPadding * 2f), 1),
+			Location = SKPoint.Empty,
+		};
+
+		_trays[alignment] = tray;
+		_owner.Controls.Add(tray);
+		EnsureAllTraysTopMost();
+		return tray;
+	}
+
+	private void SyncAllTrays(bool snap = false)
+	{
+		foreach (var alignment in _trays.Keys)
+			SyncTray(alignment, snap);
+	}
+
+	private void SyncTray(ContentAlignment alignment, bool snap = false)
+	{
+		if (!_trays.TryGetValue(alignment, out var tray))
+			return;
+
+		if (!_activeByAlignment.TryGetValue(alignment, out var activeList) || activeList.Count == 0)
+		{
+			tray.Visible = false;
 			return;
 		}
 
 		var topInset = 0f;
 		if (_owner is Window window && window.ShowTitle)
 			topInset = _owner.Padding.Top;
+		var isTop = IsTopAlignment(alignment);
 
-		var totalHeight = TotalContentHeight();
-		var availableHeight = Math.Max(1f, _owner.Height - topInset - MarginBottom);
-		_tray.Resize(totalHeight, availableHeight);
-		var trayHeight = _tray.Height;
+		Dictionary<NotificationToast, float>? previousScreenY = null;
+		if (!snap)
+			previousScreenY = CaptureScreenPositions(activeList, tray.Location.Y, tray.VerticalDisplayOffset);
 
-		_tray.Location = new SKPoint(
-			_owner.Width - MarginRight - _tray.Width,
-			topInset + (availableHeight - trayHeight));
+		var totalHeight     = TotalContentHeight(activeList);
+		var availableHeight = Math.Max(1f, _owner.Height - topInset - MarginTop - MarginBottom);
+		tray.Resize(totalHeight, availableHeight);
+		var trayHeight = tray.Height;
+		var targetScrollOffset = ResolveTargetScrollOffset(totalHeight, trayHeight, isTop);
 
-		EnsureTrayTopMost();
-		ArrangeToasts(totalHeight, trayHeight, snap);
-		_tray.RefreshScrollMetrics();
+		float trayX = alignment switch
+		{
+			ContentAlignment.TopLeft   or ContentAlignment.BottomLeft   => MarginLeft,
+			ContentAlignment.TopCenter or ContentAlignment.BottomCenter => (_owner.Width - tray.Width) / 2f,
+			_                                                           => _owner.Width - MarginRight - tray.Width,
+		};
 
-		if (totalHeight > trayHeight)
-			_tray.ScrollToBottom();
-		else
-			_tray.ScrollToTop();
+		float trayY = isTop
+			? topInset + MarginTop
+			: topInset + MarginTop + (availableHeight - trayHeight);
 
-		_tray.Visible = true;
-		_tray.Invalidate();
+		tray.Location = new SKPoint(trayX, trayY);
+
+		EnsureAllTraysTopMost();
+		ArrangeToasts(activeList, totalHeight, trayHeight, trayY, targetScrollOffset, snap, previousScreenY);
+		tray.RefreshScrollMetrics();
+		tray.SetVerticalScrollOffset(targetScrollOffset, immediate: true);
+
+		tray.Visible = true;
+		tray.Invalidate();
 	}
 
-	private void ArrangeToasts(float totalHeight, float viewportHeight, bool snap = false)
+	private void ArrangeToasts(
+		List<NotificationToast> activeList,
+		float totalHeight,
+		float viewportHeight,
+		float trayY,
+		float targetScrollOffset,
+		bool snap,
+		Dictionary<NotificationToast, float>? previousScreenY)
 	{
 		var startY = Math.Max(0f, viewportHeight - totalHeight) + ToastShadowPadding;
 		var y = startY;
 
-		for (var i = 0; i < _active.Count; i++)
+		for (var i = 0; i < activeList.Count; i++)
 		{
-			var toast = _active[i];
+			var toast = activeList[i];
 			if (!toast._hasBeenPlaced)
 				toast.Place(ToastShadowPadding, y);
 			else if (snap)
 				toast.SnapTo(y);
 			else
-				toast.MoveTo(y);
+			{
+				var oldScreenY = toast.GetVisualScreenY(trayY, targetScrollOffset);
+				if (previousScreenY != null)
+					previousScreenY.TryGetValue(toast, out oldScreenY);
+
+				var newScreenY = trayY + y - targetScrollOffset;
+				toast.MoveTo(y, oldScreenY, newScreenY);
+			}
 
 			y += toast.Height + ToastSpacing;
 		}
 	}
 
+	private static Dictionary<NotificationToast, float> CaptureScreenPositions(
+		List<NotificationToast> activeList,
+		float trayY,
+		float scrollOffset)
+	{
+		var positions = new Dictionary<NotificationToast, float>(activeList.Count);
+		for (var i = 0; i < activeList.Count; i++)
+		{
+			var toast = activeList[i];
+			if (!toast._hasBeenPlaced)
+				continue;
+
+			positions[toast] = toast.GetVisualScreenY(trayY, scrollOffset);
+		}
+
+		return positions;
+	}
+
+	private static float ResolveTargetScrollOffset(float totalHeight, float trayHeight, bool isTopAlignment)
+	{
+		if (totalHeight <= trayHeight)
+			return 0f;
+
+		return isTopAlignment ? 0f : totalHeight - trayHeight;
+	}
+
 	private void RefreshActiveToastThemes()
 	{
-		for (var i = 0; i < _active.Count; i++)
-			_active[i].RefreshTheme();
+		foreach (var list in _activeByAlignment.Values)
+			for (var i = 0; i < list.Count; i++)
+				list[i].RefreshTheme();
 	}
 
-	private void EnsureTrayTopMost()
+	private void EnsureAllTraysTopMost()
 	{
-		if (_owner.Controls.Count > 0)
-			_owner.Controls.SetChildIndex(_tray, _owner.Controls.Count - 1);
+		foreach (var tray in _trays.Values)
+		{
+			if (_owner.Controls.Count > 0)
+				_owner.Controls.SetChildIndex(tray, _owner.Controls.Count - 1);
 
-		_owner.UpdateZOrder();
-		_tray.BringToFront();
+			_owner.UpdateZOrder();
+			tray.BringToFront();
+		}
 	}
 
-	private float TotalContentHeight()
+	private float TotalContentHeight(List<NotificationToast> activeList)
 	{
-		var total = _active.Count > 0 ? ToastShadowPadding * 2f : 0f;
-		for (var i = 0; i < _active.Count; i++)
+		var total = activeList.Count > 0 ? ToastShadowPadding * 2f : 0f;
+		for (var i = 0; i < activeList.Count; i++)
 		{
 			if (i > 0)
 				total += ToastSpacing;
-			total += _active[i].Height;
+			total += activeList[i].Height;
 		}
 
 		return total;
@@ -310,20 +395,30 @@ internal sealed class NotificationManager : IDisposable
 			return;
 
 		_disposed = true;
-		_owner.SizeChanged -= OnOwnerSizeChanged;
-		_owner.DpiChanged -= OnOwnerDpiChanged;
+		_owner.SizeChanged  -= OnOwnerSizeChanged;
+		_owner.DpiChanged   -= OnOwnerDpiChanged;
 		_owner.ControlAdded -= OnOwnerControlAdded;
 
-		for (var i = _active.Count - 1; i >= 0; i--)
+		foreach (var (alignment, list) in _activeByAlignment)
 		{
-			var toast = _active[i];
-			toast.DismissCompleted -= OnToastDismissed;
-			_tray.Controls.Remove(toast);
-			toast.Dispose();
+			for (var i = list.Count - 1; i >= 0; i--)
+			{
+				var toast = list[i];
+				toast.DismissCompleted -= OnToastDismissed;
+				if (_trays.TryGetValue(alignment, out var t))
+					t.Controls.Remove(toast);
+				toast.Dispose();
+			}
 		}
 
-		_active.Clear();
-		_owner.Controls.Remove(_tray);
-		_tray.Dispose();
+		_activeByAlignment.Clear();
+
+		foreach (var tray in _trays.Values)
+		{
+			_owner.Controls.Remove(tray);
+			tray.Dispose();
+		}
+
+		_trays.Clear();
 	}
 }

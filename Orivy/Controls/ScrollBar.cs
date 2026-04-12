@@ -699,6 +699,11 @@ public class ScrollBar : ElementBase
         return true;
     }
 
+    internal void SetValueImmediate(float value)
+    {
+        SetValueCore(value, animate: false);
+    }
+
     /// <summary>
     /// Returns the best starting point for an accumulated delta:
     /// continues from the display value when we are already overflowing,

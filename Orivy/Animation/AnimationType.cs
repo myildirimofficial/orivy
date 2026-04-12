@@ -15,5 +15,6 @@ public enum AnimationType
     QuarticEaseIn,
     QuarticEaseOut,
     QuarticEaseInOut,
-    CustomQuadratic
+    CustomQuadratic,
+    BackOut
 }

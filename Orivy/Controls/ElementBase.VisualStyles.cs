@@ -11,6 +11,7 @@ public abstract partial class ElementBase
     private readonly AnimationManager _visualStyleAnimation = new(true);
     private ElementVisualStyleSnapshot _styleAnimationFrom;
     private ElementVisualStyleSnapshot _styleAnimationTo;
+    private ElementVisualTransitionDescriptor _styleAnimationTransition;
     private ElementVisualStyleSnapshot _styleBaseSnapshot;
     private ElementVisualStyleSnapshot _styleEffectiveSnapshot;
     private bool _hasVisualStyleBaseOverride;
@@ -67,6 +68,7 @@ public abstract partial class ElementBase
         _styleEffectiveSnapshot = _styleBaseSnapshot;
         _styleAnimationFrom = _styleBaseSnapshot;
         _styleAnimationTo = _styleBaseSnapshot;
+        _styleAnimationTransition = VisualTransition.ToDescriptor();
 
         _visualStyleAnimation.AnimationType = VisualTransition.AnimationType;
         _visualStyleAnimation.Increment = VisualTransition.GetIncrement();
@@ -124,27 +126,7 @@ public abstract partial class ElementBase
 
         var targetTransition = VisualTransition;
         var targetSnapshot = ResolveVisualStyleSnapshot(ref targetTransition);
-        if (_styleAnimationTo.Equals(targetSnapshot) && !_visualStyleAnimation.IsAnimating())
-            return;
-
-        _styleAnimationTo = targetSnapshot;
-
-        if (forceImmediate || !targetTransition.Enabled || targetTransition.Duration <= TimeSpan.Zero)
-        {
-            _visualStyleAnimation.SetProgress(1);
-            ApplyEffectiveVisualStyle(targetSnapshot);
-            return;
-        }
-
-        _styleAnimationFrom = _styleEffectiveSnapshot;
-        if (_styleAnimationFrom.Equals(targetSnapshot))
-            return;
-
-        _visualStyleAnimation.AnimationType = targetTransition.AnimationType;
-        _visualStyleAnimation.Increment = targetTransition.GetIncrement();
-        _visualStyleAnimation.SecondaryIncrement = _visualStyleAnimation.Increment;
-        _visualStyleAnimation.SetProgress(0);
-        _visualStyleAnimation.StartNewAnimation(AnimationDirection.In);
+        ApplyOrStartVisualStyleTransition(targetSnapshot, targetTransition.ToDescriptor(), forceImmediate);
     }
 
     private ElementVisualStyleSnapshot ResolveVisualStyleSnapshot(ref ElementVisualTransition transition)
@@ -200,6 +182,45 @@ public abstract partial class ElementBase
     private void HandleVisualStyleAnimationFinished(object _)
     {
         ApplyEffectiveVisualStyle(_styleAnimationTo);
+        OnVisualStyleTransitionCompleted();
+    }
+
+    protected virtual void OnVisualStyleTransitionCompleted() { }
+
+    private void ApplyOrStartVisualStyleTransition(
+        in ElementVisualStyleSnapshot targetSnapshot,
+        ElementVisualTransitionDescriptor targetTransition,
+        bool forceImmediate)
+    {
+        var transitionChanged = _styleAnimationTransition != targetTransition;
+        var allowReplayOnReevaluate = targetTransition.Mode == ElementVisualTransitionMode.ReplayOnReevaluate;
+        var targetUnchanged = _styleAnimationTo.Equals(targetSnapshot);
+
+        if (!transitionChanged && targetUnchanged && !_visualStyleAnimation.IsAnimating())
+        {
+            if (!allowReplayOnReevaluate || _styleEffectiveSnapshot.Equals(targetSnapshot))
+                return;
+        }
+
+        _styleAnimationTo = targetSnapshot;
+        _styleAnimationTransition = targetTransition;
+
+        if (forceImmediate || !targetTransition.Enabled || targetTransition.Duration <= TimeSpan.Zero)
+        {
+            _visualStyleAnimation.SetProgress(1);
+            ApplyEffectiveVisualStyle(targetSnapshot);
+            return;
+        }
+
+        _styleAnimationFrom = _styleEffectiveSnapshot;
+        if (_styleAnimationFrom.Equals(targetSnapshot))
+            return;
+
+        _visualStyleAnimation.AnimationType = targetTransition.AnimationType;
+        _visualStyleAnimation.Increment = targetTransition.GetIncrement();
+        _visualStyleAnimation.SecondaryIncrement = _visualStyleAnimation.Increment;
+        _visualStyleAnimation.SetProgress(0);
+        _visualStyleAnimation.StartNewAnimation(AnimationDirection.In);
     }
 
     private void ApplyEffectiveVisualStyle(in ElementVisualStyleSnapshot snapshot)
@@ -212,6 +233,10 @@ public abstract partial class ElementBase
         var previousRadius = _radius;
         var previousShadows = _shadows;
         var previousOpacity = _opacity;
+        var previousTranslateX = _renderTranslateX;
+        var previousTranslateY = _renderTranslateY;
+        var previousScaleX = _renderScaleX;
+        var previousScaleY = _renderScaleY;
 
         _size = snapshot.Size;
         _backColor = snapshot.BackColor;
@@ -221,6 +246,10 @@ public abstract partial class ElementBase
         _radius = snapshot.Radius;
         _shadows = ElementVisualStyleInterpolator.CloneShadows(snapshot.Shadows);
         _opacity = snapshot.Opacity;
+        _renderTranslateX = snapshot.TranslateX;
+        _renderTranslateY = snapshot.TranslateY;
+        _renderScaleX = snapshot.ScaleX;
+        _renderScaleY = snapshot.ScaleY;
         _styleEffectiveSnapshot = new ElementVisualStyleSnapshot(
             _size,
             _backColor,
@@ -229,7 +258,11 @@ public abstract partial class ElementBase
             _borderColor,
             _radius,
             _shadows,
-            _opacity);
+            _opacity,
+            _renderTranslateX,
+            _renderTranslateY,
+            _renderScaleX,
+            _renderScaleY);
 
         var sizeChanged = previousSize != _size;
         var visualsChanged = previousBackColor != _backColor ||
@@ -238,6 +271,10 @@ public abstract partial class ElementBase
                              previousBorderColor != _borderColor ||
                              previousRadius != _radius ||
                              Math.Abs(previousOpacity - _opacity) > 0.0001f ||
+                             Math.Abs(previousTranslateX - _renderTranslateX) > 0.01f ||
+                             Math.Abs(previousTranslateY - _renderTranslateY) > 0.01f ||
+                             Math.Abs(previousScaleX - _renderScaleX) > 0.001f ||
+                             Math.Abs(previousScaleY - _renderScaleY) > 0.001f ||
                              !ElementVisualStyleInterpolator.AreShadowsEqual(previousShadows, _shadows);
 
         if (sizeChanged)
@@ -264,7 +301,21 @@ public abstract partial class ElementBase
             _borderColor,
             _radius,
             ElementVisualStyleInterpolator.CloneShadows(_shadows),
-            _opacity);
+            _opacity,
+            _renderTranslateX,
+            _renderTranslateY,
+            _renderScaleX,
+            _renderScaleY);
+    }
+
+    internal void OffsetEffectiveTranslateY(float delta)
+    {
+        if (Math.Abs(delta) < 0.5f)
+            return;
+
+        _renderTranslateY += delta;
+        _styleEffectiveSnapshot = _styleEffectiveSnapshot.WithTranslateY(_styleEffectiveSnapshot.TranslateY + delta);
+        Invalidate();
     }
 
     private void SetStyleBaseSize(SKSize size)

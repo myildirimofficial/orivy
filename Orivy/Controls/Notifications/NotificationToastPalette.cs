@@ -1,3 +1,4 @@
+using Orivy;
 using SkiaSharp;
 using System;
 
@@ -10,6 +11,19 @@ public sealed class NotificationToastPalette
 		BackgroundColor = backgroundColor;
 		AccentColor = accentColor;
 		ForegroundColor = foregroundColor;
+		IsDarkSurface = backgroundColor.IsDark();
+
+		var baseSurface = IsDarkSurface
+			? backgroundColor.Brightness(0.08f).WithAlpha(216)
+			: backgroundColor.Brightness(-0.05f).WithAlpha(164);
+
+		SurfaceVariantColor = baseSurface;
+		OutlineColor = foregroundColor.WithAlpha(IsDarkSurface ? (byte)96 : (byte)72);
+		PrimaryActionBackgroundColor = accentColor;
+		PrimaryActionForegroundColor = accentColor.Determine().WithAlpha(255);
+		SecondaryActionForegroundColor = foregroundColor;
+		CloseButtonIdleForegroundColor = foregroundColor.WithAlpha(IsDarkSurface ? (byte)160 : (byte)148);
+		CloseButtonActiveForegroundColor = foregroundColor.WithAlpha(228);
 	}
 
 	public SKColor BackgroundColor { get; }
@@ -17,6 +31,22 @@ public sealed class NotificationToastPalette
 	public SKColor AccentColor { get; }
 
 	public SKColor ForegroundColor { get; }
+
+	public bool IsDarkSurface { get; }
+
+	public SKColor SurfaceVariantColor { get; }
+
+	public SKColor OutlineColor { get; }
+
+	public SKColor PrimaryActionBackgroundColor { get; }
+
+	public SKColor PrimaryActionForegroundColor { get; }
+
+	public SKColor SecondaryActionForegroundColor { get; }
+
+	public SKColor CloseButtonIdleForegroundColor { get; }
+
+	public SKColor CloseButtonActiveForegroundColor { get; }
 
 	public NotificationToastPalette WithForeground(SKColor foregroundColor)
 		=> new(BackgroundColor, AccentColor, foregroundColor);
@@ -27,18 +57,15 @@ public sealed class NotificationToastPalette
 	public NotificationToastPalette WithBackground(SKColor backgroundColor)
 		=> new(backgroundColor, AccentColor, ForegroundColor);
 
-	public static NotificationToastPalette FromKind(NotificationKind kind, NotificationToastThemeMode mode)
+	public static NotificationToastPalette FromKind(NotificationKind kind, NotificationToastPalette? customPalette = null)
 	{
-		var resolvedMode = mode switch
+		return kind switch
 		{
-			NotificationToastThemeMode.Auto => throw new ArgumentException("Auto mode must be resolved before requesting a preset palette.", nameof(mode)),
-			NotificationToastThemeMode.Custom => throw new ArgumentException("Custom mode requires an explicit palette.", nameof(mode)),
-			_ => mode
+			NotificationKind.Custom => customPalette ?? throw new InvalidOperationException("Custom notification kind requires a CustomPalette."),
+			NotificationKind.Dark => CreateDarkPalette(NotificationKind.Info),
+			NotificationKind.Light => CreateLightPalette(NotificationKind.Info),
+			_ => ColorScheme.IsDarkMode ? CreateDarkPalette(kind) : CreateLightPalette(kind),
 		};
-
-		return resolvedMode == NotificationToastThemeMode.Dark
-			? CreateDarkPalette(kind)
-			: CreateLightPalette(kind);
 	}
 
 	private static NotificationToastPalette CreateDarkPalette(NotificationKind kind)

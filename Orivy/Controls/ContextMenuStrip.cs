@@ -1,6 +1,7 @@
 ﻿using Orivy.Animation;
 using Orivy.Binding;
 using Orivy.Helpers;
+using Orivy.Styling;
 using SkiaSharp;
 using System;
 using System.Collections.Generic;
@@ -41,7 +42,6 @@ public class ContextMenuStrip : MenuStrip
     private const double AccordionAnimationIncrement = 0.18;
     private const float PopupMargin = 8f;
     private const float ScrollBarGap = 4f;
-    private readonly AnimationManager _fadeInAnimation;
     private bool _isClosing;
 
     private readonly Dictionary<MenuItem, AnimationManager> _itemHoverAnims = new();
@@ -76,7 +76,6 @@ public class ContextMenuStrip : MenuStrip
     private float _lastMetricsDpi;
     private float _maxPopupHeight;
     private float _minPopupWidth;
-    private float _openingTargetOpacity = 1f;
     private float _verticalItemGap;
     private float _scrollOffset;
     private float _viewportHeight;
@@ -136,41 +135,26 @@ public class ContextMenuStrip : MenuStrip
             _hScrollBar.Visible = false;
         }
 
-        _fadeInAnimation = new AnimationManager
-        {
-            Increment = 0.20,
-            AnimationType = AnimationType.EaseOut,
-            Singular = true,
-            InterruptAnimation = false
-        };
-        _fadeInAnimation.OnAnimationProgress += _ =>
-        {
-            var progress = (float)_fadeInAnimation.GetProgress();
-            var openProgress = _fadeInAnimation.Direction == AnimationDirection.Out ? 1f - progress : progress;
-            var opacity = _openingTargetOpacity * (OpeningOpacityFloor + (1f - OpeningOpacityFloor) * openProgress);
-            if (Math.Abs(Opacity - opacity) > 0.0001f)
-                Opacity = opacity;
-
-            Invalidate();
-        };
-        _fadeInAnimation.OnAnimationFinished += _ =>
-        {
-            if (_fadeInAnimation.Direction == AnimationDirection.In)
-            {
-                if (Math.Abs(Opacity - _openingTargetOpacity) > 0.0001f)
-                    Opacity = _openingTargetOpacity;
-
-                _isClosing = false;
-                Invalidate();
-                return;
-            }
-
-            CompleteHide();
-        };
-
         _ctxSlideAnim = new AnimationManager
             { Increment = 0.22, AnimationType = AnimationType.EaseOut, InterruptAnimation = true };
         _ctxSlideAnim.OnAnimationProgress += _ => Invalidate();
+
+        Opacity = 0f;
+        ConfigureVisualStyles(styles => styles
+            .When(
+                (el, _) => el is ContextMenuStrip ctx && ctx.IsOpen && !ctx._isClosing,
+                rule => rule
+                    .Opacity(1f)
+                    .Scale(1f)
+                    .TranslateY(0f)
+                    .Transition(TimeSpan.FromMilliseconds(200), AnimationType.BackOut))
+            .When(
+                (el, _) => el is ContextMenuStrip ctx && ctx._isClosing,
+                rule => rule
+                    .Opacity(0f)
+                    .Scale(0.96f)
+                    .TranslateY(0f)
+                    .Transition(TimeSpan.FromMilliseconds(110), AnimationType.CubicEaseIn)));
 
         ColorScheme.ThemeChanged += OnContextThemeChanged;
     }
@@ -291,11 +275,10 @@ public class ContextMenuStrip : MenuStrip
         {
             // Force-close without resetting the anchor state — ConfigureElementAnchor
             // was already called before ShowCore and must remain intact for positioning.
-            _fadeInAnimation.Stop();
             IsOpen = false;
             _isClosing = false;
             Visible = false;
-            Opacity = _openingTargetOpacity;
+            Opacity = 0f;
             DetachHandlers();
             _ownerWindow = null!;
         }
@@ -355,13 +338,21 @@ public class ContextMenuStrip : MenuStrip
 
         AttachHandlers();
 
-        _openingTargetOpacity = Math.Clamp(Opacity, 0.01f, 1f);
-        Opacity = _openingTargetOpacity * OpeningOpacityFloor;
-        _fadeInAnimation.SetProgress(0);
-        _fadeInAnimation.StartNewAnimation(AnimationDirection.In);
+        var dpiScale = DeviceDpi > 0 ? DeviceDpi / 96f : 1f;
+        _renderScalePivotX = 0.5f;
+        _renderScalePivotY = _openingUpwards ? 1.0f : 0.0f;
+        ApplyVisualStyleBase(new ElementVisualStyle
+        {
+            Opacity = 0f,
+            ScaleX = 0.96f,
+            ScaleY = 0.96f,
+            TranslateY = (_openingUpwards ? 4f : -4f) * dpiScale,
+        });
+
+        IsOpen = true;
+        ReevaluateVisualStyles();
 
         _ownerWindow.Invalidate();
-        IsOpen = true;
 
         Opened?.Invoke(this, EventArgs.Empty);
     }
@@ -393,12 +384,13 @@ public class ContextMenuStrip : MenuStrip
         // Close any open submenus before hiding
         CloseSubmenu();
 
-        // Stop any in-progress opening animation before starting the close,
-        // otherwise StartNewAnimation(Out) is skipped when Running=true and
-        // InterruptAnimation=false, leaving the dropdown stuck open.
-        _fadeInAnimation.Stop();
-        _fadeInAnimation.SetProgress(0);
-        _fadeInAnimation.StartNewAnimation(AnimationDirection.Out);
+        ReevaluateVisualStyles();
+    }
+
+    protected override void OnVisualStyleTransitionCompleted()
+    {
+        if (_isClosing && Opacity <= 0.001f)
+            CompleteHide();
     }
 
     private void CompleteHide()
@@ -417,7 +409,6 @@ public class ContextMenuStrip : MenuStrip
         ParentDropDown = null;
         ResetElementAnchor();
         ResetAccordionState();
-        Opacity = _openingTargetOpacity;
     }
 
     private void ConfigureElementAnchor(ElementBase element, SKRect anchorBounds, PopupAnchorPlacement placement)
@@ -1394,10 +1385,7 @@ public class ContextMenuStrip : MenuStrip
     {
         EnsureSkiaCaches();
 
-        var fadeProgress = (float)_fadeInAnimation.GetProgress();
-        if (_fadeInAnimation.Direction == AnimationDirection.Out)
-            fadeProgress = 1f - fadeProgress;
-
+        var fadeProgress = Opacity;
         var fadeAlpha = (byte)(fadeProgress * 255);
 
         var animationSaveCount = -1;

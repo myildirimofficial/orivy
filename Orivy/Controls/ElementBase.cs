@@ -331,6 +331,12 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
     private float _opacity = 1f;
+    internal float _renderTranslateX;
+    internal float _renderTranslateY;
+    internal float _renderScaleX = 1f;
+    internal float _renderScaleY = 1f;
+    internal float _renderScalePivotX = 0.5f;
+    internal float _renderScalePivotY = 0.5f;
 
     [Category("Appearance")]
     [DefaultValue(1f)]
@@ -1994,7 +2000,16 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         try
         {
             var saved = targetCanvas.Save();
-            targetCanvas.Translate(Location.X, Location.Y);
+            targetCanvas.Translate(Location.X + _renderTranslateX, Location.Y + _renderTranslateY);
+
+            if (Math.Abs(_renderScaleX - 1f) > 0.0001f || Math.Abs(_renderScaleY - 1f) > 0.0001f)
+            {
+                var pivotX = Width * _renderScalePivotX;
+                var pivotY = Height * _renderScalePivotY;
+                targetCanvas.Translate(pivotX, pivotY);
+                targetCanvas.Scale(_renderScaleX, _renderScaleY);
+                targetCanvas.Translate(-pivotX, -pivotY);
+            }
 
             int layerSaveCount = -1;
             SKPaint? layerPaint = null;

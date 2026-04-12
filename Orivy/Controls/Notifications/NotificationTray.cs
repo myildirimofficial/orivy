@@ -19,6 +19,8 @@ internal sealed class NotificationTray : ElementBase
 		AutoScrollMinSize = new SKSize((NotificationToast.BaseToastWidth * ScaleFactor) + (NotificationToast.BaseShadowPadding * ScaleFactor * 2f), 1);
 	}
 
+	internal float VerticalDisplayOffset => _vScrollBar?.Visible == true ? _vScrollBar.DisplayValue : 0f;
+
 	protected override bool TryRenderChildContent(SKCanvas canvas)
 	{
 		RenderChildren(canvas);
@@ -36,6 +38,17 @@ internal sealed class NotificationTray : ElementBase
 	{
 		if (_vScrollBar != null)
 			_vScrollBar.Value = _vScrollBar.Maximum;
+	}
+
+	internal void SetVerticalScrollOffset(float value, bool immediate)
+	{
+		if (_vScrollBar == null)
+			return;
+
+		if (immediate)
+			_vScrollBar.SetValueImmediate(value);
+		else
+			_vScrollBar.Value = value;
 	}
 
 	internal void Resize(float totalContentHeight, float maxHeight)
