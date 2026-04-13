@@ -1645,7 +1645,7 @@ internal partial class MainWindow
         {
             Name       = "embeddedTabToolbar",
             Dock       = DockStyle.Top,
-            Height     = 344,
+            Height     = 402,
             Margin     = new Thickness(0, 0, 0, 16),
             Padding    = new Thickness(16),
             Radius     = new Radius(16),
@@ -1718,7 +1718,30 @@ internal partial class MainWindow
             Border    = new Thickness(0),
         };
 
-        // ── Row 3 label ───────────────────────────────────────────────────────
+        var layoutLabel = new Element
+        {
+            Text      = "Tab Layout",
+            Dock      = DockStyle.Top,
+            Height    = 22,
+            Margin    = new Thickness(0, 0, 0, 6),
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+            ForeColor = ColorScheme.ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)180 : (byte)160),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
+        };
+
+        var embeddedLayoutButtons = new Container
+        {
+            Name      = "embeddedLayoutButtons",
+            Dock      = DockStyle.Top,
+            Height    = 36,
+            Margin    = new Thickness(0, 0, 0, 10),
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+        };
+
+        // ── Row 4 label ───────────────────────────────────────────────────────
         var textAlignmentLabel = new Element
         {
             Text      = "Text Alignment",
@@ -1732,7 +1755,7 @@ internal partial class MainWindow
             Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
         };
 
-        // ── Row 3: text alignment buttons ─────────────────────────────────────
+        // ── Row 4: text alignment buttons ─────────────────────────────────────
         var embeddedTextAlignButtons = new Container
         {
             Name      = "embeddedTextAlignButtons",
@@ -1809,6 +1832,11 @@ internal partial class MainWindow
         var centerAlignButton = MakeToolButton("centerAlignButton", "· Center");
         var endAlignButton    = MakeToolButton("endAlignButton",    "· End");
 
+        var topLayoutButton    = MakeToolButton("topLayoutButton",    "Top");
+        var leftLayoutButton   = MakeToolButton("leftLayoutButton",   "Left");
+        var rightLayoutButton  = MakeToolButton("rightLayoutButton",  "Right");
+        var bottomLayoutButton = MakeToolButton("bottomLayoutButton", "Bottom");
+
         var textAlignTopLeftButton      = MakeTextAlignButton("textAlignTopLeftButton",      "Top Left");
         var textAlignTopCenterButton    = MakeTextAlignButton("textAlignTopCenterButton",    "Top Center");
         var textAlignTopRightButton     = MakeTextAlignButton("textAlignTopRightButton",     "Top Right");
@@ -1862,7 +1890,14 @@ internal partial class MainWindow
                 WindowPageTabAlignment.End    => "End",
                 _                             => "Start",
             };
-            embeddedModeStatus.Text = $"Mode: {modeDesc}\nAlignment: {alignDesc}";
+            var layoutDesc = embeddedPageControl.TabLayoutMode switch
+            {
+                WindowPageTabLayoutMode.Left => "Left",
+                WindowPageTabLayoutMode.Right => "Right",
+                WindowPageTabLayoutMode.Bottom => "Bottom",
+                _ => "Top",
+            };
+            embeddedModeStatus.Text = $"Mode: {modeDesc}\nAlignment: {alignDesc} · Layout: {layoutDesc}";
 
             SetButtonActive(roundedCompactModeButton, mode == WindowPageTabDesignMode.RoundedCompact);
             SetButtonActive(rectangleModeButton,      mode == WindowPageTabDesignMode.Rectangle);
@@ -1883,6 +1918,29 @@ internal partial class MainWindow
             SetButtonActive(startAlignButton,  alignment == WindowPageTabAlignment.Start);
             SetButtonActive(centerAlignButton, alignment == WindowPageTabAlignment.Center);
             SetButtonActive(endAlignButton,    alignment == WindowPageTabAlignment.End);
+        }
+
+        void ApplyEmbeddedTabLayout(WindowPageTabLayoutMode layoutMode)
+        {
+            embeddedPageControl.TabLayoutMode = layoutMode;
+
+            if (layoutMode == WindowPageTabLayoutMode.Top)
+            {
+                windowPageControl.TabMode = WindowPageTabMode.WindowChrome;
+                windowPageControl.TabLayoutMode = WindowPageTabLayoutMode.Top;
+            }
+            else
+            {
+                windowPageControl.TabMode = WindowPageTabMode.Embedded;
+                windowPageControl.TabLayoutMode = layoutMode;
+            }
+
+            ApplyEmbeddedTabDesignMode(embeddedPageControl.TabDesignMode);
+
+            SetButtonActive(topLayoutButton,    layoutMode == WindowPageTabLayoutMode.Top);
+            SetButtonActive(leftLayoutButton,   layoutMode == WindowPageTabLayoutMode.Left);
+            SetButtonActive(rightLayoutButton,  layoutMode == WindowPageTabLayoutMode.Right);
+            SetButtonActive(bottomLayoutButton, layoutMode == WindowPageTabLayoutMode.Bottom);
         }
 
         // ── Apply text alignment ──────────────────────────────────────────────
@@ -1923,6 +1981,11 @@ internal partial class MainWindow
         centerAlignButton.Click += (_, _) => ApplyEmbeddedTabAlignment(WindowPageTabAlignment.Center);
         endAlignButton.Click    += (_, _) => ApplyEmbeddedTabAlignment(WindowPageTabAlignment.End);
 
+        topLayoutButton.Click    += (_, _) => ApplyEmbeddedTabLayout(WindowPageTabLayoutMode.Top);
+        leftLayoutButton.Click   += (_, _) => ApplyEmbeddedTabLayout(WindowPageTabLayoutMode.Left);
+        rightLayoutButton.Click  += (_, _) => ApplyEmbeddedTabLayout(WindowPageTabLayoutMode.Right);
+        bottomLayoutButton.Click += (_, _) => ApplyEmbeddedTabLayout(WindowPageTabLayoutMode.Bottom);
+
         textAlignTopLeftButton.Click      += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.TopLeft);
         textAlignTopCenterButton.Click    += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.TopCenter);
         textAlignTopRightButton.Click     += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.TopRight);
@@ -1948,6 +2011,11 @@ internal partial class MainWindow
         embeddedAlignmentButtons.Controls.Add(centerAlignButton);
         embeddedAlignmentButtons.Controls.Add(startAlignButton);
 
+        embeddedLayoutButtons.Controls.Add(bottomLayoutButton);
+        embeddedLayoutButtons.Controls.Add(rightLayoutButton);
+        embeddedLayoutButtons.Controls.Add(leftLayoutButton);
+        embeddedLayoutButtons.Controls.Add(topLayoutButton);
+
         embeddedTextAlignTopButtons.Controls.Add(textAlignTopRightButton);
         embeddedTextAlignTopButtons.Controls.Add(textAlignTopCenterButton);
         embeddedTextAlignTopButtons.Controls.Add(textAlignTopLeftButton);
@@ -1967,6 +2035,8 @@ internal partial class MainWindow
         embeddedToolbar.Controls.Add(embeddedModeStatus);
         embeddedToolbar.Controls.Add(embeddedTextAlignButtons);
         embeddedToolbar.Controls.Add(textAlignmentLabel);
+        embeddedToolbar.Controls.Add(embeddedLayoutButtons);
+        embeddedToolbar.Controls.Add(layoutLabel);
         embeddedToolbar.Controls.Add(embeddedAlignmentButtons);
         embeddedToolbar.Controls.Add(alignmentLabel);
         embeddedToolbar.Controls.Add(embeddedModeButtons);
@@ -2097,6 +2167,7 @@ internal partial class MainWindow
         // ── Seed initial state ────────────────────────────────────────────────
         ApplyEmbeddedTabDesignMode(embeddedPageControl.TabDesignMode);
         ApplyEmbeddedTabAlignment(embeddedPageControl.TabAlignment);
+        ApplyEmbeddedTabLayout(embeddedPageControl.TabLayoutMode);
         ApplyEmbeddedTextAlign(embeddedPageControl.TextAlign);
 
         embeddedPageControl.NewTabButtonClick += (_, _) =>

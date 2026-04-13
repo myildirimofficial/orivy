@@ -463,20 +463,66 @@ public partial class Window : WindowBase
         get => _windowPageControl;
         set
         {
-            _windowPageControl = value;
-            if (_windowPageControl == null)
+            if (ReferenceEquals(_windowPageControl, value))
                 return;
 
-            _windowPageControl.SelectedIndexChanged += (sender, previousIndex) =>
+            if (_windowPageControl != null)
             {
-                if (_windowPageControl == null)
-                    return;
+                _windowPageControl.SelectedIndexChanged -= HandleWindowPageControlSelectedIndexChanged;
+                _windowPageControl.ControlAdded -= HandleWindowPageControlStructureChanged;
+                _windowPageControl.ControlRemoved -= HandleWindowPageControlStructureChanged;
+                _windowPageControl.TabModeChanged -= HandleWindowPageControlTabModeChanged;
+            }
 
-                _windowPageControl.HandleWindowChromeSelectionChanged(previousIndex);
-            };
-            _windowPageControl.ControlAdded += delegate { Invalidate(); };
-            _windowPageControl.ControlRemoved += delegate { Invalidate(); };
+            _windowPageControl = value;
+            if (_windowPageControl == null)
+            {
+                Invalidate();
+                return;
+            }
+
+            _windowPageControl.SelectedIndexChanged += HandleWindowPageControlSelectedIndexChanged;
+            _windowPageControl.ControlAdded += HandleWindowPageControlStructureChanged;
+            _windowPageControl.ControlRemoved += HandleWindowPageControlStructureChanged;
+            _windowPageControl.TabModeChanged += HandleWindowPageControlTabModeChanged;
+
+            RefreshWindowPageControlHostState();
         }
+    }
+
+    private void HandleWindowPageControlSelectedIndexChanged(object? sender, int previousIndex)
+    {
+        if (_windowPageControl == null)
+            return;
+
+        _windowPageControl.HandleWindowChromeSelectionChanged(previousIndex);
+        Invalidate();
+    }
+
+    private void HandleWindowPageControlStructureChanged(object sender, ElementEventArgs e)
+    {
+        RefreshWindowPageControlHostState();
+    }
+
+    private void HandleWindowPageControlTabModeChanged(object? sender, EventArgs e)
+    {
+        RefreshWindowPageControlHostState();
+    }
+
+    private void RefreshWindowPageControlHostState()
+    {
+        if (_windowPageControl == null)
+            return;
+
+        _pendingTabSelectionIndex = -1;
+        _windowPageControl.ResetWindowChromeHoverState();
+        _windowPageControl.InvalidateWindowChromeLayout();
+        CalcSystemBoxPos();
+        InvalidateMeasureRecursive();
+        PerformLayout();
+        NeedsFullChildRedraw = true;
+        InvalidateRenderTree();
+        Invalidate();
     }
 
     public SKRectI MaximizedBounds { get; private set; }

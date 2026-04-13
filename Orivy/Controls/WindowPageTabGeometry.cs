@@ -61,6 +61,45 @@ internal static class WindowPageTabGeometry
         }
     }
 
+    public static void LayoutTabsVertical(IReadOnlyList<float> desiredHeights, float left, float startY, float width,
+        float availableHeight, float gap, float maxHeight, bool distributeExtraSpace, List<SKRect> destination)
+    {
+        destination.Clear();
+
+        if (desiredHeights.Count == 0 || width <= 0f || availableHeight <= 0f)
+            return;
+
+        var totalDesiredHeight = 0f;
+        for (var i = 0; i < desiredHeights.Count; i++)
+            totalDesiredHeight += desiredHeights[i];
+
+        var totalGapHeight = gap * Math.Max(0, desiredHeights.Count - 1);
+        var heightBudget = Math.Max(0f, availableHeight - totalGapHeight);
+
+        var scale = 1f;
+        var extraPerTab = 0f;
+
+        if (totalDesiredHeight > heightBudget && totalDesiredHeight > 0f)
+        {
+            scale = heightBudget / totalDesiredHeight;
+        }
+        else if (distributeExtraSpace && totalDesiredHeight < heightBudget)
+        {
+            extraPerTab = (heightBudget - totalDesiredHeight) / desiredHeights.Count;
+        }
+
+        var currentY = startY;
+        for (var i = 0; i < desiredHeights.Count; i++)
+        {
+            var height = desiredHeights[i] * scale + extraPerTab;
+            height = Math.Min(height, maxHeight);
+            height = Math.Max(0f, height);
+
+            destination.Add(SKRect.Create(left, currentY, width, height));
+            currentY += height + gap;
+        }
+    }
+
     public static SKRect CreateTrailingButtonRect(SKRect tabRect, float preferredSize, float trailingInset,
         float minimumSize, float widthFactor = 1.5f)
     {
