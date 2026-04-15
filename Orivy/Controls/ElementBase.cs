@@ -1514,6 +1514,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
         MarkDirty();
 
+        if (!IsVisibleInRenderTree())
+            return;
+
         // Only propagate to window if this isn't already the window
         // This prevents cascade invalidations that kill FPS
         if (this is not WindowBase)
@@ -1532,6 +1535,23 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         {
             DebugSettings.Log($"MarkDirty called on {GetType().Name}");
         }
+    }
+
+    protected bool IsVisibleInRenderTree()
+    {
+        if (!Visible)
+            return false;
+
+        var current = _parent;
+        while (current != null)
+        {
+            if (!current.Visible)
+                return false;
+
+            current = current._parent;
+        }
+
+        return true;
     }
 
     internal void InvalidateRenderTree()
@@ -2912,7 +2932,21 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         VisibleChanged?.Invoke(this, e);
         UpdateBackgroundImageSlideshowState();
         RefreshVisualStylesForStateChange();
-        Invalidate();
+
+        if (Visible)
+        {
+            Invalidate();
+        }
+        else
+        {
+            MarkDirty();
+
+            if (Parent is WindowBase parentWindowForInvalidate)
+                parentWindowForInvalidate.Invalidate();
+            else if (Parent is ElementBase parentElementForInvalidate)
+                parentElementForInvalidate.Invalidate();
+        }
+
         if (Parent is WindowBase parentWindow) parentWindow.PerformLayout();
         else if (Parent is ElementBase parentElement) parentElement.PerformLayout();
     }
