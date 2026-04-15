@@ -116,14 +116,14 @@ public partial class WindowBase
         if (_softwareUpdateQueued)
             return;
 
-        if (!IsHandleCreated || IsDisposed || Disposing)
+        if (!CanInvalidateWindowSurface())
             return;
 
         _softwareUpdateQueued = true;
         try
         {
             _softwareUpdateQueued = false;
-            if (!IsHandleCreated || IsDisposed || Disposing)
+            if (!CanInvalidateWindowSurface())
                 return;
 
             if (_renderBackend == RenderBackend.Software)
@@ -137,7 +137,9 @@ public partial class WindowBase
 
     public override void Invalidate()
     {
-        if (!IsHandleCreated || IsDisposed || Disposing)
+        MarkDirty();
+
+        if (!CanInvalidateWindowSurface())
             return;
 
         if (_renderBackend == RenderBackend.Software)
@@ -151,6 +153,11 @@ public partial class WindowBase
         {
             InvalidateWindow();
         }
+    }
+
+    private bool CanInvalidateWindowSurface()
+    {
+        return IsHandleCreated && !IsDisposed && !Disposing && Visible && WindowState != FormWindowState.Minimized;
     }
 
     protected virtual bool ShouldForceSoftwareUpdate()
