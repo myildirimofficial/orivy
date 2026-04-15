@@ -1,4 +1,5 @@
 using Orivy.Animation;
+using Orivy;
 using Orivy.Extensions;
 using Orivy.Helpers;
 using SkiaSharp;
@@ -16,12 +17,21 @@ public class WindowPageControl : ElementBase
     private const float TabHorizontalPadding = 14f;
     private const float TabVerticalInset = 4f;
     private const float TabIndicatorHeight = 3f;
-    private const float TabIconSize = 16f;
+    private const float TabIconSize = 24f;
     private const float TabIconSpacing = 8f;
     private const float TabCloseButtonSize = 18f;
     private const float TabCloseButtonSpacing = 8f;
     private const float TabMinWidth = 130f;
     private const float TabMaxWidth = 240f;
+    private const float VerticalTabMinWidth = 160f;
+    private const float VerticalTabMaxWidth = 360f;
+    private const float VerticalTabMinHeight = 32f;
+    private const float VerticalTabMaxHeight = 74f;
+    private const float VerticalTabStripResizeMaxWidth = 420f;
+    private const float TabStripResizerThickness = 14f;
+    private const float TabStripResizerVisualThickness = 2f;
+    private const float TabStripResizerVisualLength = 28f;
+    private const float TabStripResizerAnimationSpeed = 0.14f;
     private const float NewTabButtonSize = 22f;
     private const float TabSelectionAnimationSpeed = 0.14f;
     private const float TabDragThreshold = 6f;
@@ -38,6 +48,7 @@ public class WindowPageControl : ElementBase
 
     private readonly AnimationManager _transitionAnimation;
     private readonly AnimationManager _tabSelectionAnimation;
+    private readonly AnimationManager _tabStripResizerAnimation;
     private readonly AnimationManager _windowChromeTabSelectionAnimation;
     private readonly AnimationManager _windowChromeTabCloseHoverAnimation;
     private readonly AnimationManager _windowChromeNewTabHoverAnimation;
@@ -71,11 +82,18 @@ public class WindowPageControl : ElementBase
     private bool _hasWindowChromeLayoutContext;
     private int _windowChromeLayoutPageCount = -1;
     private float _tabStripHeight = 44f;
+    private float _verticalTabScrollOffset;
+    private float _verticalTabScrollableExtent;
+    private bool _showTabStripResizer;
     private int _hoveredTabIndex = -1;
+    private bool _hoveredTabStripResizer;
     private bool _isTransitionDirty;
+    private bool _isResizingTabStrip;
     private bool _newTabButton;
     private int _selectedIndex = -1;
     private bool _tabCloseButton;
+    private float _tabStripResizeOrigin;
+    private float _tabStripResizeStartHeight;
     private float _tabGap = DefaultTabGap;
     private WindowPageTabDesignMode _tabDesignMode = WindowPageTabDesignMode.Rectangle;
     private WindowPageTabAlignment _tabAlignment = WindowPageTabAlignment.Start;
@@ -144,6 +162,8 @@ public class WindowPageControl : ElementBase
 
     public WindowPageControl()
     {
+        MouseWheel += HandleMouseWheelRouting;
+
         _tabBackgroundPaint = new SKPaint
         {
             IsAntialias = true,
@@ -178,6 +198,16 @@ public class WindowPageControl : ElementBase
         };
         _tabSelectionAnimation.OnAnimationProgress += HandleTabSelectionProgress;
         _tabSelectionAnimation.OnAnimationFinished += HandleTabSelectionFinished;
+
+        _tabStripResizerAnimation = new AnimationManager
+        {
+            Singular = true,
+            InterruptAnimation = true,
+            Increment = TabStripResizerAnimationSpeed,
+            SecondaryIncrement = TabStripResizerAnimationSpeed,
+            AnimationType = AnimationType.CubicEaseOut
+        };
+        _tabStripResizerAnimation.OnAnimationProgress += HandleTabStripResizerProgress;
 
         _windowChromeTabSelectionAnimation = new AnimationManager
         {
@@ -239,6 +269,7 @@ public class WindowPageControl : ElementBase
                 return;
 
             _tabMode = value;
+            ResetTabStripResizerInteraction();
             _hoveredTabIndex = -1;
             ResetTabSelectionAnimation();
             ResetWindowChromeState();
@@ -263,6 +294,11 @@ public class WindowPageControl : ElementBase
                 return;
 
             _tabLayoutMode = value;
+            ResetTabStripResizerInteraction();
+            if (_tabLayoutMode is not WindowPageTabLayoutMode.Left and not WindowPageTabLayoutMode.Right)
+                ResetVerticalTabScroll();
+            else
+                EnsureSelectedVerticalTabVisible();
             ResetTabSelectionAnimation();
             CancelTransitionPreservingSelection();
             PerformLayout();
@@ -283,8 +319,30 @@ public class WindowPageControl : ElementBase
                 return;
 
             _tabStripHeight = clamped;
+            EnsureSelectedVerticalTabVisible();
 
             CancelTransitionPreservingSelection();
+            PerformLayout();
+            InvalidateRenderTree();
+            Invalidate();
+        }
+    }
+
+    [Category("Layout")]
+    [DefaultValue(false)]
+    [Description("Shows a draggable splitter between a vertical embedded tab strip and the page content.")]
+    public bool ShowTabStripResizer
+    {
+        get => _showTabStripResizer;
+        set
+        {
+            if (_showTabStripResizer == value)
+                return;
+
+            _showTabStripResizer = value;
+            if (!_showTabStripResizer)
+                ResetTabStripResizerInteraction();
+
             PerformLayout();
             InvalidateRenderTree();
             Invalidate();
@@ -474,9 +532,11 @@ public class WindowPageControl : ElementBase
     internal float ResolvedTabGap => _tabGap;
 
     private bool ShouldDrawTabStrip => TabMode == WindowPageTabMode.Embedded && Count > 0;
+    private bool ShouldDrawTabStripResizer => _showTabStripResizer && SupportsTabStripResizer;
     private bool ShouldDrawTabIcons => ShouldDrawTabStrip && DrawTabIcons;
     private bool ShouldDrawTabCloseButtons => ShouldDrawTabStrip && TabCloseButton;
     private bool ShouldDrawNewTabButton => ShouldDrawTabStrip && NewTabButton;
+    private bool SupportsTabStripResizer => ShouldDrawTabStrip && _tabLayoutMode is WindowPageTabLayoutMode.Left or WindowPageTabLayoutMode.Right;
     private bool UsesVerticalTabLayout => ShouldDrawTabStrip && _tabLayoutMode is WindowPageTabLayoutMode.Left or WindowPageTabLayoutMode.Right;
     private bool UsesNonTopEmbeddedTabLayout => ShouldDrawTabStrip && _tabLayoutMode != WindowPageTabLayoutMode.Top;
 
@@ -546,6 +606,7 @@ public class WindowPageControl : ElementBase
 
             var previousSelectedIndex = _selectedIndex;
             _selectedIndex = value;
+            EnsureSelectedVerticalTabVisible();
             StartTabSelectionAnimation(previousSelectedIndex, _selectedIndex);
             StartWindowChromeSelectionAnimation(previousSelectedIndex, _selectedIndex);
 
@@ -626,6 +687,7 @@ public class WindowPageControl : ElementBase
         if (_pageOrder != null)
             _pageOrder.Add(element);
 
+        EnsureSelectedVerticalTabVisible();
         ResetTabSelectionAnimation();
 
         CancelTransitionPreservingSelection();
@@ -646,6 +708,7 @@ public class WindowPageControl : ElementBase
         else if (_selectedIndex >= Count)
             SelectedIndex = Count - 1;
 
+        EnsureSelectedVerticalTabVisible();
         ResetTabSelectionAnimation();
 
         CancelTransitionPreservingSelection();
@@ -666,6 +729,7 @@ public class WindowPageControl : ElementBase
     {
         base.OnSizeChanged(e);
         SyncAllPageBounds();
+        EnsureSelectedVerticalTabVisible();
         InvalidateWindowChromeLayout();
 
         if (IsTransitioning)
@@ -695,6 +759,12 @@ public class WindowPageControl : ElementBase
 
     internal override void OnMouseDown(MouseEventArgs e)
     {
+        if (e.Button == MouseButtons.Left && TryBeginTabStripResize(e.Location))
+        {
+            base.OnMouseDown(e);
+            return;
+        }
+
         if (e.Button == MouseButtons.Left && ShouldDrawTabStrip)
         {
             if (!TryGetTabCloseButtonIndexAtPoint(e.Location, out _) &&
@@ -744,20 +814,42 @@ public class WindowPageControl : ElementBase
 
     internal override void OnMouseMove(MouseEventArgs e)
     {
+        if (_isResizingTabStrip)
+        {
+            UpdateTabStripResize(e.Location);
+            return;
+        }
+
         base.OnMouseMove(e);
 
         if (!ShouldDrawTabStrip)
         {
-            if (_hoveredTabIndex >= 0 || _hoveredTabCloseIndex >= 0 || _hoveredNewTabButton)
+            if (_hoveredTabIndex >= 0 || _hoveredTabCloseIndex >= 0 || _hoveredNewTabButton || _hoveredTabStripResizer)
             {
                 _hoveredTabIndex = -1;
                 _hoveredTabCloseIndex = -1;
                 _hoveredNewTabButton = false;
+                if (_hoveredTabStripResizer)
+                    _tabStripResizerAnimation.StartNewAnimation(AnimationDirection.Out);
+                _hoveredTabStripResizer = false;
+                Cursor = Cursors.Default;
                 Invalidate();
             }
 
             return;
         }
+
+        var hoveredTabStripResizer = IsPointOverTabStripResizer(e.Location);
+        var resizerStateChanged = _hoveredTabStripResizer != hoveredTabStripResizer;
+        if (resizerStateChanged)
+        {
+            _hoveredTabStripResizer = hoveredTabStripResizer;
+            Cursor = hoveredTabStripResizer ? GetTabStripResizerCursor() : Cursors.Default;
+            _tabStripResizerAnimation.StartNewAnimation(hoveredTabStripResizer ? AnimationDirection.In : AnimationDirection.Out);
+        }
+
+        if (hoveredTabStripResizer || _isResizingTabStrip)
+            GetParentWindow()?.UpdateCursor(this);
 
         if (_dragTabSourceIndex >= 0)
         {
@@ -783,13 +875,35 @@ public class WindowPageControl : ElementBase
         var hoveredNewTabButton = IsPointOverNewTabButton(e.Location);
         if (_hoveredTabIndex == hoveredTabIndex &&
             _hoveredTabCloseIndex == hoveredCloseTabIndex &&
-            _hoveredNewTabButton == hoveredNewTabButton)
+            _hoveredNewTabButton == hoveredNewTabButton &&
+            !resizerStateChanged)
             return;
 
         _hoveredTabIndex = hoveredTabIndex;
         _hoveredTabCloseIndex = hoveredCloseTabIndex;
         _hoveredNewTabButton = hoveredNewTabButton;
         Invalidate();
+    }
+
+    internal override void OnMouseWheel(MouseEventArgs e)
+    {
+        if (UsesVerticalTabLayout && ShouldDrawTabStrip && !e.IsHorizontalWheel)
+        {
+            var headerRect = GetTabHeaderRect();
+            if (headerRect.Width > 0f && headerRect.Height > 0f && headerRect.Contains(e.Location))
+            {
+                UpdateTabRects();
+
+                if (_verticalTabScrollableExtent > 0f)
+                {
+                    var step = GetVerticalTabScrollStep();
+                    SetVerticalTabScrollOffset(_verticalTabScrollOffset - ((e.Delta / 120f) * step));
+                    return;
+                }
+            }
+        }
+
+        base.OnMouseWheel(e);
     }
 
     internal override void OnMouseLeave(EventArgs e)
@@ -807,11 +921,16 @@ public class WindowPageControl : ElementBase
             invalidate = true;
         }
 
-        if (_hoveredTabIndex >= 0 || _hoveredTabCloseIndex >= 0 || _hoveredNewTabButton)
+        if (_hoveredTabIndex >= 0 || _hoveredTabCloseIndex >= 0 || _hoveredNewTabButton || _hoveredTabStripResizer)
         {
             _hoveredTabIndex = -1;
             _hoveredTabCloseIndex = -1;
             _hoveredNewTabButton = false;
+            if (_hoveredTabStripResizer)
+                _tabStripResizerAnimation.StartNewAnimation(AnimationDirection.Out);
+            _hoveredTabStripResizer = false;
+            if (!_isResizingTabStrip)
+                Cursor = Cursors.Default;
             invalidate = true;
         }
 
@@ -824,7 +943,31 @@ public class WindowPageControl : ElementBase
         FinalizeCompletedTransitionIfPending();
 
         if (!IsTransitioning)
-            return false;
+        {
+            var selectedPage = GetPageAt(_selectedIndex);
+
+            for (var i = 0; i < Controls.Count; i++)
+            {
+                if (Controls[i] is not ElementBase child || !child.Visible || child.Width <= 0f || child.Height <= 0f)
+                    continue;
+
+                if (IsPageControl(child))
+                {
+                    if (!ReferenceEquals(child, selectedPage))
+                        continue;
+
+                    SyncPageBounds(child);
+                }
+
+                if (NeedsFullChildRedraw)
+                    child.InvalidateRenderTree();
+
+                child.Render(canvas);
+            }
+
+            NeedsFullChildRedraw = false;
+            return true;
+        }
 
         if (!EnsureTransitionSnapshots())
             return false;
@@ -864,6 +1007,8 @@ public class WindowPageControl : ElementBase
             _tabSelectionAnimation.OnAnimationProgress -= HandleTabSelectionProgress;
             _tabSelectionAnimation.OnAnimationFinished -= HandleTabSelectionFinished;
             _tabSelectionAnimation.Dispose();
+            _tabStripResizerAnimation.OnAnimationProgress -= HandleTabStripResizerProgress;
+            _tabStripResizerAnimation.Dispose();
             _transitionAnimation.OnAnimationProgress -= HandleTransitionProgress;
             _transitionAnimation.OnAnimationFinished -= HandleTransitionFinished;
             _transitionAnimation.Dispose();
@@ -880,12 +1025,21 @@ public class WindowPageControl : ElementBase
         base.Dispose(disposing);
     }
 
+    private void HandleMouseWheelRouting(object? sender, MouseEventArgs e)
+    {
+    }
+
     private void HandleTransitionProgress(object _)
     {
         Invalidate();
     }
 
     private void HandleTabSelectionProgress(object _)
+    {
+        Invalidate();
+    }
+
+    private void HandleTabStripResizerProgress(object _)
     {
         Invalidate();
     }
@@ -1541,6 +1695,17 @@ public class WindowPageControl : ElementBase
 
     internal override void OnMouseUp(MouseEventArgs e)
     {
+        if (_isResizingTabStrip)
+        {
+            base.OnMouseUp(e);
+            _isResizingTabStrip = false;
+            _hoveredTabStripResizer = IsPointOverTabStripResizer(e.Location);
+            _tabStripResizerAnimation.StartNewAnimation(_hoveredTabStripResizer ? AnimationDirection.In : AnimationDirection.Out);
+            Cursor = _hoveredTabStripResizer ? GetTabStripResizerCursor() : Cursors.Default;
+            Invalidate();
+            return;
+        }
+
         base.OnMouseUp(e);
 
         if (_isDraggingTab && _dragTabSourceIndex >= 0 && _dragTabInsertIndex >= 0)
@@ -1789,6 +1954,15 @@ public class WindowPageControl : ElementBase
         DrawTabHeaderSurface(canvas, headerRect,
             _tabStripBackground == SKColors.Transparent ? headerBackground : _tabStripBackground,
             headerBorderColor);
+        DrawTabStripResizer(canvas);
+
+        var clippedTabContent = UsesVerticalTabLayout;
+        var clippedTabContentSave = 0;
+        if (clippedTabContent)
+        {
+            clippedTabContentSave = canvas.Save();
+            canvas.ClipRect(headerRect);
+        }
 
         float ComputeDragTabTarget(int tIdx)
         {
@@ -1944,6 +2118,9 @@ public class WindowPageControl : ElementBase
 
             canvas.RestoreToCount(layerSaved);
         }
+
+        if (clippedTabContent)
+            canvas.RestoreToCount(clippedTabContentSave);
     }
 
     internal void HandleWindowChromeSelectionChanged(int previousSelectedIndex)
@@ -2581,6 +2758,38 @@ public class WindowPageControl : ElementBase
         }
     }
 
+    private void DrawTabStripResizer(SKCanvas canvas)
+    {
+        var resizerBounds = GetTabStripResizerRect();
+        if (resizerBounds.Width <= 0f || resizerBounds.Height <= 0f)
+            return;
+
+        var active = _hoveredTabStripResizer || _isResizingTabStrip;
+        var progress = _isResizingTabStrip
+            ? 1f
+            : Math.Clamp((float)_tabStripResizerAnimation.GetProgress(), 0f, 1f);
+        if (!active && progress <= 0.001f)
+            return;
+
+        var visualWidth = MathF.Min(TabStripResizerVisualThickness * ScaleFactor, resizerBounds.Width);
+        var maxLineHeight = MathF.Min(TabStripResizerVisualLength * ScaleFactor, resizerBounds.Height - 18f * ScaleFactor);
+        if (visualWidth <= 0f || maxLineHeight <= 0f)
+            return;
+
+        var collapsedLineHeight = 8f * ScaleFactor;
+        var lineHeight = collapsedLineHeight + ((maxLineHeight - collapsedLineHeight) * progress);
+        var visualRect = SKRect.Create(
+            resizerBounds.MidX - visualWidth / 2f,
+            resizerBounds.MidY - lineHeight / 2f,
+            visualWidth,
+            lineHeight);
+
+        var radius = visualRect.Width * 0.5f;
+
+        _tabBackgroundPaint.Color = ColorScheme.Primary.WithAlpha((byte)Math.Clamp(MathF.Round(228f * progress), 0f, 255f));
+        canvas.DrawRoundRect(visualRect, radius, radius, _tabBackgroundPaint);
+    }
+
     private void DrawTabBackground(SKCanvas canvas, SKRect rect, bool isSelected, bool isHovered,
         SKColor inactiveBackground, SKColor selectedBackground, SKColor hoverBackground,
         SKColor inactiveBorderColor, SKColor selectedBorderColor, float indicatorHeight)
@@ -2953,6 +3162,34 @@ public class WindowPageControl : ElementBase
         };
     }
 
+    private SKRect GetTabStripResizerRect()
+    {
+        if (!ShouldDrawTabStripResizer)
+            return SKRect.Empty;
+
+        var headerRect = GetTabHeaderRect();
+        var resizerThickness = GetTabStripResizerThickness();
+        if (headerRect.Width <= 0f || headerRect.Height <= 0f || resizerThickness <= 0f)
+            return SKRect.Empty;
+
+        var halfThickness = resizerThickness / 2f;
+
+        return _tabLayoutMode switch
+        {
+            WindowPageTabLayoutMode.Left => new SKRect(
+                headerRect.Right - halfThickness,
+                headerRect.Top,
+                headerRect.Right + halfThickness,
+                headerRect.Bottom),
+            WindowPageTabLayoutMode.Right => new SKRect(
+                headerRect.Left - halfThickness,
+                headerRect.Top,
+                headerRect.Left + halfThickness,
+                headerRect.Bottom),
+            _ => SKRect.Empty,
+        };
+    }
+
     private float GetTabHeaderThickness()
     {
         var minimumThickness = TabStripHeight * ScaleFactor;
@@ -2962,14 +3199,19 @@ public class WindowPageControl : ElementBase
         return MeasureVerticalTabHeaderThickness(minimumThickness);
     }
 
+    private float GetTabStripResizerThickness()
+    {
+        return ShouldDrawTabStripResizer ? TabStripResizerThickness * ScaleFactor : 0f;
+    }
+
     private float MeasureVerticalTabHeaderThickness(float minimumThickness)
     {
         PrepareTabFont();
 
         var axisPadding = Math.Max(4f * ScaleFactor, TabVerticalInset * ScaleFactor);
         var horizontalPadding = TabHorizontalPadding * ScaleFactor;
-        var minWidth = TabMinWidth * ScaleFactor;
-        var maxWidth = TabMaxWidth * ScaleFactor;
+        var minWidth = Math.Max(VerticalTabMinWidth * ScaleFactor, minimumThickness);
+        var maxWidth = Math.Max(VerticalTabMaxWidth * ScaleFactor, minWidth);
         var iconAllowance = (TabIconSize + TabIconSpacing) * ScaleFactor;
         var closeButtonSize = TabCloseButtonSize * ScaleFactor;
         var closeButtonSpacing = TabCloseButtonSpacing * ScaleFactor;
@@ -3012,9 +3254,7 @@ public class WindowPageControl : ElementBase
         var baseFont = Font;
         _tabFont.Typeface = baseFont.Typeface ?? SKTypeface.Default;
         _tabFont.Size = Math.Max(1f, size);
-        _tabFont.Subpixel = true;
-        _tabFont.Edging = SKFontEdging.SubpixelAntialias;
-        _tabFont.Hinting = SKFontHinting.Full;
+        Application.ApplyPreferredFontRendering(_tabFont);
         _tabFont.Embolden = baseFont.Embolden;
         _tabFont.ScaleX = baseFont.ScaleX;
         _tabFont.SkewX = baseFont.SkewX;
@@ -3105,8 +3345,8 @@ public class WindowPageControl : ElementBase
         {
             var axisPadding = Math.Max(4f * ScaleFactor, verticalInset);
             var tabWidth = Math.Max(0f, headerRect.Width - (axisPadding * 2f));
-            var tabHeight = GetVerticalTabHeight(iconAllowance, closeButtonAllowance);
             var contentHeight = Math.Max(0f, headerRect.Height - (axisPadding * 2f) - newTabReserve);
+            var tabHeight = Math.Min(GetVerticalTabHeight(iconAllowance, closeButtonAllowance), VerticalTabMaxHeight * ScaleFactor);
 
             for (var pageIndex = 0; pageIndex < pageCount; pageIndex++)
             {
@@ -3117,20 +3357,25 @@ public class WindowPageControl : ElementBase
                 _tabWidthBuffer.Add(tabHeight);
             }
 
-            var startY = ComputeTabStartY(headerRect, axisPadding, contentHeight, gap);
+            var totalTabHeight = 0f;
+            for (var i = 0; i < _tabWidthBuffer.Count; i++)
+                totalTabHeight += _tabWidthBuffer[i];
+            totalTabHeight += gap * MathF.Max(0f, _tabWidthBuffer.Count - 1);
 
-            WindowPageTabGeometry.LayoutTabsVertical(
-                _tabWidthBuffer,
-                headerRect.Left + axisPadding,
-                startY,
-                tabWidth,
-                contentHeight,
-                gap,
-                tabHeight,
-                false,
-                _tabRects);
+            UpdateVerticalTabScrollMetrics(totalTabHeight, contentHeight);
 
+            var startY = _verticalTabScrollableExtent > 0.01f
+                ? headerRect.Top + axisPadding - _verticalTabScrollOffset
+                : ComputeTabStartY(headerRect, axisPadding, contentHeight, gap);
+
+            _tabRects.Clear();
             var currentY = startY;
+            for (var i = 0; i < _tabWidthBuffer.Count; i++)
+            {
+                _tabRects.Add(SKRect.Create(headerRect.Left + axisPadding, currentY, tabWidth, _tabWidthBuffer[i]));
+                currentY += _tabWidthBuffer[i] + gap;
+            }
+
             if (_tabRects.Count > 0)
                 currentY = _tabRects[_tabRects.Count - 1].Bottom + gap;
 
@@ -3139,7 +3384,10 @@ public class WindowPageControl : ElementBase
 
             if (ShouldDrawNewTabButton)
             {
-                var newButtonTop = Math.Min(currentY, headerRect.Bottom - axisPadding - newTabButtonSize);
+                var pinnedNewButtonTop = headerRect.Bottom - axisPadding - newTabButtonSize;
+                var newButtonTop = _verticalTabScrollableExtent > 0.01f
+                    ? pinnedNewButtonTop
+                    : Math.Min(currentY, pinnedNewButtonTop);
                 _newTabButtonRect = SKRect.Create(
                     headerRect.MidX - newTabButtonSize / 2f,
                     newButtonTop,
@@ -3151,6 +3399,7 @@ public class WindowPageControl : ElementBase
         }
 
         var contentWidth = Math.Max(0f, headerRect.Width - (horizontalPadding * 2f) - newTabReserve);
+    ResetVerticalTabScroll();
 
         for (var pageIndex = 0; pageIndex < pageCount; pageIndex++)
         {
@@ -3202,7 +3451,153 @@ public class WindowPageControl : ElementBase
         var closeButtonWidth = Math.Max(0f, closeButtonAllowance - (TabCloseButtonSpacing * ScaleFactor));
         var textHeight = Math.Max(1f, _tabFont.Metrics.Descent - _tabFont.Metrics.Ascent);
         var contentHeight = Math.Max(textHeight, Math.Max(iconWidth, closeButtonWidth));
-        return Math.Max(34f * ScaleFactor, MathF.Ceiling(contentHeight + (TabVerticalInset * ScaleFactor * 4f)));
+        var minimumHeight = VerticalTabMinHeight * ScaleFactor;
+        return Math.Max(minimumHeight, MathF.Ceiling(contentHeight + (TabVerticalInset * ScaleFactor * 4f)));
+    }
+
+    private bool TryBeginTabStripResize(SKPoint point)
+    {
+        if (!IsPointOverTabStripResizer(point))
+            return false;
+
+        _isResizingTabStrip = true;
+        _hoveredTabStripResizer = true;
+        _tabStripResizeOrigin = point.X;
+        _tabStripResizeStartHeight = _tabStripHeight;
+        _tabStripResizerAnimation.SetProgress(1d);
+        Cursor = GetTabStripResizerCursor();
+        GetParentWindow()?.UpdateCursor(this);
+        Invalidate();
+        return true;
+    }
+
+    private void UpdateTabStripResize(SKPoint point)
+    {
+        if (!_isResizingTabStrip)
+            return;
+
+        var scale = Math.Max(ScaleFactor, 1f);
+        var pixelDelta = _tabLayoutMode == WindowPageTabLayoutMode.Right
+            ? _tabStripResizeOrigin - point.X
+            : point.X - _tabStripResizeOrigin;
+        var logicalDelta = pixelDelta / scale;
+        var nextThickness = Math.Clamp(
+            _tabStripResizeStartHeight + logicalDelta,
+            VerticalTabMinWidth,
+            GetMaximumVerticalTabStripWidth());
+
+        if (Math.Abs(nextThickness - _tabStripHeight) >= 0.25f)
+            TabStripHeight = nextThickness;
+
+        Cursor = GetTabStripResizerCursor();
+    }
+
+    private void UpdateVerticalTabScrollMetrics(float totalTabHeight, float viewportHeight)
+    {
+        _verticalTabScrollableExtent = Math.Max(0f, totalTabHeight - viewportHeight);
+        _verticalTabScrollOffset = _verticalTabScrollableExtent <= 0.01f
+            ? 0f
+            : Math.Clamp(_verticalTabScrollOffset, 0f, _verticalTabScrollableExtent);
+    }
+
+    private void EnsureSelectedVerticalTabVisible()
+    {
+        if (!ShouldDrawTabStrip || !UsesVerticalTabLayout || _selectedIndex < 0 || Count <= 0)
+        {
+            ResetVerticalTabScroll();
+            return;
+        }
+
+        PrepareTabFont();
+
+        var headerRect = GetTabHeaderRect();
+        if (headerRect.Width <= 0f || headerRect.Height <= 0f)
+            return;
+
+        var gap = ResolvedTabGap * ScaleFactor;
+        var axisPadding = Math.Max(4f * ScaleFactor, TabVerticalInset * ScaleFactor);
+        var iconAllowance = (TabIconSize + TabIconSpacing) * ScaleFactor;
+        var closeButtonAllowance = ShouldDrawTabCloseButtons
+            ? (TabCloseButtonSize + TabCloseButtonSpacing) * ScaleFactor
+            : 0f;
+        var newTabReserve = ShouldDrawNewTabButton ? (NewTabButtonSize * ScaleFactor) + gap : 0f;
+        var viewportHeight = Math.Max(0f, headerRect.Height - (axisPadding * 2f) - newTabReserve);
+        var tabHeight = Math.Min(GetVerticalTabHeight(iconAllowance, closeButtonAllowance), VerticalTabMaxHeight * ScaleFactor);
+        var totalTabHeight = (Count * tabHeight) + (Math.Max(0, Count - 1) * gap);
+
+        UpdateVerticalTabScrollMetrics(totalTabHeight, viewportHeight);
+        if (_verticalTabScrollableExtent <= 0.01f)
+            return;
+
+        var slotHeight = tabHeight + gap;
+        var selectedTop = _selectedIndex * slotHeight;
+        var selectedBottom = selectedTop + tabHeight;
+        var nextOffset = _verticalTabScrollOffset;
+
+        if (selectedTop < nextOffset)
+            nextOffset = selectedTop;
+        else if (selectedBottom > nextOffset + viewportHeight)
+            nextOffset = selectedBottom - viewportHeight;
+
+        _verticalTabScrollOffset = Math.Clamp(nextOffset, 0f, _verticalTabScrollableExtent);
+    }
+
+    private void SetVerticalTabScrollOffset(float value)
+    {
+        var clamped = Math.Clamp(value, 0f, _verticalTabScrollableExtent);
+        if (Math.Abs(_verticalTabScrollOffset - clamped) < 0.01f)
+            return;
+
+        _verticalTabScrollOffset = clamped;
+        Invalidate();
+    }
+
+    private float GetVerticalTabScrollStep()
+    {
+        var step = _tabRects.Count > 0
+            ? _tabRects[0].Height + (ResolvedTabGap * ScaleFactor)
+            : VerticalTabMinHeight * ScaleFactor;
+
+        return Math.Max(12f * ScaleFactor, step);
+    }
+
+    private void ResetVerticalTabScroll()
+    {
+        _verticalTabScrollOffset = 0f;
+        _verticalTabScrollableExtent = 0f;
+    }
+
+    private float GetMaximumVerticalTabStripWidth()
+    {
+        var scale = Math.Max(ScaleFactor, 1f);
+        var availableWidth = Math.Max(VerticalTabMinWidth, base.DisplayRectangle.Width / scale);
+        return Math.Max(VerticalTabMinWidth, Math.Min(VerticalTabStripResizeMaxWidth, availableWidth - 96f));
+    }
+
+    private bool IsPointOverTabStripResizer(SKPoint point)
+    {
+        var rect = GetTabStripResizerRect();
+        return rect.Width > 0f && rect.Height > 0f && rect.Contains(point);
+    }
+
+    private Cursor GetTabStripResizerCursor()
+    {
+        return _tabLayoutMode switch
+        {
+            WindowPageTabLayoutMode.Left or WindowPageTabLayoutMode.Right => Cursors.SizeWE,
+            WindowPageTabLayoutMode.Bottom => Cursors.SizeNS,
+            _ => Cursors.Default,
+        };
+    }
+
+    private void ResetTabStripResizerInteraction()
+    {
+        _hoveredTabStripResizer = false;
+        _isResizingTabStrip = false;
+        _tabStripResizeOrigin = 0f;
+        _tabStripResizeStartHeight = 0f;
+        _tabStripResizerAnimation.SetProgress(0d);
+        Cursor = Cursors.Default;
     }
 
     private float ComputeTabStartX(SKRect headerRect, float horizontalPadding, float newTabReserve, float contentWidth, float gap)

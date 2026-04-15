@@ -325,11 +325,9 @@ public class MenuItem
         var font = Font;
         using var scaledFont = new SKFont(font.Typeface ?? SKTypeface.Default)
         {
-            Size = font.Size.Topx(Parent),
-            Subpixel = true,
-            Edging = SKFontEdging.SubpixelAntialias,
-            Hinting = SKFontHinting.Full
+            Size = font.Size.Topx(Parent)
         };
+        Application.ApplyPreferredFontRendering(scaledFont);
 
         var textBounds = new SkiaSharp.SKRect();
         scaledFont.MeasureText(Text, out textBounds);

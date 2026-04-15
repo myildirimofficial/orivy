@@ -1,4 +1,5 @@
-﻿using Orivy.Helpers;
+﻿using Orivy.Collections;
+using Orivy.Helpers;
 using Orivy.Native.Windows;
 using SkiaSharp;
 using System;
@@ -29,6 +30,8 @@ public partial class WindowBase : ElementBase
     private FocusManager _focusManager;
     private NotificationManager? _notifications;
     private bool _mouseInClient;
+    private bool _closeRequested;
+    private bool _formClosed;
     protected bool enableFullDraggable;
 
     // element which currently has native mouse capture; used by derived classes
@@ -510,8 +513,10 @@ public partial class WindowBase : ElementBase
             // Special keys that should always be processed at window level
             if (keyData == Keys.Escape)
             {
-                Close();
-                return true;
+                if (TryHandleEscapeCommand())
+                    return true;
+
+                return false;
             }
 
             // Tab navigation
@@ -521,6 +526,34 @@ public partial class WindowBase : ElementBase
                 if (FocusManager.ProcessKeyNavigation(keyArgs))
                     return true;
             }
+        }
+
+        return false;
+    }
+
+    private bool TryHandleEscapeCommand()
+    {
+        if (HasOpenEscapeOverlay(Controls))
+            return false;
+
+        return _notifications?.TryDismissActiveDialog() == true;
+    }
+
+    private static bool HasOpenEscapeOverlay(ElementCollection elements)
+    {
+        for (var i = 0; i < elements.Count; i++)
+        {
+            if (elements[i] is not ElementBase element || !element.Visible)
+                continue;
+
+            if (element is ContextMenuStrip { IsOpen: true })
+                return true;
+
+            if (element is ComboBox { DroppedDown: true })
+                return true;
+
+            if (HasOpenEscapeOverlay(element.Controls))
+                return true;
         }
 
         return false;
@@ -558,6 +591,8 @@ public partial class WindowBase : ElementBase
         if (_hWnd == IntPtr.Zero)
             return;
 
+        _closeRequested = false;
+        _formClosed = false;
         Application.RegisterForm(this);
         ShowWindow(_hWnd, 5);
         Application.SetActiveForm(this);
@@ -577,9 +612,14 @@ public partial class WindowBase : ElementBase
         if (_hWnd == IntPtr.Zero)
             return;
 
+        _closeRequested = false;
+        _formClosed = false;
+        Application.RegisterForm(this);
         ShowWindow(_hWnd, 5);
+        Application.SetActiveForm(this);
+
         MSG msg;
-        while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
+        while (!_formClosed && GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
         {
             TranslateMessage(ref msg);
             DispatchMessage(ref msg);
@@ -600,12 +640,11 @@ public partial class WindowBase : ElementBase
 
     public void Close()
     {
-        if (_hWnd != IntPtr.Zero)
+        if (_hWnd != IntPtr.Zero && !_closeRequested)
         {
+            _closeRequested = true;
             nint param = 0;
             PostMessage(_hWnd, (int)WindowMessage.WM_CLOSE, 0, ref param);
-            OnFormClosed(new FormClosedEventArgs(CloseReason.UserClosing));
-            Application.UnregisterForm(this);
         }
     }
 
@@ -1091,8 +1130,7 @@ public partial class WindowBase : ElementBase
                     return IntPtr.Zero;
                 }
             case WindowMessage.WM_CLOSE:
-                Application.UnregisterForm(this);
-                OnFormClosed(new FormClosedEventArgs(CloseReason.UserClosing));
+                _closeRequested = true;
                 return DefWindowProc(hWnd, msg, wParam, lParam);
             case WindowMessage.WM_SHOWWINDOW:
                 {
@@ -1113,9 +1151,16 @@ public partial class WindowBase : ElementBase
                     return DefWindowProc(hWnd, msg, wParam, lParam);
                 }
             case WindowMessage.WM_DESTROY:
-                Application.UnregisterForm(this);
-                OnFormClosed(new FormClosedEventArgs(CloseReason.UserClosing));
-                PostQuitMessage(0);
+                if (!_formClosed)
+                {
+                    _formClosed = true;
+                    Application.UnregisterForm(this);
+                    OnFormClosed(new FormClosedEventArgs(CloseReason.UserClosing));
+                }
+
+                _closeRequested = false;
+                if (Application.OpenForms.Count == 0)
+                    PostQuitMessage(0);
                 return IntPtr.Zero;
             case WindowMessage.WM_ERASEBKGND:
                 // Return non-zero to tell Windows we handled background erase.

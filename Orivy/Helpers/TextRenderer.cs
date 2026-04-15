@@ -100,15 +100,17 @@ public static class TextRenderer
             if (options.Trimming != TextTrimming.None && options.MaxWidth < float.MaxValue)
                 layoutText = TextTruncator.TruncateText(layoutText, font, options.MaxWidth, options.Trimming);
 
-            font.MeasureText(layoutText, out var textBounds);
+            var metrics = font.Metrics;
+            var ascent = metrics.Ascent;
+            var descent = metrics.Descent;
 
             y = alignment switch
             {
                 ContentAlignment.TopLeft or ContentAlignment.TopCenter or ContentAlignment.TopRight =>
-                    bounds.Top + 4f - textBounds.Top,
+                    bounds.Top + 4f - ascent,
                 ContentAlignment.BottomLeft or ContentAlignment.BottomCenter or ContentAlignment.BottomRight =>
-                    bounds.Bottom - 4f - textBounds.Bottom,
-                _ => bounds.MidY - textBounds.MidY
+                    bounds.Bottom - 4f - descent,
+                _ => bounds.MidY - ((ascent + descent) * 0.5f)
             };
         }
         else

@@ -40,6 +40,10 @@ namespace Orivy.Example
         private readonly Dictionary<WindowBackgroundMode, List<MenuItem>> _windowBackgroundModeMenuItems = new();
         private readonly Dictionary<int, List<MenuItem>> _windowBackgroundBlurAmountMenuItems = new();
         private readonly Dictionary<BackgroundImageBlurMode, List<MenuItem>> _windowBackgroundBlurModeMenuItems = new();
+        private readonly Dictionary<WindowThemeType, List<MenuItem>> _windowThemeMenuItems = new();
+        private readonly Dictionary<bool, List<MenuItem>> _windowThemeModeMenuItems = new();
+        private readonly List<MenuItem> _titleBarMenuPlacementItems = new();
+        private readonly List<MenuItem> _embeddedTabStripResizerItems = new();
         private readonly BindingDemoViewModel _bindingDemoViewModel = new();
         private readonly List<SKImage> _gridListImages = new();
         private readonly List<BackgroundImageFrame> _backgroundSlides = new();
@@ -56,16 +60,22 @@ namespace Orivy.Example
         private int _windowBackgroundBlurAmountPreset;
         private bool _windowBackgroundEnabled = false;
         private WindowBackgroundMode _windowBackgroundMode = WindowBackgroundMode.Normal;
+        private bool _windowThemeModePreset = ColorScheme.IsDarkMode;
         private bool _windowBackgroundSlideInitialized;
+        private bool _notificationStackModeEnabled;
         private SKImage? _windowBackgroundNormalImage;
         private NotificationHandle? _manualProgressToast;
         private MenuItem? _backgroundSlideshowMenuItem;
         private MenuItem? _backgroundRepeatMenuItem;
         private MenuItem? _windowBackgroundEnabledMenuItem;
+        private WindowPageControl? _embeddedPageControl;
 
         internal MainWindow()
         {
             InitializeComponent();
+            SetEmbeddedTabStripResizerVisible(true);
+            ColorScheme.ThemeChanged += OnColorSchemeThemeChanged;
+            RefreshNotificationStackModeButton();
             InitializeBackgroundImageShowcase();
             InitializeBackgroundImageMenu();
             InitializeWindowBackgroundMenu();
@@ -177,6 +187,151 @@ namespace Orivy.Example
                 for (var i = 0; i < pair.Value.Count; i++)
                     pair.Value[i].Checked = isSelected;
             }
+        }
+
+        private void InitializeWindowThemeMenu(MenuItem rootItem)
+        {
+            RegisterWindowThemeItem(rootItem.AddMenuItem("None", (_, _) => SetWindowThemePreset(WindowThemeType.None)), WindowThemeType.None);
+            RegisterWindowThemeItem(rootItem.AddMenuItem("Mica", (_, _) => SetWindowThemePreset(WindowThemeType.Mica)), WindowThemeType.Mica);
+            RegisterWindowThemeItem(rootItem.AddMenuItem("Acrylic", (_, _) => SetWindowThemePreset(WindowThemeType.Acrylic)), WindowThemeType.Acrylic);
+            RegisterWindowThemeItem(rootItem.AddMenuItem("Tabbed", (_, _) => SetWindowThemePreset(WindowThemeType.Tabbed)), WindowThemeType.Tabbed);
+
+            RefreshWindowThemeMenuChecks();
+        }
+
+        private void InitializeWindowThemeModeMenu(MenuItem rootItem)
+        {
+            RegisterWindowThemeModeItem(rootItem.AddMenuItem("Light", (_, _) => SetWindowThemeModePreset(false)), false);
+            RegisterWindowThemeModeItem(rootItem.AddMenuItem("Dark", (_, _) => SetWindowThemeModePreset(true)), true);
+
+            RefreshWindowThemeModeMenuChecks();
+        }
+
+        private void RegisterWindowThemeItem(MenuItem item, WindowThemeType themeType)
+        {
+            item.CheckOnClick = false;
+            if (!_windowThemeMenuItems.TryGetValue(themeType, out var list))
+            {
+                list = new List<MenuItem>();
+                _windowThemeMenuItems[themeType] = list;
+            }
+
+            list.Add(item);
+        }
+
+        private void SetWindowThemePreset(WindowThemeType themeType)
+        {
+            WindowThemeType = themeType;
+            RefreshWindowThemeMenuChecks();
+        }
+
+        private void RegisterWindowThemeModeItem(MenuItem item, bool isDark)
+        {
+            item.CheckOnClick = false;
+            if (!_windowThemeModeMenuItems.TryGetValue(isDark, out var list))
+            {
+                list = new List<MenuItem>();
+                _windowThemeModeMenuItems[isDark] = list;
+            }
+
+            list.Add(item);
+        }
+
+        private void SetWindowThemeModePreset(bool isDark)
+        {
+            _windowThemeModePreset = isDark;
+            ColorScheme.IsDarkMode = isDark;
+            RefreshWindowThemeModeMenuChecks();
+        }
+
+        private void OnColorSchemeThemeChanged(object? sender, EventArgs e)
+        {
+            RefreshWindowThemeMenuChecks();
+            RefreshWindowThemeModeMenuChecks();
+        }
+
+        private void RefreshWindowThemeMenuChecks()
+        {
+            foreach (var pair in _windowThemeMenuItems)
+            {
+                var isSelected = pair.Key == WindowThemeType;
+                for (var i = 0; i < pair.Value.Count; i++)
+                    pair.Value[i].Checked = isSelected;
+            }
+        }
+
+        private void RefreshWindowThemeModeMenuChecks()
+        {
+            foreach (var pair in _windowThemeModeMenuItems)
+            {
+                var isSelected = pair.Key == _windowThemeModePreset;
+                for (var i = 0; i < pair.Value.Count; i++)
+                    pair.Value[i].Checked = isSelected;
+            }
+        }
+
+        private void InitializeWindowMenu(MenuItem rootItem)
+        {
+            InitializeWindowThemeMenu(rootItem.AddMenuItem("Theme Type"));
+            InitializeWindowThemeModeMenu(rootItem.AddMenuItem("Theme Mode"));
+            rootItem.AddSeparator();
+
+            var embedMenuItem = rootItem.AddMenuItem(
+                "Embed Menu In Title Bar",
+                (_, _) => SetMenuStripEmbeddedInTitleBar(!ReferenceEquals(TitleBarMenuStrip, menuStrip)));
+            embedMenuItem.CheckOnClick = false;
+            _titleBarMenuPlacementItems.Add(embedMenuItem);
+
+            var resizerMenuItem = rootItem.AddMenuItem(
+                "Show Embedded Tab Resizer",
+                (_, _) => SetEmbeddedTabStripResizerVisible(!IsEmbeddedTabStripResizerVisible()));
+            resizerMenuItem.CheckOnClick = false;
+            _embeddedTabStripResizerItems.Add(resizerMenuItem);
+
+            RefreshTitleBarMenuPlacementChecks();
+            RefreshEmbeddedTabStripResizerChecks();
+        }
+
+        private void SetMenuStripEmbeddedInTitleBar(bool embedded)
+        {
+            if (menuStrip == null)
+                return;
+
+            TitleBarMenuStrip = embedded ? menuStrip : null;
+            RefreshTitleBarMenuPlacementChecks();
+        }
+
+        private void RefreshTitleBarMenuPlacementChecks()
+        {
+            var isEmbedded = ReferenceEquals(TitleBarMenuStrip, menuStrip);
+            for (var i = 0; i < _titleBarMenuPlacementItems.Count; i++)
+                _titleBarMenuPlacementItems[i].Checked = isEmbedded;
+        }
+
+        private void SetEmbeddedTabStripResizerVisible(bool visible)
+        {
+            if (windowPageControl != null)
+                windowPageControl.ShowTabStripResizer = visible;
+
+            if (_embeddedPageControl != null)
+                _embeddedPageControl.ShowTabStripResizer = visible;
+
+            RefreshEmbeddedTabStripResizerChecks();
+        }
+
+        private bool IsEmbeddedTabStripResizerVisible()
+        {
+            if (_embeddedPageControl != null)
+                return _embeddedPageControl.ShowTabStripResizer;
+
+            return windowPageControl != null && windowPageControl.ShowTabStripResizer;
+        }
+
+        private void RefreshEmbeddedTabStripResizerChecks()
+        {
+            var isVisible = IsEmbeddedTabStripResizerVisible();
+            for (var i = 0; i < _embeddedTabStripResizerItems.Count; i++)
+                _embeddedTabStripResizerItems[i].Checked = isVisible;
         }
 
         private void InitializeBackgroundImageMenu()
@@ -1186,6 +1341,7 @@ namespace Orivy.Example
                 NotificationKind.Info,
                 new NotificationOptions
                 {
+                    LayoutMode = NotificationToastLayoutMode.List,
                     DurationMs = 0,
                     ShowProgressBar = true,
                     Progress = 0f,
@@ -1212,6 +1368,7 @@ namespace Orivy.Example
                 NotificationKind.Info,
                 new NotificationOptions
                 {
+                    LayoutMode = NotificationToastLayoutMode.List,
                     DurationMs = 0,
                     ShowProgressBar = false,
                     Progress = 0.18f,
@@ -1283,13 +1440,65 @@ namespace Orivy.Example
         private void NotifBtnBottomRight_Click(object sender, EventArgs e)
             => ShowNotificationAtPosition(ContentAlignment.BottomRight, "Bottom Right");
 
-        private static void ShowNotificationAtPosition(ContentAlignment position, string label)
+        private void NotifBtnCenter_Click(object sender, EventArgs e)
+            => ShowNotificationAtPosition(ContentAlignment.MiddleCenter, "Center");
+
+        private void NotifBtnStackMode_Click(object sender, EventArgs e)
         {
+            _notificationStackModeEnabled = !_notificationStackModeEnabled;
+            NotificationToast.DefaultLayoutMode = _notificationStackModeEnabled
+                ? NotificationToastLayoutMode.Stack
+                : NotificationToastLayoutMode.List;
+            RefreshNotificationStackModeButton();
+
+            NotificationToast.Show(
+                "Stack Mode Updated",
+                _notificationStackModeEnabled
+                    ? "New notifications now use stacked presentation by default. Click the front toast to reveal the ones behind it."
+                    : "New notifications now use the standard list layout again.",
+                NotificationKind.Info,
+                3200);
+        }
+
+        private void NotifBtnDialog_Click(object sender, EventArgs e)
+            => NotificationToast.ShowDialog(
+                "Dialog Presentation",
+                "Dialog mode centers the notification, adds a scrim and keeps the action area readable for confirm-style flows.",
+                NotificationKind.Info,
+                new NotificationOptions
+                {
+                    DurationMs = 0,
+                    ShowProgressBar = false,
+                    Actions =
+                    [
+                        new NotificationAction("Primary"),
+                        new NotificationAction("Close")
+                    ]
+                });
+
+        private void ShowNotificationAtPosition(
+            ContentAlignment position,
+            string label)
+        {
+            var layoutLabel = _notificationStackModeEnabled ? "stack" : "list";
             NotificationToast.Show(
                 label,
-                $"Toasts anchored to {label.ToLowerInvariant()}. Concurrent toasts at other positions run in their own tray and do not interfere.",
+                $"Toasts can anchor to {label.ToLowerInvariant()} using the {layoutLabel} layout. Different positions and layouts run in separate trays.",
                 NotificationKind.Info,
-                new NotificationOptions { DurationMs = 4000, ShowProgressBar = true, Position = position });
+                new NotificationOptions
+                {
+                    DurationMs = 4000,
+                    ShowProgressBar = true,
+                    Position = position,
+                });
+        }
+
+        private void RefreshNotificationStackModeButton()
+        {
+            if (notifBtnStackMode == null)
+                return;
+
+            notifBtnStackMode.Text = _notificationStackModeEnabled ? "Stack Mode: On" : "Stack Mode: Off";
         }
 
         private void ShowNotificationThemeModeExample(NotificationKind kind, string title, string message)
@@ -1615,6 +1824,8 @@ namespace Orivy.Example
         {
             if (disposing)
             {
+                ColorScheme.ThemeChanged -= OnColorSchemeThemeChanged;
+
                 if (_backgroundHero != null)
                 {
                     _backgroundHero.BackgroundImageChanged -= BackgroundHero_BackgroundImageChanged;

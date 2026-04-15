@@ -71,6 +71,7 @@ public class MenuStrip : ElementBase
     private bool _showHoverEffect = true;
     private bool _showIcons = true;
     private bool _showImageMargin = false;
+    private bool _showBottomBorder = true;
     private bool _showShortcutKeys = true;
     private bool _showSubmenuArrow = true;
     private bool _stretch;
@@ -314,6 +315,19 @@ public class MenuStrip : ElementBase
 
     [Category("Appearance")]
     [DefaultValue(true)]
+    public bool ShowBottomBorder
+    {
+        get => _showBottomBorder;
+        set
+        {
+            if (_showBottomBorder == value) return;
+            _showBottomBorder = value;
+            Invalidate();
+        }
+    }
+
+    [Category("Appearance")]
+    [DefaultValue(true)]
     public bool ShowShortcutKeys
     {
         get => _showShortcutKeys;
@@ -411,11 +425,9 @@ public class MenuStrip : ElementBase
             _defaultSkFont?.Dispose();
             _defaultSkFont = new SKFont(font.Typeface ?? SKTypeface.Default)
             {
-                Size = font.Size.Topx(this),
-                Subpixel = true,
-                Edging = SKFontEdging.SubpixelAntialias,
-                Hinting = SKFontHinting.Full
+                Size = font.Size.Topx(this)
             };
+            Application.ApplyPreferredFontRendering(_defaultSkFont);
             _defaultSkFontSource = font;
             _defaultSkFontDpi = dpi;
         }
@@ -439,11 +451,9 @@ public class MenuStrip : ElementBase
 
             _shortcutSkFont = new SKFont(_shortcutTypeface ?? font.Typeface ?? SKTypeface.Default)
             {
-                Size = 8.Topx(this),
-                Subpixel = true,
-                Edging = SKFontEdging.SubpixelAntialias,
-                Hinting = SKFontHinting.Full
+                Size = 8.Topx(this)
             };
+            Application.ApplyPreferredFontRendering(_shortcutSkFont);
             _shortcutSkFontSource = font;
             _shortcutSkFontDpi = dpi;
         }
@@ -517,7 +527,7 @@ public class MenuStrip : ElementBase
     {
         ExecuteOnMenuThread(() =>
         {
-            if (_openedItem == null || _hoveredItem?.HasDropDown == true || _activeDropDown?.IsPointerOver == true)
+            if (_openedItem == null || _hoveredItem?.HasDropDown == true || _activeDropDown?.IsPointerOverSubmenuChain() == true)
                 return;
 
             CloseSubmenu();
@@ -527,6 +537,27 @@ public class MenuStrip : ElementBase
     protected void CancelPendingSubmenuClose()
     {
         _submenuCloseTimer?.Stop();
+    }
+
+    internal bool IsPointerOverSubmenuChain()
+    {
+        if (IsPointerOver)
+            return true;
+
+        return _activeDropDown?.IsPointerOverSubmenuChain() == true;
+    }
+
+    internal void NotifyPopupPointerEnter()
+    {
+        CancelPendingSubmenuClose();
+    }
+
+    internal void NotifyPopupPointerLeave()
+    {
+        if (_activeDropDown?.IsPointerOverSubmenuChain() == true)
+            return;
+
+        ScheduleSubmenuClose();
     }
 
     protected void ScheduleSubmenuClose()
@@ -604,6 +635,7 @@ public class MenuStrip : ElementBase
         if (item == null) throw new ArgumentNullException(nameof(item));
         Items.Add(item);
         item.Parent = this;
+        InvalidateMeasure();
         Invalidate();
     }
 
@@ -613,8 +645,63 @@ public class MenuStrip : ElementBase
         if (Items.Remove(item))
         {
             item.Parent = null!;
+            InvalidateMeasure();
             Invalidate();
         }
+    }
+
+    public override SKSize GetPreferredSize(SKSize proposedSize)
+    {
+        var visibleCount = 0;
+
+        if (Orientation == Orientation.Horizontal && GetType() != typeof(ContextMenuStrip))
+        {
+            var width = Padding.Horizontal + (GetHorizontalMenuInset() * 2f);
+            var gap = GetHorizontalItemGap();
+
+            for (var i = 0; i < Items.Count; i++)
+            {
+                var item = Items[i];
+                if (!item.Visible)
+                    continue;
+
+                if (visibleCount > 0)
+                    width += gap;
+
+                width += MeasureItemWidth(item);
+                visibleCount++;
+            }
+
+            return new SKSize(width, ItemHeight + Padding.Vertical);
+        }
+
+        var maxWidth = 0f;
+        var height = Padding.Vertical + _itemPadding;
+
+        for (var i = 0; i < Items.Count; i++)
+        {
+            var item = Items[i];
+            if (!item.Visible)
+                continue;
+
+            var itemWidth = MeasureItemWidth(item);
+            maxWidth = Math.Max(maxWidth, itemWidth);
+
+            if (item.IsSeparator)
+            {
+                height += (_separatorMargin * 2f) + 1f + _itemPadding;
+                visibleCount++;
+                continue;
+            }
+
+            height += _itemHeight + _itemPadding;
+            visibleCount++;
+        }
+
+        if (visibleCount == 0)
+            height = Padding.Vertical + _itemHeight;
+
+        return new SKSize(Padding.Horizontal + (_itemPadding * 2f) + maxWidth, height);
     }
 
     public override void OnPaint(SKCanvas canvas)
@@ -628,10 +715,12 @@ public class MenuStrip : ElementBase
         _bgPaint.Color = BackColor;
         canvas.DrawRect(new SkiaSharp.SKRect(0, 0, bounds.Width, bounds.Height), _bgPaint);
 
-        // Subtle bottom border
-        _bottomBorderPaint ??= new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1f };
-        _bottomBorderPaint.Color = SeparatorColor.WithAlpha(72);
-        canvas.DrawLine(0, bounds.Height - 1, bounds.Width, bounds.Height - 1, _bottomBorderPaint);
+        if (ShowBottomBorder)
+        {
+            _bottomBorderPaint ??= new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1f };
+            _bottomBorderPaint.Color = SeparatorColor.WithAlpha(72);
+            canvas.DrawLine(0, bounds.Height - 1, bounds.Width, bounds.Height - 1, _bottomBorderPaint);
+        }
 
         // Draw sliding hover rect before items so text renders on top
         if (ShowHoverEffect && _hoveredItem != null && !_hoverSlideTo.IsEmpty
@@ -774,9 +863,9 @@ public class MenuStrip : ElementBase
         // Reserve space for chevron in vertical mode
         var drawBounds = new SkiaSharp.SKRect(
             tx,
-            bounds.Top,
+            bounds.Top + (vertical ? 0f : 0.75f * scale),
             Math.Max(tx, bounds.Right - contentRightInset),
-            bounds.Bottom);
+            bounds.Bottom + (vertical ? 0f : 0.75f * scale));
         TextRenderer.DrawText(c, item.Text, drawBounds, _textPaint, font, ContentAlignment.MiddleLeft, false, true);
 
         if (shouldDrawShortcut)
@@ -1070,6 +1159,7 @@ public class MenuStrip : ElementBase
         EnsureDropDownHost();
         var activeDropDown = _activeDropDown!;
         activeDropDown.ParentDropDown = this as ContextMenuStrip;
+        activeDropDown.ParentMenuHost = this;
         activeDropDown.ResetStableAccordionPopupSize();
         activeDropDown.Items.Clear();
 

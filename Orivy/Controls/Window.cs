@@ -170,6 +170,15 @@ public partial class Window : WindowBase
     ///     Whether to show the title bar of the form
     /// </summary>
     private bool showMenuInsteadOfIcon;
+    private bool _titleBarMenuStripStoredShowBottomBorder;
+    private bool _hasStoredTitleBarMenuLayout;
+    private MenuStrip? _titleBarMenuStrip;
+    private SKPoint _titleBarMenuStripStoredLocation;
+    private SKRect _titleBarMenuStripRect;
+    private SKSize _titleBarMenuStripStoredSize;
+    private Thickness _titleBarMenuStripStoredMargin;
+    private DockStyle _titleBarMenuStripStoredDock;
+    private AnchorStyles _titleBarMenuStripStoredAnchor;
 
     /// <summary>
     ///     Whether to show the title bar of the form
@@ -302,6 +311,37 @@ public partial class Window : WindowBase
     private ContextMenuStrip _extendMenu;
 
     [DefaultValue(null)] public ContextMenuStrip FormMenu { get; set; }
+
+    [DefaultValue(null)]
+    public MenuStrip? TitleBarMenuStrip
+    {
+        get => _titleBarMenuStrip;
+        set
+        {
+            if (ReferenceEquals(_titleBarMenuStrip, value))
+                return;
+
+            if (_titleBarMenuStrip != null)
+                RestoreTitleBarMenuStripLayout(_titleBarMenuStrip);
+
+            _titleBarMenuStrip = value;
+            _titleBarMenuStripRect = SKRect.Empty;
+
+            if (_titleBarMenuStrip != null)
+            {
+                CaptureTitleBarMenuStripLayout(_titleBarMenuStrip);
+
+                if (!Controls.Contains(_titleBarMenuStrip))
+                    Controls.Add(_titleBarMenuStrip);
+
+                _titleBarMenuStrip.Dock = DockStyle.None;
+                _titleBarMenuStrip.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+                _titleBarMenuStrip.ShowBottomBorder = false;
+            }
+
+            RefreshHostedTitleBarLayout();
+        }
+    }
 
     /// <summary>
     ///     Gets or sets whether to show the title bar of the form
@@ -525,6 +565,129 @@ public partial class Window : WindowBase
         Invalidate();
     }
 
+    private bool HasVisibleTitleBarMenuStrip =>
+        _titleBarMenuStrip != null &&
+        _titleBarMenuStrip.Visible &&
+        ShowTitle &&
+        _titleBarMenuStrip.Items.Count > 0;
+
+    private void CaptureTitleBarMenuStripLayout(MenuStrip menuStrip)
+    {
+        _titleBarMenuStripStoredDock = menuStrip.Dock;
+        _titleBarMenuStripStoredAnchor = menuStrip.Anchor;
+        _titleBarMenuStripStoredMargin = menuStrip.Margin;
+        _titleBarMenuStripStoredLocation = menuStrip.Location;
+        _titleBarMenuStripStoredSize = menuStrip.Size;
+        _titleBarMenuStripStoredShowBottomBorder = menuStrip.ShowBottomBorder;
+        _hasStoredTitleBarMenuLayout = true;
+    }
+
+    private void RestoreTitleBarMenuStripLayout(MenuStrip menuStrip)
+    {
+        if (!_hasStoredTitleBarMenuLayout)
+            return;
+
+        menuStrip.Dock = _titleBarMenuStripStoredDock;
+        menuStrip.Anchor = _titleBarMenuStripStoredAnchor;
+        menuStrip.Margin = _titleBarMenuStripStoredMargin;
+        menuStrip.Size = _titleBarMenuStripStoredSize;
+        menuStrip.Location = _titleBarMenuStripStoredLocation;
+        menuStrip.ShowBottomBorder = _titleBarMenuStripStoredShowBottomBorder;
+
+        _hasStoredTitleBarMenuLayout = false;
+    }
+
+    private void RefreshHostedTitleBarLayout()
+    {
+        CalcSystemBoxPos();
+        if (UsesWindowChromeTabs)
+            _windowPageControl.InvalidateWindowChromeLayout();
+
+        InvalidateMeasureRecursive();
+        PerformLayout();
+        SyncTitleBarMenuStripLayout();
+        NeedsFullChildRedraw = true;
+        InvalidateRenderTree();
+        Invalidate();
+    }
+
+    private float GetTitleBarLeadingContentX()
+    {
+        if (showMenuInsteadOfIcon)
+            return _formMenuRect.Right + (8f * ScaleFactor);
+
+        if (ShowIcon && Icon != null)
+            return _titleBarLeftInsetDPI + (30f * ScaleFactor);
+
+        return _titleBarLeftInsetDPI + (8f * ScaleFactor);
+    }
+
+    private float GetTitleBarTrailingContentX()
+    {
+        var trailingEdge = _controlBoxLeft > 0f ? _controlBoxLeft : Width - _titleBarRightInsetDPI;
+        return Math.Max(_titleBarLeftInsetDPI, trailingEdge - (8f * ScaleFactor));
+    }
+
+    private void SyncTitleBarMenuStripLayout()
+    {
+        if (_titleBarMenuStrip == null)
+        {
+            _titleBarMenuStripRect = SKRect.Empty;
+            return;
+        }
+
+        if (!HasVisibleTitleBarMenuStrip)
+        {
+            _titleBarMenuStripRect = SKRect.Empty;
+            return;
+        }
+
+        var left = GetTitleBarLeadingContentX();
+        var right = GetTitleBarTrailingContentX();
+        var availableWidth = Math.Max(0f, right - left);
+        var preferredSize = _titleBarMenuStrip.GetPreferredSize(SKSize.Empty);
+        var width = Math.Min(preferredSize.Width, availableWidth);
+        var maxHeight = Math.Max(0f, _titleHeightDPI - (4f * ScaleFactor));
+        var height = Math.Min(preferredSize.Height, maxHeight);
+
+        if (width <= 0f || height <= 0f)
+        {
+            _titleBarMenuStripRect = SKRect.Empty;
+            return;
+        }
+
+        var top = _titleBarCenterYDPI - (height / 2f);
+        var newBounds = SKRect.Create(left, top, width, height);
+        _titleBarMenuStripRect = newBounds;
+
+        var newLocation = new SKPoint(newBounds.Left, newBounds.Top);
+        var newSize = new SKSize(newBounds.Width, newBounds.Height);
+
+        if (_titleBarMenuStrip.Location != newLocation)
+            _titleBarMenuStrip.Location = newLocation;
+
+        if (_titleBarMenuStrip.Size != newSize)
+            _titleBarMenuStrip.Size = newSize;
+    }
+
+    private float GetTitleBarMenuReservedWidth()
+    {
+        if (!HasVisibleTitleBarMenuStrip || _titleBarMenuStripRect.IsEmpty)
+            return 0f;
+
+        return _titleBarMenuStripRect.Width + (10f * ScaleFactor);
+    }
+
+    private bool IsPointOverTitleBarMenuStrip(SKPoint point)
+    {
+        return HasVisibleTitleBarMenuStrip && !_titleBarMenuStripRect.IsEmpty && _titleBarMenuStripRect.Contains(point);
+    }
+
+    private bool IsHostedTitleBarElement(IElement element)
+    {
+        return _titleBarMenuStrip != null && ReferenceEquals(element, _titleBarMenuStrip);
+    }
+
     public SKRectI MaximizedBounds { get; private set; }
 
 
@@ -662,7 +825,7 @@ public partial class Window : WindowBase
     {
         base.OnControlAdded(e);
 
-        if (ShowTitle && !AllowAddControlOnTitle && e.Element.Location.Y < TitleHeight)
+        if (ShowTitle && !AllowAddControlOnTitle && !IsHostedTitleBarElement(e.Element) && e.Element.Location.Y < TitleHeight)
         {
             var newLoc = e.Element.Location;
             newLoc.Y = Padding.Top;
@@ -709,6 +872,9 @@ public partial class Window : WindowBase
         {
             return false;
         }
+
+        if (IsPointOverTitleBarMenuStrip(clientPt))
+            return false;
 
         return true;
     }
@@ -773,6 +939,8 @@ public partial class Window : WindowBase
             (int)(showTitle ? MathF.Ceiling(_titleBarBottomDPI) : 0),
             (int)MathF.Ceiling(_titleBarRightInsetDPI),
             Padding.Bottom);
+
+        SyncTitleBarMenuStripLayout();
     }
 
     private bool TryGetTabIndexAtPoint(SKPoint point, out int tabIndex)
@@ -795,8 +963,14 @@ public partial class Window : WindowBase
         if (!base.ShouldIncludeHitTestElement(element, requireEnabled))
             return false;
 
+        if (element is NotificationTray notificationTray)
+            return notificationTray.ParticipatesInHitTesting;
+
         // Floating popups must remain hit-testable even when they overlap the custom title area.
         if (element is ContextMenuStrip contextMenu && contextMenu.Visible)
+            return true;
+
+        if (IsHostedTitleBarElement(element))
             return true;
 
         return !ShowTitle || AllowAddControlOnTitle || element.Location.Y >= _titleBarBottomDPI;
@@ -962,11 +1136,13 @@ public partial class Window : WindowBase
         // (e.g. during the first layout pass) cannot steal the drag.
         var inTitleArea = ShowTitle && e.Y < Padding.Top;
         var clickedTabIndex = -1;
+        var inTitleBarMenu = IsPointOverTitleBarMenuStrip(e.Location);
         var inTabHeader = UsesWindowChromeTabs && TryGetTabIndexAtPoint(e.Location, out clickedTabIndex);
         var inControlBox = _inCloseBox || _inMaxBox || _inMinBox || _inExtendBox
                    || (UsesWindowChromeTabs && (_windowPageControl.IsPointOverWindowChromeCloseButton(e.Location, CreateWindowChromeLayoutContext()) ||
                                                _windowPageControl.IsPointOverWindowChromeNewTabButton(e.Location, CreateWindowChromeLayoutContext())))
-                   || _inFormMenuBox;
+               || _inFormMenuBox
+               || inTitleBarMenu;
 
         if (e.Button == MouseButtons.Left && inTabHeader && !inControlBox)
         {
@@ -1015,13 +1191,15 @@ public partial class Window : WindowBase
         if (inTitleAreaDbl)
         {
             var inTabHeaderDbl = UsesWindowChromeTabs && IsPointOverTabHeader(e.Location);
+            var inTitleBarMenuDbl = IsPointOverTitleBarMenuStrip(e.Location);
             var inControlBoxDbl = _controlBoxRect.Contains(e.Location)
                                   || _maximizeBoxRect.Contains(e.Location)
                                   || _minimizeBoxRect.Contains(e.Location)
                                   || _extendBoxRect.Contains(e.Location)
                                   || (UsesWindowChromeTabs && _windowPageControl.IsPointOverWindowChromeCloseButton(e.Location, CreateWindowChromeLayoutContext()))
                                   || (UsesWindowChromeTabs && _windowPageControl.IsPointOverWindowChromeNewTabButton(e.Location, CreateWindowChromeLayoutContext()))
-                                  || (showMenuInsteadOfIcon && _formMenuRect.Contains(e.Location));
+                                  || (showMenuInsteadOfIcon && _formMenuRect.Contains(e.Location))
+                                  || inTitleBarMenuDbl;
 
             if (!inControlBoxDbl && !inTabHeaderDbl)
             {
@@ -1335,6 +1513,8 @@ public partial class Window : WindowBase
         if (info.Width <= 0 || info.Height <= 0)
             return;
 
+        SyncTitleBarMenuStripLayout();
+
         bool revealNativeBackdrop = UsesNativeBackdropMaterial && DwmMargin != 0;
 
         if (revealNativeBackdrop)
@@ -1619,23 +1799,41 @@ public partial class Window : WindowBase
             var baseFont = Font;
             var font = GetOrCreateFont("title", () => new SKFont(baseFont.Typeface ?? SKTypeface.Default)
             {
-                Subpixel = true,
-                Edging = SKFontEdging.SubpixelAntialias,
-                Hinting = SKFontHinting.Full
             });
             font.Size = baseFont.Size.Topx(this);
+            font.Typeface = baseFont.Typeface ?? SKTypeface.Default;
+            Application.ApplyPreferredFontRendering(font);
 
             var textPaint = GetOrCreatePaint("titleText", () => new SKPaint { IsAntialias = true });
             textPaint.Color = foreColor;
 
             var bounds = new SKRect();
             font.MeasureText(Text, out bounds);
-            var textX = showMenuInsteadOfIcon
-                ? _formMenuRect.Left + _formMenuRect.Width + 8 * ScaleFactor
-                : _titleBarLeftInsetDPI + ((ShowIcon && Icon != null) ? faviconSize + 14 * ScaleFactor : 8);
-            var textY = _titleBarCenterYDPI + Math.Abs(font.Metrics.Ascent + font.Metrics.Descent) / 2;
+            var titleLeft = HasVisibleTitleBarMenuStrip
+                ? _titleBarMenuStripRect.Right + 10f * ScaleFactor
+                : GetTitleBarLeadingContentX();
+            var titleRight = GetTitleBarTrailingContentX();
+            var availableWidth = titleRight - titleLeft;
 
-            TextRenderer.DrawText(canvas, Text, textX, textY, SKTextAlign.Left, font, textPaint);
+            if (availableWidth >= 64f * ScaleFactor)
+            {
+                var textHeight = Math.Abs(font.Metrics.Ascent) + Math.Abs(font.Metrics.Descent);
+                var textTop = _titleBarCenterYDPI - (textHeight * 0.5f);
+                var textBottom = textTop + textHeight;
+                var centeredLeft = (Width - bounds.Width) * 0.5f;
+                var centeredRight = centeredLeft + bounds.Width;
+
+                if (centeredLeft >= titleLeft && centeredRight <= titleRight)
+                {
+                    var centeredRect = new SKRect(centeredLeft, textTop, centeredRight, textBottom);
+                    TextRenderer.DrawText(canvas, Text, centeredRect, textPaint, font, ContentAlignment.MiddleCenter, autoEllipsis: false);
+                }
+                else
+                {
+                    var fallbackRect = new SKRect(titleLeft, textTop, titleRight, textBottom);
+                    TextRenderer.DrawText(canvas, Text, fallbackRect, textPaint, font, ContentAlignment.MiddleLeft, autoEllipsis: true);
+                }
+            }
         }
 
         WindowPageChromeLayoutContext? windowChromeLayoutContext = null;
@@ -1690,14 +1888,17 @@ public partial class Window : WindowBase
 
     private WindowPageChromeLayoutContext CreateWindowChromeLayoutContext()
     {
+        SyncTitleBarMenuStripLayout();
+
         var leadingInset = _titleBarLeftInsetDPI;
         var trailingInset = _titleBarRightInsetDPI;
         // determine if we actually need the large left inset that was previously hard-coded to 44*scale.
         // reserve extra space only when there is an icon or the "menu" glyph.
         bool leftGroupVisible = showMenuInsteadOfIcon || (ShowIcon && Icon != null);
         var initialOffset = leftGroupVisible ? 44 * ScaleFactor : 0;
+        var titleBarMenuReservedWidth = GetTitleBarMenuReservedWidth();
 
-        var occupiedWidth = initialOffset + leadingInset + trailingInset;
+        var occupiedWidth = initialOffset + leadingInset + trailingInset + titleBarMenuReservedWidth;
 
         if (controlBox)
             occupiedWidth += _controlBoxRect.Width;
@@ -1713,10 +1914,10 @@ public partial class Window : WindowBase
 
         occupiedWidth += 30 * ScaleFactor;
 
-        var availableWidth = Width - occupiedWidth;
+        var availableWidth = Math.Max(0f, Width - occupiedWidth);
         var maxSize = 250f * ScaleFactor;
 
-        var currentX = leadingInset + (leftGroupVisible ? 44 * ScaleFactor : 0);
+        var currentX = leadingInset + (leftGroupVisible ? 44 * ScaleFactor : 0) + titleBarMenuReservedWidth;
         return new WindowPageChromeLayoutContext(currentX, availableWidth, _titleBarTopDPI, _titleHeightDPI, _titleBarCenterYDPI, maxSize);
     }
 

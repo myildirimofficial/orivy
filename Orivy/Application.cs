@@ -15,7 +15,7 @@ public class Application
 {
     private static readonly List<WindowBase> _openForms = new();
     private static SKFont? _defaultFont;
-    private static WindowBase _activeForm;
+    private static WindowBase _activeForm = null!;
     private static bool _dpiAwarenessSet;
 
     /// <summary>
@@ -108,7 +108,7 @@ public class Application
         _openForms.Remove(form);
 
         if (_activeForm == form)
-            _activeForm = _openForms.LastOrDefault();
+            _activeForm = _openForms.LastOrDefault()!;
     }
 
     internal static void SetActiveForm(WindowBase form)
@@ -153,14 +153,34 @@ public class Application
 
     private static SKFont CreateDefaultFont()
     {
-        var typeface = SKTypeface.FromFamilyName("Inter") ?? SKTypeface.Default;
+        return CreateUiFont(ResolveDefaultTypeface(), 9.75f);
+    }
 
-        return new SKFont(typeface, 9.25f)
-        {
-            Subpixel = true,
-            Edging = SKFontEdging.Antialias,
-            Hinting = SKFontHinting.Full
-        };
+    internal static SKFont CreateUiFont(SKTypeface? typeface, float size)
+    {
+        var font = new SKFont(typeface ?? SKTypeface.Default, size);
+        ApplyPreferredFontRendering(font);
+        return font;
+    }
+
+    internal static void ApplyPreferredFontRendering(SKFont font)
+    {
+        ArgumentNullException.ThrowIfNull(font);
+
+        font.Subpixel = true;
+        font.Edging = SKFontEdging.SubpixelAntialias;
+        font.Hinting = SKFontHinting.Full;
+        font.LinearMetrics = true;
+    }
+
+    private static SKTypeface ResolveDefaultTypeface()
+    {
+        var defaultTypeFace = SKTypeface.Default;
+        return SKTypeface.FromFamilyName("Inter")
+            ?? (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? SKTypeface.FromFamilyName("Segoe UI")
+                : SKTypeface.FromFamilyName("Segoe UI Variable"))
+            ?? defaultTypeFace;
     }
 
     private static void NotifyDefaultFontChanged()

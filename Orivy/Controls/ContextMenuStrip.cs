@@ -238,6 +238,7 @@ public class ContextMenuStrip : MenuStrip
     }
 
     internal ContextMenuStrip? ParentDropDown { get; set; }
+    internal MenuStrip? ParentMenuHost { get; set; }
 
     public bool IsClosing => _isClosing;
 
@@ -275,11 +276,13 @@ public class ContextMenuStrip : MenuStrip
         {
             // Force-close without resetting the anchor state — ConfigureElementAnchor
             // was already called before ShowCore and must remain intact for positioning.
+            CloseSubmenu();
             IsOpen = false;
             _isClosing = false;
             Visible = false;
             Opacity = 0f;
             DetachHandlers();
+            ResetPopupVisualState();
             _ownerWindow = null!;
         }
 
@@ -296,6 +299,7 @@ public class ContextMenuStrip : MenuStrip
         _ownerWindow = owner;
         _accordionCenterTarget = null;
         ResetAccordionState();
+        ResetPopupVisualState();
         ApplyDpiMetrics(_ownerWindow.DeviceDpi > 0 ? _ownerWindow.DeviceDpi : DeviceDpi);
 
         if (!_ownerWindow.Controls.Contains(this))
@@ -407,6 +411,7 @@ public class ContextMenuStrip : MenuStrip
         _ownerWindow = null!;
         SourceElement = null;
         ParentDropDown = null;
+        ResetPopupVisualState();
         ResetElementAnchor();
         ResetAccordionState();
     }
@@ -1120,7 +1125,14 @@ public class ContextMenuStrip : MenuStrip
     private void OnOwnerMouseDown(object? sender, MouseEventArgs e)
     {
         if (!IsOpen || !AutoClose) return;
-        if (!Bounds.Contains(e.Location)) Hide();
+
+        if (Bounds.Contains(e.Location))
+            return;
+
+        if (TryGetAnchorBoundsInOwner(out var anchorBounds) && anchorBounds.Contains(e.Location))
+            return;
+
+        Hide();
     }
 
     private void OnOwnerDeactivate(object? sender, EventArgs e)
@@ -1245,9 +1257,17 @@ public class ContextMenuStrip : MenuStrip
 
     internal override void OnMouseMove(MouseEventArgs e)
     {
+        ParentMenuHost?.NotifyPopupPointerEnter();
+
         if (TryRouteScrollableMouseMove(e))
         {
+            if (_hoveredItem != null)
+                EnsureItemHoverAnim(_hoveredItem).StartNewAnimation(AnimationDirection.Out);
+
             _hoveredItem = null;
+            _ctxSlideFrom = SKRect.Empty;
+            _ctxSlideTo = SKRect.Empty;
+            _ctxSlideAnim.SetProgress(0);
             Invalidate();
             return;
         }
@@ -1341,11 +1361,17 @@ public class ContextMenuStrip : MenuStrip
     internal override void OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
+        ParentMenuHost?.NotifyPopupPointerLeave();
+
         if (_hoveredItem != null)
         {
             EnsureItemHoverAnim(_hoveredItem).StartNewAnimation(AnimationDirection.Out);
             _hoveredItem = null;
         }
+
+        _ctxSlideFrom = SKRect.Empty;
+        _ctxSlideTo = SKRect.Empty;
+        _ctxSlideAnim.SetProgress(0);
         Invalidate();
     }
 
@@ -1719,6 +1745,29 @@ public class ContextMenuStrip : MenuStrip
             anim.SetProgress(0);
         _accordionCenterTarget = null;
         UpdateScrollState();
+    }
+
+    private void ResetPopupVisualState()
+    {
+        _hoveredItem = null;
+        _ctxSlideFrom = SKRect.Empty;
+        _ctxSlideTo = SKRect.Empty;
+        _ctxSlideAnim.SetProgress(0);
+        _stableAccordionPopupSize = SKSize.Empty;
+
+        foreach (var anim in _itemHoverAnims.Values)
+            anim.SetProgress(0);
+        _itemHoverAnims.Clear();
+
+        if (LastHoveredElement != null)
+        {
+            LastHoveredElement.OnMouseLeave(EventArgs.Empty);
+            LastHoveredElement = null!;
+        }
+
+        _scrollOffset = 0f;
+        if (_vScrollBar != null)
+            _vScrollBar.Value = 0f;
     }
 
     private float GetAccordionProgress(MenuItem item)

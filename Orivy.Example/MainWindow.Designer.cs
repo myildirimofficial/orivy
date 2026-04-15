@@ -1073,6 +1073,9 @@ internal partial class MainWindow
         var transitionsMenu = this.menuStrip.AddMenuItem("Transitions");
         InitializeTransitionMenu(transitionsMenu);
 
+        var windowMenu = this.menuStrip.AddMenuItem("Window");
+        InitializeWindowMenu(windowMenu);
+
         // --- ExtendMenu: drop-down that appears when the extend button (⋯) in
         // the title bar is clicked. ExtendBox must be true to show the button.
         this.extendMenu = new ContextMenuStrip();
@@ -1080,10 +1083,7 @@ internal partial class MainWindow
         this.extendMenu.AddMenuItem("Settings", (s, e) => Debug.WriteLine("Settings clicked"), Keys.Control | Keys.O);
         this.extendMenu.AddMenuItem("Check for Updates", (s, e) => Debug.WriteLine("Update check"));
         this.extendMenu.AddSeparator();
-        var themeItem = this.extendMenu.AddMenuItem("Dark Mode", null, Keys.Control | Keys.L);
-        themeItem.CheckOnClick = true;
-        themeItem.Checked = ColorScheme.IsDarkMode;
-        themeItem.CheckedChanged += (s, e) => ColorScheme.IsDarkMode = !ColorScheme.IsDarkMode;
+        InitializeWindowMenu(this.extendMenu.AddMenuItem("Window"));
         var extendTransitionsMenu = this.extendMenu.AddMenuItem("Page Transition");
         InitializeTransitionMenu(extendTransitionsMenu);
 
@@ -1129,6 +1129,7 @@ internal partial class MainWindow
         this.DwmMargin = 1000;
         this.Padding = new(10);
         this.WindowThemeType = WindowThemeType.Tabbed;
+        RefreshWindowThemeMenuChecks();
         this.ContextMenuStrip = this.extendMenu;
         this.WindowPageControl = windowPageControl;
         this.FormStartPosition = Orivy.FormStartPosition.CenterScreen;
@@ -1153,7 +1154,7 @@ internal partial class MainWindow
 
         var notifHeader = new Element
         {
-            Text      = "Notification Surface\nAlert-style toasts, inline actions, confirmation flow, theme modes and the manual progress API are all demonstrated on this page.",
+            Text      = "Notification Surface\nAlert-style toasts, global stack mode, dialog presentation, center positioning, inline actions, theme modes and the manual progress API are all demonstrated on this page.",
             Dock      = DockStyle.Top,
             Height    = 88,
             Padding   = new Thickness(18),
@@ -1471,7 +1472,7 @@ internal partial class MainWindow
 
         var notifPositionLabel = new Element
         {
-            Text      = "Toast Position",
+            Text      = "Toast Position & Presentation",
             Dock      = DockStyle.Top,
             Height    = 22,
             Margin    = new Thickness(0, 10, 0, 6),
@@ -1566,6 +1567,67 @@ internal partial class MainWindow
         notifRow8.Controls.Add(notifBtnBottomCenter);
         notifRow8.Controls.Add(notifBtnBottomRight);
 
+        var notifRow9 = new Container
+        {
+            Dock      = DockStyle.Top,
+            Height    = 46,
+            Margin    = new Thickness(0, 0, 0, 10),
+            Radius    = new Radius(0),
+            Border    = new Thickness(0),
+            BackColor = SkiaSharp.SKColors.Transparent,
+        };
+
+        notifBtnCenter = new Button
+        {
+            Text   = "Center",
+            Dock   = DockStyle.Left,
+            Width  = 112,
+            Height = 38,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+
+        notifBtnStackMode = new Button
+        {
+            Text   = "Stack Mode: Off",
+            Dock   = DockStyle.Left,
+            Width  = 144,
+            Height = 38,
+            Margin = new Thickness(0, 0, 10, 0),
+        };
+        notifBtnStackMode.ConfigureVisualStyles(s => s
+            .Base(b => b
+                .Background(new SkiaSharp.SKColor(15, 23, 42))
+                .Foreground(SkiaSharp.SKColors.White)
+                .Border(1)
+                .BorderColor(new SkiaSharp.SKColor(51, 65, 85))
+                .Radius(12))
+            .OnHover(r => r
+                .Background(new SkiaSharp.SKColor(30, 41, 59))
+                .BorderColor(new SkiaSharp.SKColor(71, 85, 105))));
+
+        notifBtnDialog = new Button
+        {
+            Text   = "Dialog Toast",
+            Dock   = DockStyle.Left,
+            Width  = 128,
+            Height = 38,
+        };
+        notifBtnDialog.ConfigureVisualStyles(s => s
+            .Base(b => b
+                .Background(ColorScheme.Primary.WithAlpha(220))
+                .Foreground(SkiaSharp.SKColors.White)
+                .Border(1)
+                .BorderColor(ColorScheme.Primary)
+                .Radius(12))
+            .OnHover(r => r
+                .Background(ColorScheme.Primary.Brightness(0.08f))
+                .BorderColor(ColorScheme.Primary.Brightness(-0.08f))));
+
+        notifRow9.Controls.Add(notifBtnCenter);
+        notifRow9.Controls.Add(notifBtnStackMode);
+        notifRow9.Controls.Add(notifBtnDialog);
+
+        panel7.Controls.Add(notifRow9);
         panel7.Controls.Add(notifRow8);
         panel7.Controls.Add(notifRow7);
         panel7.Controls.Add(notifPositionLabel);
@@ -1603,6 +1665,9 @@ internal partial class MainWindow
         notifBtnBottomLeft.Click   += NotifBtnBottomLeft_Click;
         notifBtnBottomCenter.Click += NotifBtnBottomCenter_Click;
         notifBtnBottomRight.Click  += NotifBtnBottomRight_Click;
+        notifBtnCenter.Click       += NotifBtnCenter_Click;
+        notifBtnStackMode.Click    += NotifBtnStackMode_Click;
+        notifBtnDialog.Click       += NotifBtnDialog_Click;
     }
 
     private void InitializeEmbeddedTabsPage()
@@ -1639,6 +1704,7 @@ internal partial class MainWindow
             LockInputDuringTransition = true,
             TextAlign                   = ContentAlignment.MiddleCenter,
         };
+        _embeddedPageControl = embeddedPageControl;
 
         // ── Toolbar shell ─────────────────────────────────────────────────────
         var embeddedToolbar = new Container
@@ -2216,6 +2282,9 @@ internal partial class MainWindow
     private Button notifBtnBottomLeft;
     private Button notifBtnBottomCenter;
     private Button notifBtnBottomRight;
+    private Button notifBtnCenter;
+    private Button notifBtnStackMode;
+    private Button notifBtnDialog;
 
     private void InitializeBindingDemoPage()
     {

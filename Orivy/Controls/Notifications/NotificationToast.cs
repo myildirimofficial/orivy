@@ -11,6 +11,18 @@ namespace Orivy.Controls;
 
 public sealed class NotificationToast : ElementBase
 {
+	public static bool StackModeEnabled
+	{
+		get => ResolveCurrentManager().DefaultLayoutMode == NotificationToastLayoutMode.Stack;
+		set => ResolveCurrentManager().DefaultLayoutMode = value ? NotificationToastLayoutMode.Stack : NotificationToastLayoutMode.List;
+	}
+
+	public static NotificationToastLayoutMode DefaultLayoutMode
+	{
+		get => ResolveCurrentManager().DefaultLayoutMode;
+		set => ResolveCurrentManager().DefaultLayoutMode = value;
+	}
+
 	public static NotificationToastPalette? CustomPalette
 	{
 		get => ResolveCurrentManager().CustomPalette;
@@ -37,6 +49,13 @@ public sealed class NotificationToast : ElementBase
 		NotificationKind kind,
 		NotificationOptions? options)
 		=> ResolveCurrentManager().Show(title, message, kind, options);
+
+	public static NotificationHandle ShowDialog(
+		string title,
+		string message,
+		NotificationKind kind,
+		NotificationOptions? options = null)
+		=> ResolveCurrentManager().ShowDialog(title, message, kind, options);
 
 	public static Task<string> ConfirmAsync(
 		string title,
@@ -70,31 +89,35 @@ public sealed class NotificationToast : ElementBase
 	}
 
 	internal const float BaseToastWidth = 380f;
-	internal const float BaseShadowPadding = 6f;
+	internal const float BaseDialogWidth = 468f;
+	internal const float BaseShadowPadding = 12f;
 
-	internal float ToastWidth => BaseToastWidth * ScaleFactor;
-	private Radius CardRadius => new(16f * ScaleFactor, 16f * ScaleFactor, 16f * ScaleFactor, 16f * ScaleFactor);
+	internal float ToastWidth => (_presentationMode == NotificationToastPresentationMode.Dialog ? BaseDialogWidth : BaseToastWidth) * ScaleFactor;
+	private Radius CardRadius
+		=> _presentationMode == NotificationToastPresentationMode.Dialog
+			? new(22f * ScaleFactor, 22f * ScaleFactor, 22f * ScaleFactor, 22f * ScaleFactor)
+			: new(16f * ScaleFactor, 16f * ScaleFactor, 16f * ScaleFactor, 16f * ScaleFactor);
 	private Radius BadgeRadius => new(14f * ScaleFactor, 14f * ScaleFactor, 14f * ScaleFactor, 14f * ScaleFactor);
 	private Radius ActionRadius => new(8f * ScaleFactor, 8f * ScaleFactor, 8f * ScaleFactor, 8f * ScaleFactor);
 
-	private float PaddingH => 14f * ScaleFactor;
-	private float PaddingV => 10f * ScaleFactor;
+	private float PaddingH => (_presentationMode == NotificationToastPresentationMode.Dialog ? 18f : 14f) * ScaleFactor;
+	private float PaddingV => (_presentationMode == NotificationToastPresentationMode.Dialog ? 14f : 10f) * ScaleFactor;
 	private float CloseSize => 24f * ScaleFactor;
 	private float CloseRightGap => 10f * ScaleFactor;
-	private float IconDiameter => 28f * ScaleFactor;
-	private float IconRadius => 14f * ScaleFactor;
+	private float IconDiameter => (_presentationMode == NotificationToastPresentationMode.Dialog ? 32f : 28f) * ScaleFactor;
+	private float IconRadius => IconDiameter / 2f;
 	private float IconGap => 12f * ScaleFactor;
-	private float TitleFontSize => 13f * ScaleFactor;
-	private float MessageFontSize => 12f * ScaleFactor;
+	private float TitleFontSize => (_presentationMode == NotificationToastPresentationMode.Dialog ? 14f : 13f) * ScaleFactor;
+	private float MessageFontSize => (_presentationMode == NotificationToastPresentationMode.Dialog ? 12.5f : 12f) * ScaleFactor;
 	private float ActionFontSize => 13f * ScaleFactor;
 	private float TitleLineHeight => MathF.Ceiling(TitleFontSize * 1.18f);
 	private float MessageLineHeight => MathF.Ceiling(MessageFontSize * 1.28f);
 	private float TitleMessageGap => 6f * ScaleFactor;
-	private float ActionTopGap => 10f * ScaleFactor;
+	private float ActionTopGap => (_presentationMode == NotificationToastPresentationMode.Dialog ? 14f : 10f) * ScaleFactor;
 	private float ActionHeight => MathF.Max(26f * ScaleFactor, MathF.Ceiling(ActionFontSize * 2.2f));
 	private float ActionGap => 6f * ScaleFactor;
 	private float ProgressHeight => 3f * ScaleFactor;
-	private const int MaxMessageLines = 4;
+	private int MaxMessageLines => _presentationMode == NotificationToastPresentationMode.Dialog ? 6 : 4;
 	private float ContentLeft => PaddingH + IconDiameter + IconGap;
 	private float ContentRight => ToastWidth - PaddingH - CloseSize - CloseRightGap;
 	private float ContentWidth => ContentRight - ContentLeft;
@@ -111,7 +134,10 @@ public sealed class NotificationToast : ElementBase
 	private readonly SKRect[] _actionRects;
 	private readonly NotificationToastPalette? _customPalette;
 	internal readonly ContentAlignment _alignment;
+	internal readonly NotificationToastLayoutMode _layoutMode;
+	internal readonly NotificationToastPresentationMode _presentationMode;
 	private bool IsTopPosition => _alignment is ContentAlignment.TopLeft or ContentAlignment.TopCenter or ContentAlignment.TopRight;
+	private bool IsMiddlePosition => _alignment is ContentAlignment.MiddleLeft or ContentAlignment.MiddleCenter or ContentAlignment.MiddleRight;
 	private ToastTransitionPhase _transitionPhase = ToastTransitionPhase.Enter;
 	private NotificationHandle? _handle;
 
@@ -121,6 +147,7 @@ public sealed class NotificationToast : ElementBase
 	private float _remainingMs;
 	private float? _manualProgress;
 	private int _dismissState;
+	private int _stackDepth;
 	private bool _countdownPaused;
 	private bool _closeHovered;
 	private bool _closePressed;
@@ -130,9 +157,13 @@ public sealed class NotificationToast : ElementBase
 	private int _hoveredAction = -1;
 	private int _pressedAction = -1;
 	private Action? _deferredCompletionAction;
+	private float _steadyOpacity = 1f;
+	private float _steadyScale = 1f;
 	private SKRect _closeRect;
 	private NotificationToastPalette _palette = new NotificationToastPalette(SKColors.White, SKColors.Black, SKColors.Black);
 	internal Action? OnDismissWithoutAction;
+	internal Action<NotificationToast>? StackBodyClickRequested;
+	internal Action<NotificationToast, int>? StackWheelRequested;
 
 	private enum ToastTransitionPhase
 	{
@@ -191,9 +222,13 @@ public sealed class NotificationToast : ElementBase
 		_cachedBoldTypeface = SKTypeface.FromFamilyName(familyName, SKFontStyle.Bold);
 		_ownsCachedBoldTypeface = _cachedBoldTypeface != null;
 		var titleTypeface = _cachedBoldTypeface ?? defaultTypeface;
-		_cachedTitleFont = new SKFont(titleTypeface, TitleFontSize) { Subpixel = true, Edging = SKFontEdging.SubpixelAntialias };
-		_cachedMessageFont = new SKFont(defaultTypeface, MessageFontSize) { Subpixel = true, Edging = SKFontEdging.SubpixelAntialias };
-		_cachedActionFont = new SKFont(defaultTypeface, ActionFontSize) { Subpixel = true, Edging = SKFontEdging.SubpixelAntialias };
+		_cachedTitleFont = Application.CreateUiFont(titleTypeface, TitleFontSize);
+		_cachedMessageFont = Application.CreateUiFont(defaultTypeface, MessageFontSize);
+		_cachedActionFont = Application.CreateUiFont(defaultTypeface, ActionFontSize);
+	}
+
+	private static void EnsureMouseWheelRouting(object? sender, MouseEventArgs e)
+	{
 	}
 
 	private void ClearFontCache()
@@ -212,7 +247,6 @@ public sealed class NotificationToast : ElementBase
 		_cachedTypefaceName = null;
 	}
 
-
 	internal NotificationToast(
 		string title,
 		string message,
@@ -222,9 +256,13 @@ public sealed class NotificationToast : ElementBase
 		float? progress,
 		NotificationToastPalette? customPalette,
 		NotificationAction[]? actions = null,
-		ContentAlignment alignment = ContentAlignment.BottomRight)
+		ContentAlignment alignment = ContentAlignment.BottomRight,
+		NotificationToastLayoutMode layoutMode = NotificationToastLayoutMode.List,
+		NotificationToastPresentationMode presentationMode = NotificationToastPresentationMode.Toast)
 	{
 		_alignment = alignment;
+		_layoutMode = layoutMode;
+		_presentationMode = presentationMode;
 		Title = title;
 		Message = message;
 		Kind = kind;
@@ -247,6 +285,7 @@ public sealed class NotificationToast : ElementBase
 		ApplyTheme();
 		ZOrder = 9999;
 		Opacity = 0f;
+		MouseWheel += EnsureMouseWheelRouting;
 		ColorScheme.ThemeChanged += OnThemeChanged;
 
 		ConfigureEntryExitStyles();
@@ -266,6 +305,35 @@ public sealed class NotificationToast : ElementBase
 		_remainingMs = durationMs;
 	}
 
+	internal void UpdateStackPresentation(int depth)
+	{
+		var normalizedDepth = Math.Max(0, depth);
+		var resolvedScale = 1f;
+		var resolvedOpacity = 1f;
+
+		if (_layoutMode == NotificationToastLayoutMode.Stack)
+		{
+			var visibleDepth = Math.Min(normalizedDepth, 3);
+			resolvedScale = 1f - (visibleDepth * 0.045f);
+			resolvedOpacity = normalizedDepth > 3 ? 0f : 1f - (visibleDepth * 0.12f);
+		}
+
+		if (_stackDepth == normalizedDepth
+			&& Math.Abs(_steadyScale - resolvedScale) < 0.001f
+			&& Math.Abs(_steadyOpacity - resolvedOpacity) < 0.001f)
+			return;
+
+		_stackDepth = normalizedDepth;
+		_steadyScale = resolvedScale;
+		_steadyOpacity = resolvedOpacity;
+		ConfigureEntryExitStyles();
+
+		if (_dismissState == 0 && _hasBeenPlaced)
+			ReevaluateVisualStyles();
+		else
+			Invalidate();
+	}
+
 	internal void Place(float targetX, float targetY)
 	{
 		_targetX = targetX;
@@ -275,6 +343,15 @@ public sealed class NotificationToast : ElementBase
 		SetAnimatedLocation(new SKPoint(targetX, targetY));
 		_remainingMs = DurationMs;
 		ReevaluateVisualStyles();
+	}
+
+	internal void SetTargetX(float newTargetX)
+	{
+		if (Math.Abs(_targetX - newTargetX) < 0.5f)
+			return;
+
+		_targetX = newTargetX;
+		SetAnimatedLocation(new SKPoint(newTargetX, _targetY));
 	}
 
 
@@ -421,7 +498,24 @@ public sealed class NotificationToast : ElementBase
 			return;
 		}
 
+		if (_layoutMode == NotificationToastLayoutMode.Stack)
+			StackBodyClickRequested?.Invoke(this);
+
 		Invalidate();
+	}
+
+	internal override void OnMouseWheel(MouseEventArgs e)
+	{
+		if (_dismissState != 0)
+			return;
+
+		if (_layoutMode == NotificationToastLayoutMode.Stack && e.Delta != 0)
+		{
+			StackWheelRequested?.Invoke(this, e.Delta);
+			return;
+		}
+
+		base.OnMouseWheel(e);
 	}
 
 	protected internal override void OnMouseClick(MouseEventArgs e)
@@ -495,10 +589,12 @@ public sealed class NotificationToast : ElementBase
 
 	private void ConfigureEntryExitStyles()
 	{
-		var directionSign = IsTopPosition ? -1f : 1f;
+		var steadyOpacity = _steadyOpacity;
+		var steadyScale = _steadyScale;
+		var directionSign = _presentationMode == NotificationToastPresentationMode.Dialog ? 0f : IsTopPosition ? -1f : IsMiddlePosition ? 0f : 1f;
 		var entranceOffset = directionSign * 16f * ScaleFactor;
 		var exitOffset = directionSign * 8f * ScaleFactor;
-		const float entranceScale = 0.88f;
+		var entranceScale = _presentationMode == NotificationToastPresentationMode.Dialog ? 0.94f : 0.88f;
 		const float exitScale = 0.95f;
 
 		if (!_hasBeenPlaced)
@@ -511,8 +607,8 @@ public sealed class NotificationToast : ElementBase
 			{
 				Opacity = 0f,
 				TranslateY = entranceOffset,
-				ScaleX = entranceScale,
-				ScaleY = entranceScale,
+				ScaleX = steadyScale * entranceScale,
+				ScaleY = steadyScale * entranceScale,
 			});
 		}
 
@@ -521,7 +617,7 @@ public sealed class NotificationToast : ElementBase
 				(el, _) => el is NotificationToast t && t._dismissState != 0,
 				rule => rule
 					.Opacity(0f)
-					.Scale(exitScale)
+					.Scale(steadyScale * exitScale)
 					.TranslateY(exitOffset)
 					.Transition(TimeSpan.FromMilliseconds(180), AnimationType.CubicEaseIn))
 			.When(
@@ -530,8 +626,8 @@ public sealed class NotificationToast : ElementBase
 					&& t._dismissState == 0
 					&& t._transitionPhase == ToastTransitionPhase.Enter,
 				rule => rule
-					.Opacity(1f)
-					.Scale(1f)
+					.Opacity(steadyOpacity)
+					.Scale(steadyScale)
 					.TranslateY(0f)
 					.Transition(TimeSpan.FromMilliseconds(320), AnimationType.BackOut))
 			.When(
@@ -540,15 +636,15 @@ public sealed class NotificationToast : ElementBase
 					&& t._dismissState == 0
 					&& t._transitionPhase == ToastTransitionPhase.StackReflow,
 				rule => rule
-					.Opacity(1f)
-					.Scale(1f)
+					.Opacity(steadyOpacity)
+					.Scale(steadyScale)
 					.TranslateY(0f)
 					.Transition(TimeSpan.FromMilliseconds(190), AnimationType.QuarticEaseOut, ElementVisualTransitionMode.ReplayOnReevaluate))
 			.When(
 				(el, _) => el is NotificationToast t && t._hasBeenPlaced && t._dismissState == 0,
 				rule => rule
-					.Opacity(1f)
-					.Scale(1f)
+					.Opacity(steadyOpacity)
+					.Scale(steadyScale)
 					.TranslateY(0f)),
 			clearExisting: true);
 	}
@@ -558,11 +654,32 @@ public sealed class NotificationToast : ElementBase
 		_palette = ResolvePalette();
 
 		BackColor = _palette.BackgroundColor;
-		//Border = new Thickness(2);
 		ForeColor = _palette.ForegroundColor;
-		//BorderColor = background.BlendWith(ForeColor, 0.5f).WithAlpha(150);
 		Radius = CardRadius;
-		//Shadow = new BoxShadow(0f, 0, BaseShadowPadding, 0, ColorScheme.ShadowColor);
+		Shadows = CreateShadows();
+	}
+
+	private BoxShadow[] CreateShadows()
+	{
+		if (_presentationMode == NotificationToastPresentationMode.Dialog)
+		{
+			var ambientDialogShadow = SKColors.Black.WithAlpha(_palette.IsDarkSurface ? (byte)124 : (byte)58);
+			var liftDialogShadow = SKColors.Black.WithAlpha(_palette.IsDarkSurface ? (byte)64 : (byte)22);
+			return
+			[
+				new BoxShadow(0f, 14f * ScaleFactor, 32f * ScaleFactor, 0, ambientDialogShadow),
+				new BoxShadow(0f, 4f * ScaleFactor, 12f * ScaleFactor, 0, liftDialogShadow),
+			];
+		}
+
+		var ambientShadow = SKColors.Black.WithAlpha(_palette.IsDarkSurface ? (byte)88 : (byte)34);
+		var liftShadow = SKColors.Black.WithAlpha(_palette.IsDarkSurface ? (byte)42 : (byte)18);
+
+		return
+		[
+			new BoxShadow(0f, 8f * ScaleFactor, 18f * ScaleFactor, 0, ambientShadow),
+			new BoxShadow(0f, 2f * ScaleFactor, 6f * ScaleFactor, 0, liftShadow),
+		];
 	}
 
 	private void DrawIconBadge(SKCanvas canvas, SKColor accent)
@@ -959,6 +1076,7 @@ public sealed class NotificationToast : ElementBase
 	{
 		if (disposing)
 		{
+			MouseWheel -= EnsureMouseWheelRouting;
 			ClearFontCache();
 			ColorScheme.ThemeChanged -= OnThemeChanged;
 			_countdownAnimation.OnAnimationProgress -= HandleCountdownAnimationProgress;

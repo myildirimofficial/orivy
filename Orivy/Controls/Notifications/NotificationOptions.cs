@@ -11,4 +11,6 @@ public sealed class NotificationOptions
     public NotificationAction[] Actions { get; set; } = Array.Empty<NotificationAction>();
     public NotificationToastPalette? CustomPalette { get; set; }
     public ContentAlignment? Position { get; set; }
+    public NotificationToastLayoutMode? LayoutMode { get; set; }
+    public NotificationToastPresentationMode PresentationMode { get; set; } = NotificationToastPresentationMode.Toast;
 }

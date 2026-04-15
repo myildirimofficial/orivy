@@ -8,6 +8,11 @@ namespace Orivy.Controls;
 
 internal sealed class NotificationManager : IDisposable
 {
+	private const int MaxVisibleStackDepth = 3;
+	private const int ExpandedVisibleStackDepth = 4;
+	private const int MouseWheelStepDelta = 120;
+	private const int StackWheelCooldownMs = 170;
+
 	private float MarginRight  => 4f * _owner.ScaleFactor;
 	private float MarginLeft   => 4f * _owner.ScaleFactor;
 	private float MarginTop    => 4f * _owner.ScaleFactor;
@@ -18,11 +23,22 @@ internal sealed class NotificationManager : IDisposable
 	private static bool IsTopAlignment(ContentAlignment alignment) =>
 		alignment is ContentAlignment.TopLeft or ContentAlignment.TopCenter or ContentAlignment.TopRight;
 
+	private static bool IsMiddleAlignment(ContentAlignment alignment) =>
+		alignment is ContentAlignment.MiddleLeft or ContentAlignment.MiddleCenter or ContentAlignment.MiddleRight;
+
+	private static bool IsBottomAlignment(ContentAlignment alignment) =>
+		alignment is ContentAlignment.BottomLeft or ContentAlignment.BottomCenter or ContentAlignment.BottomRight;
+
 	private readonly WindowBase _owner;
-	private readonly Dictionary<ContentAlignment, NotificationTray> _trays = new();
-	private readonly Dictionary<ContentAlignment, List<NotificationToast>> _activeByAlignment = new();
+	private readonly Dictionary<(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode), NotificationTray> _trays = new();
+	private readonly Dictionary<(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode), List<NotificationToast>> _activeByAlignment = new();
+	private readonly HashSet<(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode)> _expandedStacks = new();
+	private readonly Dictionary<(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode), int> _stackFrontIndices = new();
+	private readonly Dictionary<(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode), int> _stackWheelRemainders = new();
+	private readonly Dictionary<(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode), long> _stackLastWheelTicks = new();
 	private bool _disposed;
 	private NotificationToastPalette? _customPalette;
+	private NotificationToastLayoutMode _defaultLayoutMode = NotificationToastLayoutMode.List;
 
 	public NotificationToastPalette? CustomPalette
 	{
@@ -34,6 +50,18 @@ internal sealed class NotificationManager : IDisposable
 
 			_customPalette = value;
 			RefreshActiveToastThemes();
+		}
+	}
+
+	public NotificationToastLayoutMode DefaultLayoutMode
+	{
+		get => _defaultLayoutMode;
+		set
+		{
+			if (_defaultLayoutMode == value)
+				return;
+
+			_defaultLayoutMode = value;
 		}
 	}
 
@@ -71,6 +99,22 @@ internal sealed class NotificationManager : IDisposable
 		NotificationOptions? options)
 		=> ShowCore(title, message, kind, options ?? new NotificationOptions(), null);
 
+	public NotificationHandle ShowDialog(
+		string title,
+		string message,
+		NotificationKind kind,
+		NotificationOptions? options = null)
+	{
+		var resolvedOptions = options ?? new NotificationOptions();
+		resolvedOptions.PresentationMode = NotificationToastPresentationMode.Dialog;
+		resolvedOptions.Position = ContentAlignment.MiddleCenter;
+		resolvedOptions.LayoutMode = NotificationToastLayoutMode.List;
+		if (resolvedOptions.DurationMs == 4000)
+			resolvedOptions.DurationMs = 0;
+		resolvedOptions.ShowProgressBar = resolvedOptions.DurationMs > 0 && resolvedOptions.ShowProgressBar;
+		return ShowCore(title, message, kind, resolvedOptions, null);
+	}
+
 	public Task<string> ConfirmAsync(
 		string title,
 		string message,
@@ -95,6 +139,9 @@ internal sealed class NotificationManager : IDisposable
 			DurationMs = durationMs,
 			ShowProgressBar = false,
 			Actions = actions,
+			LayoutMode = NotificationToastLayoutMode.List,
+			Position = ContentAlignment.MiddleCenter,
+			PresentationMode = NotificationToastPresentationMode.Dialog,
 		}, () => tcs.TrySetResult(string.Empty));
 		return tcs.Task;
 	}
@@ -104,6 +151,27 @@ internal sealed class NotificationManager : IDisposable
 		foreach (var list in _activeByAlignment.Values)
 			for (var i = list.Count - 1; i >= 0; i--)
 				list[i].BeginDismiss();
+	}
+
+	internal bool TryDismissActiveDialog()
+	{
+		if (_disposed)
+			return false;
+
+		NotificationToast? activeDialog = null;
+		foreach (var entry in _activeByAlignment)
+		{
+			if (entry.Key.PresentationMode != NotificationToastPresentationMode.Dialog || entry.Value.Count == 0)
+				continue;
+
+			activeDialog = entry.Value[entry.Value.Count - 1];
+		}
+
+		if (activeDialog == null)
+			return false;
+
+		activeDialog.BeginDismiss();
+		return true;
 	}
 
 	private NotificationHandle ShowCore(
@@ -116,10 +184,19 @@ internal sealed class NotificationManager : IDisposable
 		if (_disposed)
 			throw new ObjectDisposedException(nameof(NotificationManager));
 
-		var alignment           = options.Position ?? ContentAlignment.BottomRight;
-		var resolvedCustomPalette = options.CustomPalette ?? _customPalette;
+		var presentationMode = options.PresentationMode;
+		var alignment = options.Position ?? ContentAlignment.BottomRight;
+		var layoutMode = options.LayoutMode ?? _defaultLayoutMode;
+		if (presentationMode == NotificationToastPresentationMode.Dialog)
+		{
+			alignment = ContentAlignment.MiddleCenter;
+			layoutMode = NotificationToastLayoutMode.List;
+		}
 
-		var tray = GetOrCreateTray(alignment);
+		var resolvedCustomPalette = options.CustomPalette ?? _customPalette;
+		var key = (alignment, layoutMode, presentationMode);
+
+		var tray = GetOrCreateTray(key);
 
 		var toast = new NotificationToast(
 			title,
@@ -130,10 +207,14 @@ internal sealed class NotificationManager : IDisposable
 			options.Progress,
 			resolvedCustomPalette,
 			options.Actions,
-			alignment)
+			alignment,
+			layoutMode,
+			presentationMode)
 		{
 			OnDismissWithoutAction = onDismissWithoutAction,
 		};
+		toast.StackBodyClickRequested += OnStackBodyClickRequested;
+		toast.StackWheelRequested += OnStackWheelRequested;
 		var handle = new NotificationHandle(toast);
 		toast.AttachHandle(handle);
 
@@ -142,18 +223,20 @@ internal sealed class NotificationManager : IDisposable
 		tray.Controls.Add(toast);
 		toast.RefreshForScale();
 
-		if (!_activeByAlignment.TryGetValue(alignment, out var activeList))
+		if (!_activeByAlignment.TryGetValue(key, out var activeList))
 		{
 			activeList = new List<NotificationToast>();
-			_activeByAlignment[alignment] = activeList;
+			_activeByAlignment[key] = activeList;
 		}
 		activeList.Add(toast);
+		if (layoutMode == NotificationToastLayoutMode.Stack)
+			SetStackFrontIndex(key, activeList.Count, activeList.Count - 1);
 
 		tray.Controls.SetChildIndex(toast, tray.Controls.Count - 1);
 		tray.UpdateZOrder();
 		toast.BringToFront();
 
-		SyncTray(alignment);
+		SyncTray(key);
 		tray.Invalidate();
 		return handle;
 	}
@@ -164,18 +247,23 @@ internal sealed class NotificationManager : IDisposable
 			return;
 
 		dismissed.DismissCompleted -= OnToastDismissed;
+		dismissed.StackBodyClickRequested -= OnStackBodyClickRequested;
+		dismissed.StackWheelRequested -= OnStackWheelRequested;
 
-		var alignment = dismissed._alignment;
-		if (!_activeByAlignment.TryGetValue(alignment, out var activeList))
+		var key = (dismissed._alignment, dismissed._layoutMode, dismissed._presentationMode);
+		if (!_activeByAlignment.TryGetValue(key, out var activeList))
 			return;
 
+		var previousFrontIndex = dismissed._layoutMode == NotificationToastLayoutMode.Stack
+			? ResolveStackFrontIndex(key, activeList.Count)
+			: -1;
 		var index = activeList.IndexOf(dismissed);
 		if (index < 0)
 			return;
 
 		activeList.RemoveAt(index);
 
-		if (_trays.TryGetValue(alignment, out var tray))
+		if (_trays.TryGetValue(key, out var tray))
 			tray.Controls.Remove(dismissed);
 
 		var deferredCompletion = dismissed.TakeDeferredCompletionAction();
@@ -188,8 +276,116 @@ internal sealed class NotificationManager : IDisposable
 		if (_disposed)
 			return;
 
+		if (activeList.Count == 0)
+		{
+			_expandedStacks.Remove(key);
+			_stackFrontIndices.Remove(key);
+			ClearStackWheelState(key);
+		}
+		else if (dismissed._layoutMode == NotificationToastLayoutMode.Stack)
+		{
+			if (index < previousFrontIndex)
+				SetStackFrontIndex(key, activeList.Count, previousFrontIndex - 1);
+			else if (index == previousFrontIndex)
+				SetStackFrontIndex(key, activeList.Count, Math.Min(previousFrontIndex, activeList.Count - 1));
+		}
+
 		if (activeList.Count == activeCountBeforeDeferred)
-			SyncTray(alignment);
+			SyncTray(key);
+	}
+
+	private void OnStackBodyClickRequested(NotificationToast toast)
+	{
+		if (_disposed || toast._layoutMode != NotificationToastLayoutMode.Stack)
+			return;
+
+		var key = (toast._alignment, toast._layoutMode, toast._presentationMode);
+		if (!_activeByAlignment.TryGetValue(key, out var activeList) || activeList.Count <= 1)
+		{
+			_stackFrontIndices.Remove(key);
+			ClearStackWheelState(key);
+			return;
+		}
+
+		if (!_expandedStacks.Contains(key))
+		{
+			ClearStackWheelState(key);
+			_expandedStacks.Add(key);
+			SyncTray(key);
+			return;
+		}
+
+		var frontToast = activeList[ResolveStackFrontIndex(key, activeList.Count)];
+		if (ReferenceEquals(frontToast, toast))
+		{
+			if (activeList.Count <= 1)
+			{
+				_stackFrontIndices.Remove(key);
+				ClearStackWheelState(key);
+				_expandedStacks.Remove(key);
+				SyncTray(key);
+				return;
+			}
+
+			ClearStackWheelState(key);
+			ShiftStackFrontIndex(key, activeList.Count, -1);
+			SyncTray(key);
+			return;
+		}
+
+		var index = activeList.IndexOf(toast);
+		if (index < 0)
+			return;
+
+		SetStackFrontIndex(key, activeList.Count, index);
+		ClearStackWheelState(key);
+		SyncTray(key);
+	}
+
+	private void OnStackWheelRequested(NotificationToast toast, int delta)
+	{
+		if (_disposed || toast._layoutMode != NotificationToastLayoutMode.Stack || delta == 0)
+			return;
+
+		var key = (toast._alignment, toast._layoutMode, toast._presentationMode);
+		if (!_activeByAlignment.TryGetValue(key, out var activeList) || activeList.Count <= 1)
+		{
+			_stackFrontIndices.Remove(key);
+			ClearStackWheelState(key);
+			return;
+		}
+
+		var accumulatedDelta = _stackWheelRemainders.TryGetValue(key, out var remainder) ? remainder : 0;
+		if (accumulatedDelta != 0 && Math.Sign(accumulatedDelta) != Math.Sign(delta))
+			accumulatedDelta = 0;
+
+		accumulatedDelta += delta;
+		if (Math.Abs(accumulatedDelta) < MouseWheelStepDelta)
+		{
+			_stackWheelRemainders[key] = accumulatedDelta;
+			return;
+		}
+
+		var steps = Math.Sign(accumulatedDelta);
+		accumulatedDelta -= steps * MouseWheelStepDelta;
+		var now = Environment.TickCount64;
+		if (_stackLastWheelTicks.TryGetValue(key, out var lastWheelTick) && now - lastWheelTick < StackWheelCooldownMs)
+		{
+			ClearStackWheelState(key);
+			return;
+		}
+
+		_stackLastWheelTicks[key] = now;
+
+		if (accumulatedDelta == 0)
+			_stackWheelRemainders.Remove(key);
+		else
+			_stackWheelRemainders[key] = accumulatedDelta;
+
+		// Accept one visible step per wheel burst so fast scrolling cannot skip
+		// multiple stack states before the reflow animation becomes readable.
+		ShiftStackFrontIndex(key, activeList.Count, -steps);
+		SyncTray(key);
 	}
 
 	private void OnOwnerDpiChanged(object? sender, EventArgs e)
@@ -226,10 +422,14 @@ internal sealed class NotificationManager : IDisposable
 		EnsureAllTraysTopMost();
 	}
 
-	private NotificationTray GetOrCreateTray(ContentAlignment alignment)
+	private NotificationTray GetOrCreateTray((ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode) key)
 	{
-		if (_trays.TryGetValue(alignment, out var existing))
+		if (_trays.TryGetValue(key, out var existing))
+		{
+			existing.SetLayoutMode(key.LayoutMode);
+			existing.SetPresentationMode(key.PresentationMode);
 			return existing;
+		}
 
 		var tray = new NotificationTray
 		{
@@ -237,8 +437,10 @@ internal sealed class NotificationManager : IDisposable
 			Size     = new SKSize((NotificationToast.BaseToastWidth * _owner.ScaleFactor) + (ToastShadowPadding * 2f), 1),
 			Location = SKPoint.Empty,
 		};
+		tray.SetLayoutMode(key.LayoutMode);
+		tray.SetPresentationMode(key.PresentationMode);
 
-		_trays[alignment] = tray;
+		_trays[key] = tray;
 		_owner.Controls.Add(tray);
 		EnsureAllTraysTopMost();
 		return tray;
@@ -246,56 +448,223 @@ internal sealed class NotificationManager : IDisposable
 
 	private void SyncAllTrays(bool snap = false)
 	{
-		foreach (var alignment in _trays.Keys)
-			SyncTray(alignment, snap);
+		foreach (var key in _trays.Keys)
+			SyncTray(key, snap);
 	}
 
-	private void SyncTray(ContentAlignment alignment, bool snap = false)
+	private void SyncTray((ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode) key, bool snap = false)
 	{
-		if (!_trays.TryGetValue(alignment, out var tray))
+		if (!_trays.TryGetValue(key, out var tray))
 			return;
 
-		if (!_activeByAlignment.TryGetValue(alignment, out var activeList) || activeList.Count == 0)
+		tray.SetLayoutMode(key.LayoutMode);
+		tray.SetPresentationMode(key.PresentationMode);
+
+		if (!_activeByAlignment.TryGetValue(key, out var activeList) || activeList.Count == 0)
 		{
-			tray.Visible = false;
+			var animateDialogFadeOut = key.PresentationMode == NotificationToastPresentationMode.Dialog && !snap;
+			tray.SetDialogScrimVisible(false, immediate: !animateDialogFadeOut);
+			tray.Visible = animateDialogFadeOut;
+			_expandedStacks.Remove(key);
+			_stackFrontIndices.Remove(key);
+			ClearStackWheelState(key);
 			return;
 		}
 
+		var alignment = key.Alignment;
+		var isStack = key.LayoutMode == NotificationToastLayoutMode.Stack;
+		var isDialog = key.PresentationMode == NotificationToastPresentationMode.Dialog;
+		if (!isStack)
+		{
+			_stackFrontIndices.Remove(key);
+			ClearStackWheelState(key);
+		}
+
+		var isExpandedStack = isStack && _expandedStacks.Contains(key);
+		var stackFrontIndex = isStack ? ResolveStackFrontIndex(key, activeList.Count) : -1;
 		var topInset = 0f;
 		if (_owner is Window window && window.ShowTitle)
 			topInset = _owner.Padding.Top;
 		var isTop = IsTopAlignment(alignment);
+		var isMiddle = IsMiddleAlignment(alignment);
 
 		Dictionary<NotificationToast, float>? previousScreenY = null;
 		if (!snap)
 			previousScreenY = CaptureScreenPositions(activeList, tray.Location.Y, tray.VerticalDisplayOffset);
 
-		var totalHeight     = TotalContentHeight(activeList);
 		var availableHeight = Math.Max(1f, _owner.Height - topInset - MarginTop - MarginBottom);
-		tray.Resize(totalHeight, availableHeight);
+
+		var totalHeight = isDialog
+			? availableHeight
+			: isStack
+				? TotalStackHeight(activeList, stackFrontIndex, isExpandedStack)
+				: TotalContentHeight(activeList);
+		if (isDialog)
+			tray.ResizeForDialog(_owner.Width, availableHeight + MarginTop + MarginBottom);
+		else
+			tray.Resize(totalHeight, availableHeight);
 		var trayHeight = tray.Height;
-		var targetScrollOffset = ResolveTargetScrollOffset(totalHeight, trayHeight, isTop);
+		var targetScrollOffset = isStack || isDialog ? 0f : ResolveTargetScrollOffset(totalHeight, trayHeight, alignment);
 
 		float trayX = alignment switch
 		{
 			ContentAlignment.TopLeft   or ContentAlignment.BottomLeft   => MarginLeft,
+			ContentAlignment.MiddleLeft                              => MarginLeft,
 			ContentAlignment.TopCenter or ContentAlignment.BottomCenter => (_owner.Width - tray.Width) / 2f,
+			ContentAlignment.MiddleCenter                              => (_owner.Width - tray.Width) / 2f,
 			_                                                           => _owner.Width - MarginRight - tray.Width,
 		};
 
-		float trayY = isTop
-			? topInset + MarginTop
-			: topInset + MarginTop + (availableHeight - trayHeight);
+		float trayY;
+		if (isDialog)
+		{
+			trayX = 0f;
+			trayY = topInset;
+		}
+		else if (isStack)
+		{
+			var frontToast = activeList[stackFrontIndex];
+			var stackExtent = GetStackExtent(activeList, stackFrontIndex, isExpandedStack);
+			var frontLocalY = IsBottomAlignment(alignment) ? ToastShadowPadding + stackExtent : ToastShadowPadding;
+			var desiredFrontScreenY = ResolveStackFrontScreenY(frontToast.Height, availableHeight, topInset, alignment);
+			trayY = desiredFrontScreenY - frontLocalY;
+		}
+		else if (isTop)
+		{
+			trayY = topInset + MarginTop;
+		}
+		else if (isMiddle)
+		{
+			trayY = topInset + MarginTop + ((availableHeight - trayHeight) / 2f);
+		}
+		else
+		{
+			trayY = topInset + MarginTop + (availableHeight - trayHeight);
+		}
 
 		tray.Location = new SKPoint(trayX, trayY);
+		if (isDialog)
+			tray.Visible = true;
+		tray.SetDialogScrimVisible(isDialog, immediate: snap);
+		if (isStack)
+			SyncStackVisualOrder(key, activeList, stackFrontIndex);
 
 		EnsureAllTraysTopMost();
-		ArrangeToasts(activeList, totalHeight, trayHeight, trayY, targetScrollOffset, snap, previousScreenY);
+		if (isDialog)
+			ArrangeDialogToasts(activeList, tray, snap, previousScreenY);
+		else if (isStack)
+			ArrangeStackToasts(activeList, stackFrontIndex, alignment, trayY, snap, previousScreenY, isExpandedStack);
+		else
+			ArrangeToasts(activeList, totalHeight, trayHeight, trayY, targetScrollOffset, snap, previousScreenY);
 		tray.RefreshScrollMetrics();
 		tray.SetVerticalScrollOffset(targetScrollOffset, immediate: true);
 
 		tray.Visible = true;
 		tray.Invalidate();
+	}
+
+	private void ArrangeStackToasts(
+		List<NotificationToast> activeList,
+		int frontIndex,
+		ContentAlignment alignment,
+		float trayY,
+		bool snap,
+		Dictionary<NotificationToast, float>? previousScreenY,
+		bool expanded)
+	{
+		var stackExtent = GetStackExtent(activeList, frontIndex, expanded);
+		var frontLocalY = IsBottomAlignment(alignment) ? ToastShadowPadding + stackExtent : ToastShadowPadding;
+
+		for (var displayIndex = 0; displayIndex < activeList.Count; displayIndex++)
+		{
+			var actualIndex = GetStackDisplayIndex(frontIndex, activeList.Count, displayIndex);
+			var toast = activeList[actualIndex];
+			var depth = (activeList.Count - 1) - displayIndex;
+			var clampedDepth = Math.Min(depth, MaxVisibleStackDepth);
+			var stackOffset = expanded ? GetExpandedStackOffset(activeList, frontIndex, depth) : GetStackOffset(clampedDepth);
+			var y = IsBottomAlignment(alignment)
+				? frontLocalY - stackOffset
+				: frontLocalY + stackOffset;
+
+			toast.UpdateStackPresentation(depth);
+
+			if (!toast._hasBeenPlaced)
+				toast.Place(ToastShadowPadding, y);
+			else if (snap)
+				toast.SnapTo(y);
+			else
+			{
+				var oldScreenY = toast.GetVisualScreenY(trayY, 0f);
+				if (previousScreenY != null)
+					previousScreenY.TryGetValue(toast, out oldScreenY);
+
+				var newScreenY = trayY + y;
+				toast.MoveTo(y, oldScreenY, newScreenY);
+			}
+		}
+	}
+
+	private void ShiftStackFrontIndex(
+		(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode) key,
+		int itemCount,
+		int offset)
+	{
+		if (itemCount <= 1 || offset == 0)
+			return;
+
+		SetStackFrontIndex(key, itemCount, ResolveStackFrontIndex(key, itemCount) + offset);
+	}
+
+	private void SyncStackVisualOrder(
+		(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode) key,
+		List<NotificationToast> activeList,
+		int frontIndex)
+	{
+		if (!_trays.TryGetValue(key, out var tray))
+			return;
+
+		for (var displayIndex = 0; displayIndex < activeList.Count; displayIndex++)
+		{
+			var actualIndex = GetStackDisplayIndex(frontIndex, activeList.Count, displayIndex);
+			tray.Controls.SetChildIndex(activeList[actualIndex], displayIndex);
+		}
+
+		tray.UpdateZOrder();
+		activeList[frontIndex].BringToFront();
+	}
+
+	private void ArrangeDialogToasts(
+		List<NotificationToast> activeList,
+		NotificationTray tray,
+		bool snap,
+		Dictionary<NotificationToast, float>? previousScreenY)
+	{
+		for (var i = 0; i < activeList.Count; i++)
+		{
+			var toast = activeList[i];
+			var x = Math.Max(ToastShadowPadding, (tray.Width - toast.Width) / 2f);
+			var y = Math.Max(ToastShadowPadding, (tray.Height - toast.Height) / 2f);
+
+			toast.UpdateStackPresentation(0);
+
+			if (!toast._hasBeenPlaced)
+				toast.Place(x, y);
+			else
+			{
+				toast.SetTargetX(x);
+				if (snap)
+					toast.SnapTo(y);
+				else
+				{
+					var oldScreenY = toast.GetVisualScreenY(tray.Location.Y, 0f);
+					if (previousScreenY != null)
+						previousScreenY.TryGetValue(toast, out oldScreenY);
+
+					var newScreenY = tray.Location.Y + y;
+					toast.MoveTo(y, oldScreenY, newScreenY);
+				}
+			}
+		}
 	}
 
 	private void ArrangeToasts(
@@ -349,12 +718,18 @@ internal sealed class NotificationManager : IDisposable
 		return positions;
 	}
 
-	private static float ResolveTargetScrollOffset(float totalHeight, float trayHeight, bool isTopAlignment)
+	private static float ResolveTargetScrollOffset(float totalHeight, float trayHeight, ContentAlignment alignment)
 	{
 		if (totalHeight <= trayHeight)
 			return 0f;
 
-		return isTopAlignment ? 0f : totalHeight - trayHeight;
+		if (IsTopAlignment(alignment))
+			return 0f;
+
+		if (IsMiddleAlignment(alignment))
+			return (totalHeight - trayHeight) / 2f;
+
+		return totalHeight - trayHeight;
 	}
 
 	private void RefreshActiveToastThemes()
@@ -389,6 +764,118 @@ internal sealed class NotificationManager : IDisposable
 		return total;
 	}
 
+	private float TotalStackHeight(List<NotificationToast> activeList, int frontIndex, bool expanded)
+	{
+		if (activeList.Count == 0)
+			return 0f;
+
+		var frontToast = activeList[frontIndex];
+		return (ToastShadowPadding * 2f) + frontToast.Height + GetStackExtent(activeList, frontIndex, expanded);
+	}
+
+	private float GetStackExtent(List<NotificationToast> activeList, int frontIndex, bool expanded)
+	{
+		if (activeList.Count <= 1)
+			return 0f;
+
+		if (expanded)
+			return GetExpandedStackOffset(activeList, frontIndex, activeList.Count - 1);
+
+		var visibleDepth = Math.Min(activeList.Count - 1, MaxVisibleStackDepth);
+		return GetStackOffset(visibleDepth);
+	}
+
+	private float GetExpandedStackOffset(List<NotificationToast> activeList, int frontIndex, int depth)
+	{
+		if (depth <= 0)
+			return 0f;
+
+		var offset = 0f;
+		var visibleDepth = Math.Min(depth, ExpandedVisibleStackDepth);
+		for (var visibleIndex = 0; visibleIndex < visibleDepth; visibleIndex++)
+		{
+			var toast = GetStackToastByDepth(activeList, frontIndex, visibleIndex);
+			offset += Math.Max(40f * _owner.ScaleFactor, toast.Height - (34f * _owner.ScaleFactor));
+		}
+
+		return offset;
+	}
+
+	private int ResolveStackFrontIndex(
+		(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode) key,
+		int itemCount)
+	{
+		if (itemCount <= 0)
+			return -1;
+
+		if (_stackFrontIndices.TryGetValue(key, out var storedIndex))
+			return NormalizeStackIndex(storedIndex, itemCount);
+
+		return itemCount - 1;
+	}
+
+	private void SetStackFrontIndex(
+		(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode) key,
+		int itemCount,
+		int index)
+	{
+		if (itemCount <= 0)
+		{
+			_stackFrontIndices.Remove(key);
+			return;
+		}
+
+		_stackFrontIndices[key] = NormalizeStackIndex(index, itemCount);
+	}
+
+	private static int NormalizeStackIndex(int index, int itemCount)
+	{
+		var normalized = index % itemCount;
+		return normalized < 0 ? normalized + itemCount : normalized;
+	}
+
+	private static int GetStackDisplayIndex(int frontIndex, int itemCount, int displayIndex)
+	{
+		return NormalizeStackIndex(frontIndex - (itemCount - 1 - displayIndex), itemCount);
+	}
+
+	private static NotificationToast GetStackToastByDepth(List<NotificationToast> activeList, int frontIndex, int depth)
+	{
+		var actualIndex = NormalizeStackIndex(frontIndex - depth, activeList.Count);
+		return activeList[actualIndex];
+	}
+
+	private void ClearStackWheelState((ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode) key)
+	{
+		_stackWheelRemainders.Remove(key);
+		_stackLastWheelTicks.Remove(key);
+	}
+
+	private float GetStackOffset(int depth)
+	{
+		var scale = _owner.ScaleFactor;
+		return depth switch
+		{
+			<= 0 => 0f,
+			1 => 10f * scale,
+			2 => 18f * scale,
+			_ => 24f * scale,
+		};
+	}
+
+	private float ResolveStackFrontScreenY(float toastHeight, float availableHeight, float topInset, ContentAlignment alignment)
+	{
+		var originY = topInset + MarginTop;
+
+		if (IsTopAlignment(alignment))
+			return originY + ToastShadowPadding;
+
+		if (IsMiddleAlignment(alignment))
+			return originY + ((availableHeight - toastHeight) / 2f);
+
+		return originY + availableHeight - toastHeight - ToastShadowPadding;
+	}
+
 	public void Dispose()
 	{
 		if (_disposed)
@@ -405,6 +892,7 @@ internal sealed class NotificationManager : IDisposable
 			{
 				var toast = list[i];
 				toast.DismissCompleted -= OnToastDismissed;
+				toast.StackBodyClickRequested -= OnStackBodyClickRequested;
 				if (_trays.TryGetValue(alignment, out var t))
 					t.Controls.Remove(toast);
 				toast.Dispose();
@@ -412,6 +900,10 @@ internal sealed class NotificationManager : IDisposable
 		}
 
 		_activeByAlignment.Clear();
+		_expandedStacks.Clear();
+		_stackFrontIndices.Clear();
+		_stackWheelRemainders.Clear();
+		_stackLastWheelTicks.Clear();
 
 		foreach (var tray in _trays.Values)
 		{
