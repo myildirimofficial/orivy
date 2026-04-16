@@ -38,6 +38,22 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     protected int _layoutSuspendCount;
     private object? _dataContext;
     private List<BindingHandle>? _ownedBindingHandles;
+    private readonly SKPaint _renderBackgroundPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _renderBorderPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke };
+    private readonly SKPaint _renderTextPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _renderOpacityPaint = new() { IsAntialias = true, Color = SKColors.White };
+    private readonly SKPaint _renderShadowPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _renderDebugBorderPaint = new() { Color = SKColors.Red, Style = SKPaintStyle.Stroke, StrokeWidth = 1f, IsAntialias = true };
+    private readonly SKRoundRect _renderRoundRectScratch = new();
+    private readonly SKPoint[] _renderRoundRectRadiiScratch = new SKPoint[4];
+    private readonly SKPath _renderInsetShadowOuterPath = new();
+    private readonly SKPath _renderInsetShadowHolePath = new();
+    private readonly Dictionary<int, SKMaskFilter> _shadowMaskFilters = new();
+    private SKPaintSurfaceEventArgs? _cachedPaintSurfaceEventArgs;
+    private SKSurface? _cachedPaintSurface;
+    private SKFont? _defaultTextRenderFont;
+    private SKFont? _defaultTextRenderFontSource;
+    private float _defaultTextRenderFontScale;
 
     public int LayoutSuspendCount { get => _layoutSuspendCount; set => _layoutSuspendCount = value; }
 
@@ -100,6 +116,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         {
             if (_backgroundImageLayout == value) return;
             _backgroundImageLayout = value;
+            ClearBackgroundBlurCache();
             OnBackgroundImageLayoutChanged(EventArgs.Empty);
             Invalidate();
         }
@@ -375,6 +392,30 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         return true;
     }
 
+    private static bool TryGetSiblingZOrderExtreme(ElementCollection siblings, bool wantMaximum, out int value)
+    {
+        value = wantMaximum ? int.MinValue : int.MaxValue;
+        var found = false;
+
+        for (var i = 0; i < siblings.Count; i++)
+        {
+            var sibling = siblings[i];
+            found = true;
+
+            if (wantMaximum)
+            {
+                if (sibling.ZOrder > value)
+                    value = sibling.ZOrder;
+            }
+            else if (sibling.ZOrder < value)
+            {
+                value = sibling.ZOrder;
+            }
+        }
+
+        return found;
+    }
+
     /// <summary>
     /// Moves the specified element to the highest Z-order within its parent container.
     /// This is a shared helper used by windows, designers, and any container logic.
@@ -384,11 +425,13 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         if (element == null || element.Parent == null)
             return;
 
-        var siblings = element.Parent.Controls.OfType<ElementBase>().ToList();
-        if (siblings.Count == 0)
+        var siblings = element.Parent.Controls;
+        if (!TryGetSiblingZOrderExtreme(siblings, wantMaximum: true, out var max))
             return;
 
-        int max = siblings.Max(s => s.ZOrder);
+        if (element.ZOrder >= max)
+            return;
+
         element.ZOrder = max + 1;
         element.Parent.InvalidateRenderTree();
     }
@@ -401,11 +444,13 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         if (element == null || element.Parent == null)
             return;
 
-        var siblings = element.Parent.Controls.OfType<ElementBase>().ToList();
-        if (siblings.Count == 0)
+        var siblings = element.Parent.Controls;
+        if (!TryGetSiblingZOrderExtreme(siblings, wantMaximum: false, out var min))
             return;
 
-        int min = siblings.Min(s => s.ZOrder);
+        if (element.ZOrder <= min)
+            return;
+
         element.ZOrder = min - 1;
         element.Parent.InvalidateRenderTree();
     }
@@ -415,9 +460,12 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         if (Parent == null)
             return;
 
-        var siblings = Parent.Controls.OfType<ElementBase>().ToList();
-        if (siblings.Count == 0) return;
-        var max = siblings.Max(s => s.ZOrder);
+        if (!TryGetSiblingZOrderExtreme(Parent.Controls, wantMaximum: true, out var max))
+            return;
+
+        if (ZOrder >= max)
+            return;
+
         ZOrder = max + 1;
         Parent.InvalidateRenderTree();
     }
@@ -470,7 +518,11 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     /// </summary>
     protected virtual void InvalidateFontCache()
     {
-        // Base implementation does nothing - derived controls override to clear their font caches
+        _defaultTextRenderFont?.Dispose();
+        _defaultTextRenderFont = null;
+        _defaultTextRenderFontSource?.Dispose();
+        _defaultTextRenderFontSource = null;
+        _defaultTextRenderFontScale = 0f;
     }
 
     /// <summary>
@@ -511,9 +563,12 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         if (Parent == null)
             return;
 
-        var siblings = Parent.Controls.OfType<ElementBase>().ToList();
-        if (siblings.Count == 0) return;
-        var min = siblings.Min(s => s.ZOrder);
+        if (!TryGetSiblingZOrderExtreme(Parent.Controls, wantMaximum: false, out var min))
+            return;
+
+        if (ZOrder <= min)
+            return;
+
         ZOrder = min - 1;
         Parent.InvalidateRenderTree();
     }
@@ -816,6 +871,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             var replacement = value.CloneFont();
             _font?.Dispose();
             _font = replacement;
+            InvalidateFontCache();
 
             OnFontChanged(EventArgs.Empty);
             InvalidateMeasure();
@@ -830,6 +886,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
         _font.Dispose();
         _font = null;
+        InvalidateFontCache();
         OnFontChanged(EventArgs.Empty);
         InvalidateMeasure();
         Invalidate();
@@ -851,6 +908,26 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             SkewX = sourceFont.SkewX,
             LinearMetrics = sourceFont.LinearMetrics
         };
+    }
+
+    private SKFont GetDefaultTextRenderFont()
+    {
+        var sourceFont = Font;
+        var scale = ScaleFactor;
+
+        if (_defaultTextRenderFont == null || _defaultTextRenderFontSource == null ||
+            !_defaultTextRenderFontSource.FontEquals(sourceFont) ||
+            Math.Abs(_defaultTextRenderFontScale - scale) > 0.001f)
+        {
+            _defaultTextRenderFont?.Dispose();
+            _defaultTextRenderFontSource?.Dispose();
+
+            _defaultTextRenderFont = CreateRenderFont(sourceFont);
+            _defaultTextRenderFontSource = sourceFont.CloneFont();
+            _defaultTextRenderFontScale = scale;
+        }
+
+        return _defaultTextRenderFont;
     }
 
     private string _text = string.Empty;
@@ -936,6 +1013,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                 return;
 
             _tabIndex = value;
+            if (Parent is ElementBase parentElement)
+                parentElement.InvalidateChildRenderOrder();
 
             OnTabIndexChanged(EventArgs.Empty);
         }
@@ -1030,7 +1109,21 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     /// Gets or sets the stacking order of the element within its parent container.
     /// </summary>
     [Browsable(false)]
-    public int ZOrder { get; set; }
+    public int ZOrder
+    {
+        get => _zOrder;
+        set
+        {
+            if (_zOrder == value)
+                return;
+
+            _zOrder = value;
+            if (_parent != null)
+                _parent.InvalidateChildRenderOrder();
+        }
+    }
+
+    private int _zOrder;
 
     /// <summary>
     /// Gets or sets the width component of the size.
@@ -1505,7 +1598,21 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     public virtual void OnPaint(SKCanvas canvas)
     {
-        Paint?.Invoke(this, new SKPaintSurfaceEventArgs(canvas.Surface, default));
+        var paintHandler = Paint;
+        if (paintHandler == null)
+            return;
+
+        var surface = canvas.Surface;
+        if (surface == null)
+            return;
+
+        if (!ReferenceEquals(_cachedPaintSurface, surface) || _cachedPaintSurfaceEventArgs == null)
+        {
+            _cachedPaintSurface = surface;
+            _cachedPaintSurfaceEventArgs = new SKPaintSurfaceEventArgs(surface, default);
+        }
+
+        paintHandler(this, _cachedPaintSurfaceEventArgs);
     }
 
     public virtual void Invalidate()
@@ -1635,47 +1742,94 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         return new SKPoint(child.Location.X - scrollOffset.X, child.Location.Y - scrollOffset.Y);
     }
 
-    // Cached buffer for child rendering — avoids per-frame allocations
+    // Cached buffer for child rendering order — avoids per-frame rebuild/sort work
     private readonly List<ElementBase> _childRenderBuffer = new();
+    private bool _childRenderBufferDirty = true;
+
+    private static int CompareChildRenderOrder(ElementBase a, ElementBase b)
+    {
+        var cmp = a.ZOrder.CompareTo(b.ZOrder);
+        return cmp != 0 ? cmp : a.TabIndex.CompareTo(b.TabIndex);
+    }
+
+    private void InvalidateChildRenderOrder()
+    {
+        _childRenderBufferDirty = true;
+    }
+
+    private void EnsureChildRenderBuffer()
+    {
+        if (!_childRenderBufferDirty)
+            return;
+
+        _childRenderBuffer.Clear();
+        for (var i = 0; i < Controls.Count; i++)
+            if (Controls[i] is ElementBase child)
+                _childRenderBuffer.Add(child);
+
+        if (_childRenderBuffer.Count > 1)
+            _childRenderBuffer.Sort(CompareChildRenderOrder);
+
+        _childRenderBufferDirty = false;
+    }
+
+    private static bool IsRenderableChild(ElementBase child)
+    {
+        return child.Visible && child.Width > 0 && child.Height > 0;
+    }
+
+    private static bool IntersectsViewport(ElementBase child, SKRect viewport)
+    {
+        return child.Bounds.IntersectsWith(viewport);
+    }
+
+    private SKPoint GetInputCandidatePoint(ElementBase control, SKPoint originalPoint, SKPoint adjustedPoint, float scale)
+    {
+        var candidatePoint = (UseAutoScrollTranslation && AutoScroll && !IsScrollBar(control))
+            ? adjustedPoint
+            : originalPoint;
+
+        if (UseChildScaleForInput && !IsScrollBar(control) && Math.Abs(scale - 1f) > 0.001f)
+        {
+            candidatePoint = new SKPoint(
+                candidatePoint.X / scale,
+                candidatePoint.Y / scale);
+        }
+
+        return candidatePoint;
+    }
 
     protected ElementBase? FindTopmostInputTarget(SKPoint originalPoint, SKPoint adjustedPoint, float scale, out SKPoint hitPoint)
     {
         hitPoint = originalPoint;
 
+        EnsureChildRenderBuffer();
+
         ElementBase? target = null;
-        var bestZ = int.MinValue;
         var bestPriority = int.MinValue;
 
-        for (var i = 0; i < Controls.Count; i++)
+        for (var i = _childRenderBuffer.Count - 1; i >= 0; i--)
         {
-            if (Controls[i] is not ElementBase control)
-                continue;
+            var control = _childRenderBuffer[i];
 
             if (!ShouldIncludeHitTestElement(control, requireEnabled: true))
                 continue;
 
-            var candidatePoint = (UseAutoScrollTranslation && AutoScroll && !IsScrollBar(control))
-                ? adjustedPoint
-                : originalPoint;
+            var priority = GetInputPriority(control);
+            if (target != null && priority <= bestPriority)
+                continue;
 
-            if (UseChildScaleForInput && !IsScrollBar(control) && Math.Abs(scale - 1f) > 0.001f)
-            {
-                candidatePoint = new SKPoint(
-                    candidatePoint.X / scale,
-                    candidatePoint.Y / scale);
-            }
+            var candidatePoint = GetInputCandidatePoint(control, originalPoint, adjustedPoint, scale);
 
             if (!control.Bounds.Contains(candidatePoint))
                 continue;
 
-            var priority = GetInputPriority(control);
-            if (target == null || priority > bestPriority || (priority == bestPriority && control.ZOrder > bestZ))
-            {
-                target = control;
-                bestPriority = priority;
-                bestZ = control.ZOrder;
-                hitPoint = candidatePoint;
-            }
+            target = control;
+            bestPriority = priority;
+            hitPoint = candidatePoint;
+
+            if (bestPriority == 2)
+                break;
         }
 
         return target;
@@ -1928,10 +2082,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     protected void RenderChildren(SKCanvas canvas)
     {
-        _childRenderBuffer.Clear();
-        for (var i = 0; i < Controls.Count; i++)
-            if (Controls[i] is ElementBase child && child.Visible && child.Width > 0 && child.Height > 0)
-                _childRenderBuffer.Add(child);
+        EnsureChildRenderBuffer();
 
         if (_childRenderBuffer.Count == 0)
             return;
@@ -1940,21 +2091,24 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         if (NeedsFullChildRedraw)
         {
             for (var i = 0; i < _childRenderBuffer.Count; i++)
-                _childRenderBuffer[i].InvalidateRenderTree();
+            {
+                var child = _childRenderBuffer[i];
+                if (IsRenderableChild(child))
+                    child.InvalidateRenderTree();
+            }
             NeedsFullChildRedraw = false;
         }
-
-        // Stable sort by ZOrder ascending, then by original index
-        _childRenderBuffer.Sort(static (a, b) =>
-        {
-            var cmp = a.ZOrder.CompareTo(b.ZOrder);
-            return cmp != 0 ? cmp : a.TabIndex.CompareTo(b.TabIndex);
-        });
 
         var scrollOffset = GetScrollOffset();
         var shouldTranslate = UseAutoScrollTranslation && AutoScroll && (scrollOffset.X != 0 || scrollOffset.Y != 0);
         var scale = ChildRenderScale;
         var shouldScale = Math.Abs(scale - 1f) > 0.001f;
+        var viewportScale = shouldScale && Math.Abs(scale) > 0.001f ? scale : 1f;
+        var viewport = SKRect.Create(
+            shouldTranslate ? scrollOffset.X / viewportScale : 0f,
+            shouldTranslate ? scrollOffset.Y / viewportScale : 0f,
+            Width / viewportScale,
+            Height / viewportScale);
 
         if (shouldTranslate || shouldScale)
         {
@@ -1967,7 +2121,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             for (var i = 0; i < _childRenderBuffer.Count; i++)
             {
                 var child = _childRenderBuffer[i];
-                if (!IsScrollBar(child) && !IsFloatingPopup(child))
+                if (IsRenderableChild(child) && !IsScrollBar(child) && !IsFloatingPopup(child) && IntersectsViewport(child, viewport))
                     child.Render(canvas);
             }
 
@@ -1976,14 +2130,14 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             for (var i = 0; i < _childRenderBuffer.Count; i++)
             {
                 var child = _childRenderBuffer[i];
-                if (IsScrollBar(child))
+                if (IsRenderableChild(child) && IsScrollBar(child))
                     child.Render(canvas);
             }
 
             for (var i = 0; i < _childRenderBuffer.Count; i++)
             {
                 var child = _childRenderBuffer[i];
-                if (IsFloatingPopup(child))
+                if (IsRenderableChild(child) && IsFloatingPopup(child))
                     child.Render(canvas);
             }
         }
@@ -1992,21 +2146,21 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             for (var i = 0; i < _childRenderBuffer.Count; i++)
             {
                 var child = _childRenderBuffer[i];
-                if (!IsScrollBar(child) && !IsFloatingPopup(child))
+                if (IsRenderableChild(child) && !IsScrollBar(child) && !IsFloatingPopup(child) && IntersectsViewport(child, viewport))
                     child.Render(canvas);
             }
 
             for (var i = 0; i < _childRenderBuffer.Count; i++)
             {
                 var child = _childRenderBuffer[i];
-                if (IsScrollBar(child))
+                if (IsRenderableChild(child) && IsScrollBar(child))
                     child.Render(canvas);
             }
 
             for (var i = 0; i < _childRenderBuffer.Count; i++)
             {
                 var child = _childRenderBuffer[i];
-                if (IsFloatingPopup(child))
+                if (IsRenderableChild(child) && IsFloatingPopup(child))
                     child.Render(canvas);
             }
         }
@@ -2032,15 +2186,10 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             }
 
             int layerSaveCount = -1;
-            SKPaint? layerPaint = null;
             if (_opacity < 0.999f)
             {
-                layerPaint = new SKPaint
-                {
-                    IsAntialias = true,
-                    Color = SKColors.White.WithAlpha((byte)Math.Clamp((int)Math.Round(_opacity * 255f), 0, 255))
-                };
-                layerSaveCount = targetCanvas.SaveLayer(layerPaint);
+                _renderOpacityPaint.Color = SKColors.White.WithAlpha((byte)Math.Clamp((int)Math.Round(_opacity * 255f), 0, 255));
+                layerSaveCount = targetCanvas.SaveLayer(_renderOpacityPaint);
             }
 
             var hasRadius = !_radius.IsEmpty;
@@ -2060,26 +2209,23 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                 }
             }
 
-            // ── Prepare round rect once if needed ──
-            SKRoundRect? roundRect = null;
-
             if (hasRadius)
             {
-                roundRect = _radius.ToRoundRect(elementRect);
+                var roundRect = GetScratchRoundRect(elementRect, _radius);
                 targetCanvas.ClipRoundRect(roundRect, antialias: true);
             }
 
             // ── Background ──
             if (BackColor != SKColors.Transparent)
             {
-                using var paint = new SKPaint
-                {
-                    Color = BackColor,
-                    IsAntialias = true
-                };
+                var paint = _renderBackgroundPaint;
+                paint.Color = BackColor;
 
-                if (roundRect != null)
+                if (hasRadius)
+                {
+                    var roundRect = GetScratchRoundRect(elementRect, _radius);
                     targetCanvas.DrawRoundRect(roundRect, paint);
+                }
                 else
                     targetCanvas.DrawRect(elementRect, paint);
             }
@@ -2093,12 +2239,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             // ── Border ──
             if (!_border.IsEmpty)
             {
-                using var borderPaint = new SKPaint
-                {
-                    Color = BorderColor,
-                    Style = SKPaintStyle.Stroke,
-                    IsAntialias = true
-                };
+                var borderPaint = _renderBorderPaint;
+                borderPaint.Color = BorderColor;
 
                 if (hasRadius)
                 {
@@ -2108,7 +2250,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                     borderPaint.StrokeWidth = maxStroke;
                     var inset = maxStroke / 2f;
                     var borderRect = new SKRect(inset, inset, Width - inset, Height - inset);
-                    var borderRRect = _radius.ToRoundRect(borderRect);
+                    var borderRRect = GetScratchRoundRect(borderRect, _radius);
                     targetCanvas.DrawRoundRect(borderRRect, borderPaint);
                 }
                 else
@@ -2153,21 +2295,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                 }
             }
 
-            // Render default text for leaf-like controls. Containers are expected to manage their own content.
-            if (this is not Container && !string.IsNullOrEmpty(Text))
-            {
-                var textColor = ForeColor;
-                using var paint = new SKPaint
-                {
-                    Color = textColor,
-                    IsAntialias = true,
-                    Style = SKPaintStyle.Fill
-                };
-
-                using var font = CreateRenderFont(Font);
-
-                TextRenderer.DrawText(targetCanvas, Text, DisplayRectangle, paint, font, TextAlign, AutoEllipsis, UseMnemonic);
-            }
+            RenderDefaultText(targetCanvas);
 
             // ── Children ──
             targetCanvas.ClipRect(elementRect);
@@ -2175,18 +2303,13 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                 RenderChildren(targetCanvas);
 
             if (layerSaveCount >= 0)
-            {
                 targetCanvas.RestoreToCount(layerSaveCount);
-                layerPaint.Dispose();
-            }
 
             targetCanvas.RestoreToCount(saved);
 
             if (ColorScheme.DrawDebugBorders)
             {
-                using var dbg = new SKPaint
-                { Color = SKColors.Red, Style = SKPaintStyle.Stroke, StrokeWidth = 1, IsAntialias = true };
-                targetCanvas.DrawRect(0, 0, Width - 1, Height - 1, dbg);
+                targetCanvas.DrawRect(0, 0, Width - 1, Height - 1, _renderDebugBorderPaint);
             }
         }
         catch (Exception ex)
@@ -2225,6 +2348,21 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     /// Renders an outer (drop) shadow by expanding the element rect with spread, offsetting, and applying Gaussian blur.
     /// CSS equivalent: <c>box-shadow: offsetX offsetY blur spread color;</c>
     /// </summary>
+    private SKMaskFilter? GetShadowMaskFilter(float blur)
+    {
+        if (blur <= 0f)
+            return null;
+
+        var sigma = blur * 0.5f;
+        var cacheKey = Math.Max(1, (int)Math.Round(sigma * 100f));
+        if (_shadowMaskFilters.TryGetValue(cacheKey, out var maskFilter))
+            return maskFilter;
+
+        maskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, sigma);
+        _shadowMaskFilters[cacheKey] = maskFilter;
+        return maskFilter;
+    }
+
     private void RenderOuterShadow(SKCanvas canvas, SkiaSharp.SKRect elementRect, BoxShadow shadow, bool hasRadius)
     {
         var spread = shadow.Spread;
@@ -2237,26 +2375,28 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         if (shadowRect.Width <= 0 || shadowRect.Height <= 0)
             return;
 
-        using var paint = new SKPaint
-        {
-            Color = shadow.Color,
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
-        };
-
-        if (shadow.Blur > 0)
-            paint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, shadow.Blur * 0.5f);
+        var paint = _renderShadowPaint;
+    paint.Shader = null;
+    paint.ColorFilter = null;
+    paint.PathEffect = null;
+    paint.ImageFilter = null;
+    paint.IsAntialias = true;
+    paint.Style = SKPaintStyle.Fill;
+        paint.Color = shadow.Color;
+        paint.MaskFilter = GetShadowMaskFilter(shadow.Blur);
 
         if (hasRadius)
         {
             var scaledRadius = ScaleRadiusForSpread(_radius, spread);
-            var rr = scaledRadius.ToRoundRect(shadowRect);
+            var rr = GetScratchRoundRect(shadowRect, scaledRadius);
             canvas.DrawRoundRect(rr, paint);
         }
         else
         {
             canvas.DrawRect(shadowRect, paint);
         }
+
+        paint.MaskFilter = null;
     }
 
     /// <summary>
@@ -2272,7 +2412,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         // Clip to element shape
         if (hasRadius)
         {
-            var clipRRect = _radius.ToRoundRect(elementRect);
+            var clipRRect = GetScratchRoundRect(elementRect, _radius);
             canvas.ClipRoundRect(clipRRect, antialias: true);
         }
         else
@@ -2288,18 +2428,20 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             elementRect.Right - spread.BottomLeft + shadow.OffsetX,
             elementRect.Bottom - spread.BottomRight + shadow.OffsetY);
 
-        using var paint = new SKPaint
-        {
-            Color = shadow.Color,
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
-        };
-
-        if (shadow.Blur > 0)
-            paint.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, shadow.Blur * 0.5f);
+        var paint = _renderShadowPaint;
+    paint.Shader = null;
+    paint.ColorFilter = null;
+    paint.PathEffect = null;
+    paint.ImageFilter = null;
+    paint.IsAntialias = true;
+    paint.Style = SKPaintStyle.Fill;
+        paint.Color = shadow.Color;
+        paint.MaskFilter = GetShadowMaskFilter(shadow.Blur);
 
         // Draw a frame: large outer path minus inner hole
-        using var outerPath = new SKPath();
+        var outerPath = _renderInsetShadowOuterPath;
+        outerPath.Reset();
+        outerPath.FillType = SKPathFillType.Winding;
         var inflated = new SkiaSharp.SKRect(
             elementRect.Left - shadow.Blur * 2,
             elementRect.Top - shadow.Blur * 2,
@@ -2312,8 +2454,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             if (hasRadius)
             {
                 var shrunkRadius = ShrinkRadiusForSpread(_radius, spread);
-                var holeRRect = shrunkRadius.ToRoundRect(holeRect);
-                using var holePath = new SKPath();
+                var holeRRect = GetScratchRoundRect(holeRect, shrunkRadius);
+                var holePath = _renderInsetShadowHolePath;
+                holePath.Reset();
                 holePath.AddRoundRect(holeRRect);
                 outerPath.AddPath(holePath);
             }
@@ -2326,7 +2469,35 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
 
         canvas.DrawPath(outerPath, paint);
+        paint.MaskFilter = null;
         canvas.RestoreToCount(innerSaved);
+    }
+
+    private SKRoundRect GetScratchRoundRect(SKRect rect, Radius radius)
+    {
+        _renderRoundRectRadiiScratch[0] = new SKPoint(radius.TopLeft, radius.TopLeft);
+        _renderRoundRectRadiiScratch[1] = new SKPoint(radius.TopRight, radius.TopRight);
+        _renderRoundRectRadiiScratch[2] = new SKPoint(radius.BottomRight, radius.BottomRight);
+        _renderRoundRectRadiiScratch[3] = new SKPoint(radius.BottomLeft, radius.BottomLeft);
+        _renderRoundRectScratch.SetRectRadii(rect, _renderRoundRectRadiiScratch);
+        return _renderRoundRectScratch;
+    }
+
+    private void RenderDefaultText(SKCanvas canvas)
+    {
+        if (this is Container || string.IsNullOrEmpty(_text))
+            return;
+
+        var paint = _renderTextPaint;
+        paint.Color = ForeColor;
+        if (paint.Color.Alpha == 0)
+            return;
+
+        var displayRectangle = DisplayRectangle;
+        if (displayRectangle.Width <= 0f || displayRectangle.Height <= 0f)
+            return;
+
+        TextRenderer.DrawText(canvas, _text, displayRectangle, paint, GetDefaultTextRenderFont(), TextAlign, AutoEllipsis, UseMnemonic);
     }
 
     /// <summary>
@@ -2592,8 +2763,11 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         float maxBottom = 0;
         float maxRight = 0;
 
-        foreach (var control in Controls.OfType<ElementBase>())
+        for (var i = 0; i < Controls.Count; i++)
         {
+            if (Controls[i] is not ElementBase control)
+                continue;
+
             if (control == _vScrollBar || control == _hScrollBar)
                 continue;
 
@@ -2673,20 +2847,11 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     {
         MouseMove?.Invoke(this, e);
 
-        var scrollOffset = GetScrollOffset();
-        var adjusted = new SKPoint(e.X + scrollOffset.X, e.Y + scrollOffset.Y);
-        var scale = ChildRenderScale;
-
-        var hoveredElement = FindTopmostInputTarget(e.Location, adjusted, scale, out var hitPoint);
-        if (hoveredElement != null)
-        {
-            var childEventArgs = new MouseEventArgs(e.Button, e.Clicks,
-                (int)(hitPoint.X - hoveredElement.Location.X),
-                (int)(hitPoint.Y - hoveredElement.Location.Y),
-                e.Delta,
-                e.IsHorizontalWheel);
+        var hoveredElement = TryGetInputTarget(e, out var target, out var childEventArgs)
+            ? target
+            : null;
+        if (hoveredElement != null && childEventArgs != null)
             hoveredElement.OnMouseMove(childEventArgs);
-        }
 
         if (hoveredElement != _lastHoveredElement)
         {
@@ -2716,25 +2881,18 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         MouseDown?.Invoke(this, e);
         UpdatePressedState(e.Button == MouseButtons.Left);
 
-        var scrollOffset = GetScrollOffset();
-        var adjusted = new SKPoint(e.X + scrollOffset.X, e.Y + scrollOffset.Y);
-        var scale = ChildRenderScale;
-
-        var control = FindTopmostInputTarget(e.Location, adjusted, scale, out var hitPoint);
+        var control = TryGetInputTarget(e, out var target, out var childEventArgs)
+            ? target
+            : null;
         var elementClicked = control != null;
 
-        if (control != null)
+        if (control != null && childEventArgs != null)
         {
             var window = GetParentWindow();
             ElementBase? prevWindowFocus = null;
             if (window is WindowBase uiWindow)
                 prevWindowFocus = uiWindow.FocusedElement;
 
-            var childEventArgs = new MouseEventArgs(e.Button, e.Clicks,
-                (int)(hitPoint.X - control.Location.X),
-                (int)(hitPoint.Y - control.Location.Y),
-                e.Delta,
-                e.IsHorizontalWheel);
             control.OnMouseDown(childEventArgs);
 
             if (window is WindowBase uiWindowAfter)
@@ -2808,19 +2966,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         MouseUp?.Invoke(this, e);
         UpdatePressedState(false);
 
-        var scrollOffset = GetScrollOffset();
-        var adjusted = new SKPoint(e.X + scrollOffset.X, e.Y + scrollOffset.Y);
-        var scale = ChildRenderScale;
-
-        var control = FindTopmostInputTarget(e.Location, adjusted, scale, out var hitPoint);
-        if (control != null)
+        if (TryGetInputTarget(e, out var control, out var childEventArgs) && control != null && childEventArgs != null)
         {
-            var childEventArgs = new MouseEventArgs(e.Button, e.Clicks,
-                (int)(hitPoint.X - control.Location.X),
-                (int)(hitPoint.Y - control.Location.Y),
-                e.Delta,
-                e.IsHorizontalWheel);
-
             control.OnMouseUp(childEventArgs);
         }
     }
@@ -2832,20 +2979,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         if (e.Button == MouseButtons.Left)
             OnClick(EventArgs.Empty);
 
-        // Z-order'a göre tersten kontrol et (üstteki element önce)
-        var scrollOffset = GetScrollOffset();
-        var adjusted = new SKPoint(e.X + scrollOffset.X, e.Y + scrollOffset.Y);
-        var scale = ChildRenderScale;
-
-        var control = FindTopmostInputTarget(e.Location, adjusted, scale, out var hitPoint);
-        if (control != null)
+        if (TryGetInputTarget(e, out var control, out var childEventArgs) && control != null && childEventArgs != null)
         {
-            var childEventArgs = new MouseEventArgs(e.Button, e.Clicks,
-                (int)(hitPoint.X - control.Location.X),
-                (int)(hitPoint.Y - control.Location.Y),
-                e.Delta,
-                e.IsHorizontalWheel);
-
             control.OnMouseClick(childEventArgs);
 
             if (_focusedElement != control)
@@ -2857,19 +2992,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     {
         MouseDoubleClick?.Invoke(this, e);
 
-        var scrollOffset = GetScrollOffset();
-        var adjusted = new SKPoint(e.X + scrollOffset.X, e.Y + scrollOffset.Y);
-        var scale = ChildRenderScale;
-
-        var control = FindTopmostInputTarget(e.Location, adjusted, scale, out var hitPoint);
-        if (control != null)
+        if (TryGetInputTarget(e, out var control, out var childEventArgs) && control != null && childEventArgs != null)
         {
-            var childEventArgs = new MouseEventArgs(e.Button, e.Clicks,
-                (int)(hitPoint.X - control.Location.X),
-                (int)(hitPoint.Y - control.Location.Y),
-                e.Delta,
-                e.IsHorizontalWheel);
-
             control.OnMouseDoubleClick(childEventArgs);
         }
     }
@@ -2932,6 +3056,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         VisibleChanged?.Invoke(this, e);
         UpdateBackgroundImageSlideshowState();
         RefreshVisualStylesForStateChange();
+        UpdateMotionEffectsState();
 
         if (Visible)
         {
@@ -2939,6 +3064,13 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
         else
         {
+            StopBackgroundImageTransition();
+            if (_visualStylesInitialized && _visualStyleAnimation.IsAnimating())
+            {
+                _visualStyleAnimation.Stop();
+                ApplyEffectiveVisualStyle(_styleAnimationTo);
+            }
+
             MarkDirty();
 
             if (Parent is WindowBase parentWindowForInvalidate)
@@ -3420,6 +3552,22 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             DisposeMotionEffectsSystem();
             DisposeVisualStyleSystem();
             DisposeBackgroundImageTransitionSystem();
+            _defaultTextRenderFont?.Dispose();
+            _defaultTextRenderFontSource?.Dispose();
+            _renderBackgroundPaint.Dispose();
+            _renderBorderPaint.Dispose();
+            _renderTextPaint.Dispose();
+            _renderOpacityPaint.Dispose();
+            _renderShadowPaint.Dispose();
+            _renderDebugBorderPaint.Dispose();
+            _renderInsetShadowOuterPath.Dispose();
+            _renderInsetShadowHolePath.Dispose();
+            _cachedPaintSurfaceEventArgs = null;
+            _cachedPaintSurface = null;
+            foreach (var maskFilter in _shadowMaskFilters.Values)
+                maskFilter.Dispose();
+
+            _shadowMaskFilters.Clear();
             _font?.Dispose();
             _cursor?.Dispose();
 
@@ -3534,6 +3682,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     internal virtual void OnControlAdded(ElementEventArgs e)
     {
+        InvalidateChildRenderOrder();
         ControlAdded?.Invoke(this, e);
 
         // If the added element has a parent window that has already completed loading,
@@ -3547,6 +3696,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     internal virtual void OnControlRemoved(ElementEventArgs e)
     {
+        InvalidateChildRenderOrder();
         if (_lastHoveredElement == e.Element)
         {
             _lastHoveredElement.OnMouseLeave(EventArgs.Empty);
@@ -3597,6 +3747,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             if (Controls[i] is ElementBase element)
                 element.ZOrder = i;
         }
+
+        InvalidateChildRenderOrder();
     }
 
     #endregion

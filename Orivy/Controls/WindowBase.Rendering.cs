@@ -16,6 +16,7 @@ public partial class WindowBase
     private bool _showPerfOverlay = true;
     private bool _softwareUpdateQueued;
     private Timer? _idleMaintenanceTimer;
+    private long _lastRenderMaintenanceTick;
     private int _suppressImmediateUpdateCount;
     private int _backendSwitchPaintTraceFrames;
     private long _perfLastTimestamp;
@@ -29,6 +30,13 @@ public partial class WindowBase
     private bool _cachedGrContextIsValid;
     private int _grContextValidationFrame;
     private bool _paintInvalidatedPending;
+
+    private static RenderBackend ResolveDefaultRenderBackend()
+    {
+        return OperatingSystem.IsWindows() ? RenderBackend.OpenGL : RenderBackend.Software;
+    }
+
+    public static RenderBackend DefaultRenderBackend { get; set; } = ResolveDefaultRenderBackend();
 
     /// <summary>
     ///     Maximum retained bytes for the software backbuffer (SKBitmap + SKSurface + GDI Bitmap wrapper).
@@ -44,6 +52,12 @@ public partial class WindowBase
     ///     asking Skia to purge resource caches.
     /// </summary>
     public static int IdleMaintenanceDelayMs { get; set; } = 1500;
+
+    /// <summary>
+    ///     Maximum interval (ms) between maintenance passes while the window is continuously repainting.
+    ///     Set to 0 (or less) to disable active maintenance and rely on idle only.
+    /// </summary>
+    public static int ActiveRenderMaintenanceIntervalMs { get; set; } = 8000;
 
 
     public static bool PurgeSkiaResourceCacheOnIdle { get; set; } = true;
@@ -64,10 +78,9 @@ public partial class WindowBase
         }
     }
 
-    private RenderBackend _renderBackend = RenderBackend.Software;
+    private RenderBackend _renderBackend = DefaultRenderBackend;
     private IWindowRenderer _renderer;
 
-    [System.ComponentModel.DefaultValue(RenderBackend.Software)]
     [System.ComponentModel.Description("Selects how WindowBase presents frames: Software (GDI), OpenGL, or DirectX11 (DXGI/GDI-compatible swapchain).")]
     public RenderBackend RenderBackend
     {
@@ -178,21 +191,26 @@ public partial class WindowBase
 
     protected void ArmIdleMaintenance()
     {
+        RequestIdleMaintenance();
+    }
+
+    internal void RequestIdleMaintenance(int? delayMs = null)
+    {
         if (!EnableIdleMaintenance)
             return;
 
         if (_idleMaintenanceTimer == null)
         {
             _idleMaintenanceTimer = new Timer();
-            _idleMaintenanceTimer.Interval = IdleMaintenanceDelayMs;
             _idleMaintenanceTimer.Elapsed += IdleMaintenanceTimer_Tick;
         }
 
-        if (_idleMaintenanceTimer != null)
-        {
-            _idleMaintenanceTimer.Stop();
-            _idleMaintenanceTimer.Start();
-        }
+        if (_idleMaintenanceTimer == null)
+            return;
+
+        _idleMaintenanceTimer.Interval = Math.Max(1, delayMs ?? IdleMaintenanceDelayMs);
+        _idleMaintenanceTimer.Stop();
+        _idleMaintenanceTimer.Start();
     }
 
     private void IdleMaintenanceTimer_Tick(object? sender, EventArgs e)
@@ -208,6 +226,8 @@ public partial class WindowBase
 
     private void RunIdleMaintenance()
     {
+        _lastRenderMaintenanceTick = Environment.TickCount64;
+
         // 1. Trim renderer caches (DirectX / OpenGL) on UI thread.
         IWindowRenderer? rendererSnapshot;
         lock (_rendererSync)
@@ -217,6 +237,38 @@ public partial class WindowBase
 
         // 2. Purge global Skia resource cache if requested
         if (PurgeSkiaResourceCacheOnIdle) SKGraphics.PurgeResourceCache();
+    }
+
+    private void RunActiveRenderMaintenanceIfDue()
+    {
+        if (!EnableIdleMaintenance)
+            return;
+
+        var intervalMs = ActiveRenderMaintenanceIntervalMs;
+        if (intervalMs <= 0)
+            return;
+
+        var now = Environment.TickCount64;
+        if (_lastRenderMaintenanceTick == 0)
+        {
+            _lastRenderMaintenanceTick = now;
+            return;
+        }
+
+        if (now - _lastRenderMaintenanceTick < intervalMs)
+            return;
+
+        _lastRenderMaintenanceTick = now;
+
+        IWindowRenderer? rendererSnapshot;
+        lock (_rendererSync)
+            rendererSnapshot = _renderer;
+
+        if (rendererSnapshot?.IsSkiaGpuActive == true)
+            rendererSnapshot.TrimCaches();
+
+        if (PurgeSkiaResourceCacheOnIdle)
+            SKGraphics.PurgeResourceCache();
     }
 
     protected void DisposeSoftwareBackBuffer()
@@ -253,24 +305,76 @@ public partial class WindowBase
         DisposeRendererSafely(oldRenderer);
         ReleaseRetainedRenderResources();
 
-        IWindowRenderer? newRenderer = null;
         try
         {
-            newRenderer = RendererFactory.CreateRenderer(_renderBackend, Handle);
+            var newRenderer = CreateRendererWithFallback(_renderBackend, out var activeBackend);
 
             lock (_rendererSync)
             {
                 _renderer = newRenderer;
                 _cachedGrContext = null;
                 _cachedGrContextIsValid = false;  // Invalidate GRContext cache on renderer initialization
+                _renderBackend = activeBackend;
             }
 
-            Debug.WriteLine($"[WindowBase] RecreateRenderer completed. Active={_renderBackend}");
+            Debug.WriteLine($"[WindowBase] RecreateRenderer completed. Active={activeBackend}");
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[WindowBase] Failed to initialize {_renderBackend} renderer. Falling back to Software. Error: {ex.Message}");
+            throw new InvalidOperationException($"Failed to initialize renderer '{_renderBackend}'.", ex);
         }
+    }
+
+    private IWindowRenderer CreateRendererWithFallback(RenderBackend requestedBackend, out RenderBackend activeBackend)
+    {
+        try
+        {
+            activeBackend = requestedBackend;
+            return RendererFactory.CreateRenderer(requestedBackend, Handle);
+        }
+        catch (Exception ex) when (requestedBackend != RenderBackend.Software)
+        {
+            Debug.WriteLine($"[WindowBase] Failed to initialize {requestedBackend} renderer. Falling back to Software. Error: {ex.Message}");
+            activeBackend = RenderBackend.Software;
+            return RendererFactory.CreateRenderer(RenderBackend.Software, Handle);
+        }
+    }
+
+    private bool TryFallbackToSoftwareRenderer(string reason)
+    {
+        if (!IsHandleCreated || _renderBackend == RenderBackend.Software)
+            return false;
+
+        IWindowRenderer fallbackRenderer;
+        try
+        {
+            fallbackRenderer = RendererFactory.CreateRenderer(RenderBackend.Software, Handle);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[WindowBase] Runtime fallback to Software failed after '{reason}'. Error: {ex.Message}");
+            return false;
+        }
+
+        Debug.WriteLine($"[WindowBase] Falling back to Software renderer at runtime. Reason: {reason}");
+
+        IWindowRenderer? previousRenderer;
+        lock (_rendererSync)
+        {
+            previousRenderer = _renderer;
+            _renderer = fallbackRenderer;
+            _cachedGrContext = null;
+            _cachedGrContextIsValid = false;
+            _renderBackend = RenderBackend.Software;
+        }
+
+        DisposeRendererSafely(previousRenderer);
+        ReleaseRetainedRenderResources();
+        NeedsFullChildRedraw = true;
+        _backendSwitchPaintTraceFrames = 2;
+        ApplyNativeWindowStyles();
+        ApplyThemeToNativeWindow();
+        return true;
     }
 
     private void ApplyNativeWindowStyles()
@@ -278,11 +382,14 @@ public partial class WindowBase
         if (!IsHandleCreated)
             return;
 
+        var renderer = _renderer;
+        var isGpuActive = renderer?.IsSkiaGpuActive == true;
+
         var hwnd = Handle;
         var stylePtr = GetWindowLong(hwnd, WindowLongIndexFlags.GWL_STYLE);
         var style = stylePtr;
         var clipFlags = (nint)(uint)(SetWindowLongFlags.WS_CLIPCHILDREN | SetWindowLongFlags.WS_CLIPSIBLINGS);
-        style = _renderer.IsSkiaGpuActive ? style | clipFlags : style & ~clipFlags;
+        style = isGpuActive ? style | clipFlags : style & ~clipFlags;
 
         var exStylePtr = GetWindowLong(hwnd, WindowLongIndexFlags.GWL_EXSTYLE);
         var exStyle = exStylePtr;
@@ -292,7 +399,7 @@ public partial class WindowBase
         // WS_EX_NOREDIRECTIONBITMAP is required for GPU rendering.
         // Software (GDI) renderer must NOT have this flag — GetDC+BitBlt requires DWM's
         // redirection bitmap; setting this flag causes the window to render as white/blank.
-        if (_renderer.IsSkiaGpuActive)
+        if (isGpuActive)
         {
             exStyle |= noRedirect;
             exStyle &= ~composited;
@@ -356,11 +463,20 @@ public partial class WindowBase
             // Try to render with active renderer (GPU or Software)
             if (_renderer.Render(width, height, RenderScene))
             {
+                ArmIdleMaintenance();
+                RunActiveRenderMaintenanceIfDue();
                 if (_backendSwitchPaintTraceFrames > 0)
                 {
                     Debug.WriteLine($"[WindowBase] HandlePaint completed. Backend={_renderBackend}");
                     _backendSwitchPaintTraceFrames--;
                 }
+                return IntPtr.Zero;
+            }
+
+            if (TryFallbackToSoftwareRenderer("Active renderer returned false during WM_PAINT") && _renderer.Render(width, height, RenderScene))
+            {
+                ArmIdleMaintenance();
+                RunActiveRenderMaintenanceIfDue();
                 return IntPtr.Zero;
             }
 
@@ -456,7 +572,7 @@ public partial class WindowBase
         paint.TextSize = 12;
 
 
-        var backendLabel = RenderBackend + (_renderer.IsSkiaGpuActive ? "GPU" : "CPU");
+        var backendLabel = RenderBackend + ((_renderer?.IsSkiaGpuActive == true) ? "GPU" : "CPU");
 
         var text = $"{backendLabel}  {fps:0} FPS  {_perfSmoothedFrameMs:0.0} ms";
         canvas.DrawText(text, 8, 16, paint);

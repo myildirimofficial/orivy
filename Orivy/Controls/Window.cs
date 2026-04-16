@@ -139,6 +139,15 @@ public partial class Window : WindowBase
 
     private bool _popupMouseInteractionActive;
     private bool _suppressNextPopupClick;
+    private SKImage? _cachedWindowChromeTitleSampleImage;
+    private SKColor _cachedWindowChromeTitleSampleColor;
+    private ImageLayout _cachedWindowChromeTitleSampleLayout;
+    private int _cachedWindowChromeTitleSampleWindowWidth;
+    private int _cachedWindowChromeTitleSampleWindowHeight;
+    private int _cachedWindowChromeTitleSampleTop;
+    private int _cachedWindowChromeTitleSampleHeight;
+    private bool _hasResolvedWindowChromeTitleSample;
+    private bool _hasCachedWindowChromeTitleSampleColor;
 
     private long _stickyBorderTime = 5000000;
 
@@ -438,6 +447,7 @@ public partial class Window : WindowBase
         set
         {
             _titleHeight = Math.Max(value, 31);
+            ResetWindowChromeTitleSampleCache();
             Invalidate();
             CalcSystemBoxPos();
         }
@@ -449,6 +459,7 @@ public partial class Window : WindowBase
         set
         {
             _gradient = value;
+            ResetWindowChromeTitleSampleCache();
             Invalidate();
         }
     }
@@ -464,6 +475,7 @@ public partial class Window : WindowBase
         set
         {
             titleColor = value;
+            ResetWindowChromeTitleSampleCache();
             Invalidate();
         }
     }
@@ -717,6 +729,7 @@ public partial class Window : WindowBase
             if (newDpi == oldDpi)
                 return;
 
+            ResetWindowChromeTitleSampleCache();
             BeginImmediateUpdateSuppression();
 
             // CRITICAL: Aggressive layout recalculation to handle all control repositioning
@@ -1543,16 +1556,12 @@ public partial class Window : WindowBase
         var hasGradientTitle = _gradient.Length == 2 &&
                                !(_gradient[0] == SKColors.Transparent && _gradient[1] == SKColors.Transparent);
 
-        if (effectiveWindowChromeTitleColor == SKColor.Empty && !hasGradientTitle)
+        if (effectiveWindowChromeTitleColor == SKColor.Empty && !hasGradientTitle &&
+            TryGetCachedWindowChromeTitleSampleColor(out var sampledTitleColor))
         {
-            var fullBounds = SKRect.Create(0f, 0f, Width, Height);
-            var titleSampleBounds = SKRect.Create(0f, _titleBarTopDPI, Width, _titleHeightDPI);
-            if (TryGetBackgroundImageSampleColor(fullBounds, titleSampleBounds, out var sampledTitleColor))
-            {
-                effectiveWindowChromeTitleColor = sampledTitleColor;
-                foreColor = sampledTitleColor.Determine();
-                hoverColor = foreColor.WithAlpha(20);
-            }
+            effectiveWindowChromeTitleColor = sampledTitleColor;
+            foreColor = sampledTitleColor.Determine();
+            hoverColor = foreColor.WithAlpha(20);
         }
 
         if (FullDrawHatch)
@@ -1860,6 +1869,90 @@ public partial class Window : WindowBase
         }
     }
 
+    private bool TryGetCachedWindowChromeTitleSampleColor(out SKColor sampledColor)
+    {
+        sampledColor = SKColor.Empty;
+
+        var backgroundImage = BackgroundImage;
+        var windowWidth = Width;
+        var windowHeight = Height;
+        if (backgroundImage == null || windowWidth <= 0 || windowHeight <= 0)
+        {
+            ResetWindowChromeTitleSampleCache();
+            return false;
+        }
+
+        var titleBarTop = Math.Max(0, (int)MathF.Round(_titleBarTopDPI));
+        var titleBarHeight = Math.Max(0, (int)MathF.Round(_titleHeightDPI));
+        if (titleBarHeight <= 0)
+        {
+            ResetWindowChromeTitleSampleCache();
+            return false;
+        }
+
+        var backgroundLayout = BackgroundImageLayout;
+        if (_hasResolvedWindowChromeTitleSample &&
+            ReferenceEquals(_cachedWindowChromeTitleSampleImage, backgroundImage) &&
+            _cachedWindowChromeTitleSampleLayout == backgroundLayout &&
+            _cachedWindowChromeTitleSampleWindowWidth == windowWidth &&
+            _cachedWindowChromeTitleSampleWindowHeight == windowHeight &&
+            _cachedWindowChromeTitleSampleTop == titleBarTop &&
+            _cachedWindowChromeTitleSampleHeight == titleBarHeight)
+        {
+            if (_hasCachedWindowChromeTitleSampleColor)
+            {
+                sampledColor = _cachedWindowChromeTitleSampleColor;
+                return true;
+            }
+
+            return false;
+        }
+
+        var fullBounds = SKRect.Create(0f, 0f, windowWidth, windowHeight);
+        var titleSampleBounds = SKRect.Create(0f, _titleBarTopDPI, windowWidth, _titleHeightDPI);
+        if (!TryGetBackgroundImageSampleColor(fullBounds, titleSampleBounds, out sampledColor))
+        {
+            UpdateWindowChromeTitleSampleCacheKey(backgroundImage, backgroundLayout, windowWidth, windowHeight, titleBarTop, titleBarHeight);
+            _hasCachedWindowChromeTitleSampleColor = false;
+            return false;
+        }
+
+        UpdateWindowChromeTitleSampleCacheKey(backgroundImage, backgroundLayout, windowWidth, windowHeight, titleBarTop, titleBarHeight);
+        _cachedWindowChromeTitleSampleColor = sampledColor;
+        _hasCachedWindowChromeTitleSampleColor = true;
+        return true;
+    }
+
+    private void UpdateWindowChromeTitleSampleCacheKey(SKImage backgroundImage, ImageLayout backgroundLayout, int windowWidth, int windowHeight, int titleBarTop, int titleBarHeight)
+    {
+        _cachedWindowChromeTitleSampleImage = backgroundImage;
+        _cachedWindowChromeTitleSampleLayout = backgroundLayout;
+        _cachedWindowChromeTitleSampleWindowWidth = windowWidth;
+        _cachedWindowChromeTitleSampleWindowHeight = windowHeight;
+        _cachedWindowChromeTitleSampleTop = titleBarTop;
+        _cachedWindowChromeTitleSampleHeight = titleBarHeight;
+        _hasResolvedWindowChromeTitleSample = true;
+    }
+
+    private void ResetWindowChromeTitleSampleCache()
+    {
+        _cachedWindowChromeTitleSampleImage = null;
+        _hasResolvedWindowChromeTitleSample = false;
+        _hasCachedWindowChromeTitleSampleColor = false;
+    }
+
+    protected override void OnBackgroundImageChanged(EventArgs e)
+    {
+        ResetWindowChromeTitleSampleCache();
+        base.OnBackgroundImageChanged(e);
+    }
+
+    protected override void OnBackgroundImageLayoutChanged(EventArgs e)
+    {
+        ResetWindowChromeTitleSampleCache();
+        base.OnBackgroundImageLayoutChanged(e);
+    }
+
     internal override void OnTextChanged(EventArgs e)
     {
         base.OnTextChanged(e);
@@ -1868,6 +1961,7 @@ public partial class Window : WindowBase
 
     internal override void OnSizeChanged(EventArgs e)
     {
+        ResetWindowChromeTitleSampleCache();
         CalcSystemBoxPos();
         NeedsFullChildRedraw = true;
 

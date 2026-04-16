@@ -13,6 +13,7 @@ namespace Orivy.Controls;
 
 public class WindowPageControl : ElementBase
 {
+    private const long DefaultMaxTransitionSnapshotBytes = 32L * 1024 * 1024;
     private const float DefaultTabGap = 0f;
     private const float TabHorizontalPadding = 14f;
     private const float TabVerticalInset = 4f;
@@ -60,6 +61,7 @@ public class WindowPageControl : ElementBase
     private readonly List<float> _windowChromeTabWidthBuffer = new();
     private readonly SKPaint _tabBackgroundPaint;
     private readonly SKPaint _tabBorderPaint;
+    private readonly SKPaint _tabGlyphPaint;
     private readonly SKPaint _tabIndicatorPaint;
     private readonly SKPaint _tabTextPaint;
     private readonly SKPath _tabChromePath;
@@ -174,6 +176,12 @@ public class WindowPageControl : ElementBase
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1f
+        };
+        _tabGlyphPaint = new SKPaint
+        {
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeCap = SKStrokeCap.Round
         };
         _tabIndicatorPaint = new SKPaint
         {
@@ -478,6 +486,11 @@ public class WindowPageControl : ElementBase
     [Category("Behavior")]
     [DefaultValue(true)]
     public bool EnableTransitions { get; set; } = true;
+
+    [Category("Behavior")]
+    [DefaultValue(DefaultMaxTransitionSnapshotBytes)]
+    [Description("Upper bound for retained page transition snapshots in bytes. Set to 0 to disable the limit.")]
+    public long MaxTransitionSnapshotBytes { get; set; } = DefaultMaxTransitionSnapshotBytes;
 
     [Category("Behavior")]
     [DefaultValue(WindowPageTransitionEffect.SlideHorizontal)]
@@ -1014,6 +1027,7 @@ public class WindowPageControl : ElementBase
             _transitionAnimation.Dispose();
             _tabBackgroundPaint.Dispose();
             _tabBorderPaint.Dispose();
+            _tabGlyphPaint.Dispose();
             _tabIndicatorPaint.Dispose();
             _tabTextPaint.Dispose();
             _tabChromePath.Dispose();
@@ -1077,13 +1091,10 @@ public class WindowPageControl : ElementBase
     {
         FinalizeCompletedTransitionIfPending();
 
-        var carryForwardSnapshot = IsTransitioning ? CaptureActiveTransitionSnapshot() : null;
-
         if (!ShouldAnimateTransition(previousSelectedIndex, nextSelectedIndex))
-        {
-            carryForwardSnapshot?.Dispose();
             return false;
-        }
+
+        var carryForwardSnapshot = IsTransitioning ? CaptureActiveTransitionSnapshot() : null;
 
         SyncAllPageBounds();
 
@@ -1121,7 +1132,27 @@ public class WindowPageControl : ElementBase
             return false;
 
         var viewport = GetTransitionViewport();
-        return viewport.Width > 0 && viewport.Height > 0;
+        if (viewport.Width <= 0 || viewport.Height <= 0)
+            return false;
+
+        if (MaxTransitionSnapshotBytes <= 0)
+            return true;
+
+        return EstimateTransitionSnapshotBytes(viewport) <= MaxTransitionSnapshotBytes;
+    }
+
+    private static long EstimateTransitionSnapshotBytes(SKRect viewport)
+    {
+        try
+        {
+            var width = Math.Max(1L, (long)Math.Ceiling(viewport.Width));
+            var height = Math.Max(1L, (long)Math.Ceiling(viewport.Height));
+            return checked(width * height * 4L * 2L);
+        }
+        catch (OverflowException)
+        {
+            return long.MaxValue;
+        }
     }
 
     private void CommitSelectedPageVisibility()
@@ -2655,15 +2686,7 @@ public class WindowPageControl : ElementBase
         }
 
         var stroke = MathF.Max(1f, MathF.Round(sf));
-        var crispOffset = (stroke % 2 != 0) ? 0.5f : 0f;
-        
-        using var linePaint = new SKPaint
-        {
-            Color = foreColor.WithAlpha(isHovered ? (byte)255 : (byte)222),
-            StrokeWidth = stroke,
-            StrokeCap = SKStrokeCap.Round,
-            IsAntialias = true
-        };
+        var linePaint = PrepareTabGlyphPaint(foreColor.WithAlpha(isHovered ? (byte)255 : (byte)222), stroke, isAntialias: true);
 
         var size = MathF.Round(3.5f * sf);
         canvas.DrawLine(midX - size, midY - size, midX + size, midY + size, linePaint);
@@ -2689,14 +2712,7 @@ public class WindowPageControl : ElementBase
 
         var stroke = MathF.Max(1.1f, MathF.Round(sf * 1.5f));
         var crispOffset = (stroke % 2 != 0) ? 0.5f : 0f;
-
-        using var linePaint = new SKPaint
-        {
-            Color = foreColor.WithAlpha(isHovered ? (byte)255 : (byte)228),
-            StrokeWidth = stroke,
-            StrokeCap = SKStrokeCap.Round,
-            IsAntialias = false
-        };
+        var linePaint = PrepareTabGlyphPaint(foreColor.WithAlpha(isHovered ? (byte)255 : (byte)228), stroke, isAntialias: false);
 
         var size = MathF.Round(5f * sf);
         var midX = MathF.Round(roundedRect.MidX) + crispOffset;
@@ -2704,6 +2720,22 @@ public class WindowPageControl : ElementBase
         
         canvas.DrawLine(midX - size, midY, midX + size, midY, linePaint);
         canvas.DrawLine(midX, midY - size, midX, midY + size, linePaint);
+    }
+
+    private SKPaint PrepareTabGlyphPaint(SKColor color, float strokeWidth, bool isAntialias)
+    {
+        _tabGlyphPaint.Shader = null;
+        _tabGlyphPaint.ColorFilter = null;
+        _tabGlyphPaint.PathEffect = null;
+        _tabGlyphPaint.MaskFilter = null;
+        _tabGlyphPaint.ImageFilter = null;
+        _tabGlyphPaint.BlendMode = SKBlendMode.SrcOver;
+        _tabGlyphPaint.IsAntialias = isAntialias;
+        _tabGlyphPaint.Style = SKPaintStyle.Stroke;
+        _tabGlyphPaint.StrokeCap = SKStrokeCap.Round;
+        _tabGlyphPaint.Color = color;
+        _tabGlyphPaint.StrokeWidth = strokeWidth;
+        return _tabGlyphPaint;
     }
 
     private void DrawTabHeaderSurface(SKCanvas canvas, SKRect headerRect, SKColor backgroundColor, SKColor borderColor)
