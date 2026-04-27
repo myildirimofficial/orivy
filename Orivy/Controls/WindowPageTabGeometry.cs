@@ -6,20 +6,53 @@ namespace Orivy.Controls;
 
 internal static class WindowPageTabGeometry
 {
-    public static float MeasureDesiredTabWidth(ElementBase page, SKFont font, float horizontalPadding,
-        float iconAllowance, float closeButtonAllowance, float minWidth, float maxWidth,
-        bool includeIcon, bool includeCloseButton)
+    /// <summary>
+    /// Returns the content block dimensions (WITHOUT padding) for a tab.
+    /// Inline layout (MiddleLeft / MiddleRight): icon beside text horizontally.
+    /// Stacked layout (all other alignments): icon and text stacked vertically.
+    /// </summary>
+    public static (float blockW, float blockH) MeasureContentBlockSize(
+        string? text, bool hasIcon, SKFont font,
+        float iconSize, float iconSpacing, ContentAlignment imageAlign)
     {
-        font.MeasureText(page.Text ?? string.Empty, out var bounds);
+        var textW = string.IsNullOrEmpty(text) ? 0f : font.MeasureText(text);
+        var metrics = font.Metrics;
+        var textH = Math.Max(1f, metrics.Descent - metrics.Ascent);
 
-        var width = bounds.Width + horizontalPadding * 2f;
-        if (includeIcon && page.Image != null)
-            width += iconAllowance;
+        if (!hasIcon)
+            return (Math.Max(0f, textW), textH);
 
+        var isInline = imageAlign is ContentAlignment.MiddleLeft or ContentAlignment.MiddleRight;
+        if (isInline)
+            return (Math.Max(0f, iconSize + iconSpacing + textW), Math.Max(iconSize, textH));
+
+        // Stacked: width = wider of icon or text; height = icon + spacing + text line
+        return (Math.Max(iconSize, Math.Max(0f, textW)),
+                Math.Max(0f, iconSize + iconSpacing + textH));
+    }
+
+    public static float MeasureDesiredTabWidth(ElementBase page, SKFont font, float horizontalPadding,
+        float iconSize, float iconSpacing, float closeButtonAllowance, float minWidth, float maxWidth,
+        bool includeIcon, bool includeCloseButton,
+        ContentAlignment imageAlign = ContentAlignment.MiddleLeft)
+    {
+        var hasIcon = includeIcon && page.Image != null;
+        var (blockW, _) = MeasureContentBlockSize(page.Text, hasIcon, font, iconSize, iconSpacing, imageAlign);
+
+        var width = blockW + horizontalPadding * 2f;
         if (includeCloseButton)
             width += closeButtonAllowance;
 
         return Math.Clamp(width, minWidth, maxWidth);
+    }
+
+    public static float MeasureDesiredTabHeight(string? text, bool hasIcon, SKFont font, float verticalPadding,
+        float iconSize, float iconSpacing, float trailingButtonSize, float minHeight, float maxHeight,
+        ContentAlignment imageAlign = ContentAlignment.MiddleLeft)
+    {
+        var (_, blockH) = MeasureContentBlockSize(text, hasIcon, font, iconSize, iconSpacing, imageAlign);
+        var height = Math.Max(blockH, trailingButtonSize) + verticalPadding * 2f;
+        return Math.Clamp(height, minHeight, maxHeight);
     }
 
     public static void LayoutTabs(IReadOnlyList<float> desiredWidths, float startX, float top, float height,
@@ -119,7 +152,8 @@ internal static class WindowPageTabGeometry
     }
 
     public static SKRect CreateTextRect(SKRect tabRect, float horizontalPadding, SKRect iconRect, float iconSpacing,
-        SKRect trailingRect, float trailingSpacing)
+        SKRect trailingRect, float trailingSpacing,
+        ContentAlignment imageAlign = ContentAlignment.MiddleLeft)
     {
         var textRect = new SKRect(
             tabRect.Left + horizontalPadding,
@@ -128,7 +162,16 @@ internal static class WindowPageTabGeometry
             tabRect.Bottom);
 
         if (iconRect.Width > 0f)
-            textRect.Left = iconRect.Right + iconSpacing;
+        {
+            var isLeft  = imageAlign is ContentAlignment.TopLeft   or ContentAlignment.MiddleLeft   or ContentAlignment.BottomLeft;
+            var isRight = imageAlign is ContentAlignment.TopRight  or ContentAlignment.MiddleRight  or ContentAlignment.BottomRight;
+
+            if (isLeft)
+                textRect.Left = iconRect.Right + iconSpacing;
+            else if (isRight)
+                textRect.Right = Math.Min(textRect.Right, iconRect.Left - iconSpacing);
+            // center: icon floats independently, text uses its full horizontal span
+        }
 
         if (trailingRect.Width > 0f)
             textRect.Right = Math.Min(textRect.Right, trailingRect.Left - trailingSpacing);

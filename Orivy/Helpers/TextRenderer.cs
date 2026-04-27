@@ -115,7 +115,7 @@ public static class TextRenderer
         }
         else
         {
-            var measuredText = MeasureTextWithOptions(normalizedText, font, bounds.Size, options);
+            var measuredText = MeasureTextWithOptionsCore(normalizedText, font, bounds.Size, options, hasLineBreaks);
             var contentHeight = Math.Max(measuredText.Height, GetBaseLineHeight(font));
             var contentTop = bounds.Top + (bounds.Height - contentHeight) / 2f;
 
@@ -127,7 +127,7 @@ public static class TextRenderer
             y = contentTop - font.Metrics.Ascent;
         }
 
-        DrawText(canvas, normalizedText, x, y, skAlignment, font, paint, options);
+        DrawTextCore(canvas, normalizedText, x, y, skAlignment, font, paint, options, hasLineBreaks);
     }
 
     public static void DrawText(
@@ -143,14 +143,29 @@ public static class TextRenderer
         if (!ShouldRender(canvas, paint, text))
             return;
 
+        var processedText = NormalizeLineBreaks(text!);
+        var hasLineBreaks = ContainsLineBreaks(processedText);
+        DrawTextCore(canvas, processedText, x, y, alignment, font, paint, options, hasLineBreaks);
+    }
+
+    private static void DrawTextCore(
+        SKCanvas canvas,
+        string processedText,
+        float x,
+        float y,
+        SKTextAlign alignment,
+        SKFont? font,
+        SKPaint paint,
+        TextRenderOptions options,
+        bool hasLineBreaks)
+    {
+        if (string.IsNullOrEmpty(processedText))
+            return;
+
         using var disposableFont = font is null ? CreateFontFromPaint(paint) : null;
         var effectiveFont = font ?? disposableFont!;
         using var configuredFont = CreateConfiguredFontCopy(effectiveFont, options);
         effectiveFont = configuredFont ?? effectiveFont;
-
-        // Escape processing is done at property level; rendering only normalizes line endings.
-        var processedText = NormalizeLineBreaks(text!);
-        var hasLineBreaks = ContainsLineBreaks(processedText);
 
         if (options.UseMnemonic && !hasLineBreaks && options.Wrap == TextWrap.None && options.Trimming == TextTrimming.None)
         {
@@ -243,9 +258,37 @@ public static class TextRenderer
 
         var cleanText = cleanBuilder.ToString();
 
+        var primaryTypeface = font.Typeface ?? SKTypeface.Default;
+        if (CanRenderWithTypeface(cleanText, primaryTypeface))
+        {
+            var alignedX = GetAlignedTextStartX(cleanText, x, alignment, font);
+            canvas.DrawText(cleanText, alignedX, y, font, paint);
+
+            if (mnemonicIndex >= 0 && mnemonicIndex < cleanText.Length)
+            {
+                var before = cleanText.Substring(0, mnemonicIndex);
+                var mnemonicChar = cleanText[mnemonicIndex].ToString();
+                var fastPathUnderlineStart = alignedX + font.MeasureText(before);
+                var fastPathUnderlineEnd = fastPathUnderlineStart + font.MeasureText(mnemonicChar);
+
+                if (fastPathUnderlineEnd > fastPathUnderlineStart)
+                {
+                    using var underlinePaint = new SKPaint
+                    {
+                        Color = paint.Color,
+                        IsAntialias = true,
+                        Style = SKPaintStyle.Stroke,
+                        StrokeWidth = 1
+                    };
+                    canvas.DrawLine(fastPathUnderlineStart, y + 2, fastPathUnderlineEnd, y + 2, underlinePaint);
+                }
+            }
+
+            return;
+        }
+
         // Build runs with fallback detection (same approach as DrawTextWithFallback)
         var runs = new List<(string text, SKTypeface typeface)>();
-        var primaryTypeface = font.Typeface ?? SKTypeface.Default;
 
         var currentRun = string.Empty;
         var currentTypeface = primaryTypeface;
@@ -517,9 +560,17 @@ public static class TextRenderer
         SKFont font,
         SKPaint paint)
     {
+        var primaryTypeface = font.Typeface ?? SKTypeface.Default;
+
+        if (CanRenderWithTypeface(text, primaryTypeface))
+        {
+            var alignedX = GetAlignedTextStartX(text, x, alignment, font);
+            canvas.DrawText(text, alignedX, y, font, paint);
+            return;
+        }
+
         var currentX = x;
         var runs = new List<(string text, SKTypeface typeface)>();
-        var primaryTypeface = font.Typeface ?? SKTypeface.Default;
 
         var currentRun = string.Empty;
         var currentTypeface = primaryTypeface;
@@ -587,6 +638,29 @@ public static class TextRenderer
             Hinting = baseFont.Hinting,
             Subpixel = baseFont.Subpixel
         };
+    }
+
+    private static bool CanRenderWithTypeface(string text, SKTypeface typeface)
+    {
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (typeface.GetGlyph(text[i]) == 0)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static float GetAlignedTextStartX(string text, float x, SKTextAlign alignment, SKFont font)
+    {
+        if (alignment == SKTextAlign.Left)
+            return x;
+
+        var textWidth = font.MeasureText(text);
+        if (alignment == SKTextAlign.Center)
+            return x - (textWidth * 0.5f);
+
+        return x - textWidth;
     }
 
     private static SKTypeface GetFallbackTypeface(char c)
@@ -705,12 +779,19 @@ public static class TextRenderer
         if (string.IsNullOrEmpty(normalizedText))
             return SKSize.Empty;
 
+        return MeasureTextWithOptionsCore(normalizedText, font, proposedSize, options, ContainsLineBreaks(normalizedText));
+    }
+
+    private static SKSize MeasureTextWithOptionsCore(string normalizedText, SKFont font, SKSize proposedSize, TextRenderOptions options, bool hasLineBreaks)
+    {
+        if (string.IsNullOrEmpty(normalizedText))
+            return SKSize.Empty;
+
         // Apply constraints from options
         var maxWidth = options.MaxWidth < float.MaxValue ? options.MaxWidth : proposedSize.Width;
         var maxHeight = options.MaxHeight < float.MaxValue ? options.MaxHeight : proposedSize.Height;
         var effectiveMaxWidth = maxWidth > 0 ? maxWidth : float.MaxValue;
         var effectiveMaxHeight = maxHeight > 0 ? maxHeight : float.MaxValue;
-        var hasLineBreaks = ContainsLineBreaks(normalizedText);
 
         // Handle text wrapping
         if (options.Wrap != TextWrap.None && maxWidth < float.MaxValue)
@@ -829,8 +910,9 @@ public static class TextRenderer
 
     private static string NormalizeLineBreaks(string text)
     {
-        return string.IsNullOrEmpty(text)
-            ? text
-            : text.Replace("\r\n", "\n").Replace('\r', '\n');
+        if (string.IsNullOrEmpty(text) || text.IndexOf('\r') < 0)
+            return text;
+
+        return text.Replace("\r\n", "\n").Replace('\r', '\n');
     }
 }

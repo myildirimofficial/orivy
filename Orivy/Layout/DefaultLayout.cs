@@ -384,10 +384,14 @@ internal partial class DefaultLayout : LayoutEngine
                 {
                     case DockStyle.Top:
                         {
-                            SKSize elementSize = GetVerticalDockedSize(element, remainingBounds.Size, measureOnly);
+                            Thickness margin = CommonProperties.GetMargin(element);
+                            var effectiveSize = new SKSize(
+                                Math.Max(0f, remainingBounds.Width - margin.Left - margin.Right),
+                                remainingBounds.Height);
+                            SKSize elementSize = GetVerticalDockedSize(element, effectiveSize, measureOnly);
                             SkiaSharp.SKRect newElementBounds = SkiaSharp.SKRect.Create(
-                                remainingBounds.Left,
-                                remainingBounds.Top,
+                                remainingBounds.Left + margin.Left,
+                                remainingBounds.Top + margin.Top,
                                 elementSize.Width,
                                 elementSize.Height);
  
@@ -395,18 +399,21 @@ internal partial class DefaultLayout : LayoutEngine
  
                             if (!measureOnly)
                             {
-                                // What we are really doing here: top += control.Bounds.Height;
-                                remainingBounds.Top += element.Bounds.Height;
+                                remainingBounds.Top += margin.Top + element.Bounds.Height + margin.Bottom;
                             }
                             break;
                         }
  
                     case DockStyle.Bottom:
                         {
-                            SKSize elementSize = GetVerticalDockedSize(element, remainingBounds.Size, measureOnly);
+                            Thickness margin = CommonProperties.GetMargin(element);
+                            var effectiveSize = new SKSize(
+                                Math.Max(0f, remainingBounds.Width - margin.Left - margin.Right),
+                                remainingBounds.Height);
+                            SKSize elementSize = GetVerticalDockedSize(element, effectiveSize, measureOnly);
                             SkiaSharp.SKRect newElementBounds = SkiaSharp.SKRect.Create(
-                                remainingBounds.Left,
-                                remainingBounds.Bottom - elementSize.Height,
+                                remainingBounds.Left + margin.Left,
+                                remainingBounds.Bottom - margin.Bottom - elementSize.Height,
                                 elementSize.Width,
                                 elementSize.Height);
  
@@ -414,8 +421,7 @@ internal partial class DefaultLayout : LayoutEngine
  
                             if (!measureOnly)
                             {
-                                // What we are really doing here: bottom -= control.Bounds.Height;
-                                remainingBounds.Bottom -= element.Bounds.Height;
+                                remainingBounds.Bottom -= margin.Top + element.Bounds.Height + margin.Bottom;
                             }
  
                             break;
@@ -423,10 +429,14 @@ internal partial class DefaultLayout : LayoutEngine
  
                     case DockStyle.Left:
                         {
-                            SKSize elementSize = GetHorizontalDockedSize(element, remainingBounds.Size, measureOnly);
+                            Thickness margin = CommonProperties.GetMargin(element);
+                            var effectiveSize = new SKSize(
+                                remainingBounds.Width,
+                                Math.Max(0f, remainingBounds.Height - margin.Top - margin.Bottom));
+                            SKSize elementSize = GetHorizontalDockedSize(element, effectiveSize, measureOnly);
                             SkiaSharp.SKRect newElementBounds = SkiaSharp.SKRect.Create(
-                                remainingBounds.Left,
-                                remainingBounds.Top,
+                                remainingBounds.Left + margin.Left,
+                                remainingBounds.Top + margin.Top,
                                 elementSize.Width,
                                 elementSize.Height);
  
@@ -434,18 +444,21 @@ internal partial class DefaultLayout : LayoutEngine
  
                             if (!measureOnly)
                             {
-                                // What we are really doing here: left += control.Bounds.Width;
-                                remainingBounds.Left += element.Bounds.Width;
+                                remainingBounds.Left += margin.Left + element.Bounds.Width + margin.Right;
                             }
                             break;
                         }
  
                     case DockStyle.Right:
                         {
-                            SKSize elementSize = GetHorizontalDockedSize(element, remainingBounds.Size, measureOnly);
+                            Thickness margin = CommonProperties.GetMargin(element);
+                            var effectiveSize = new SKSize(
+                                remainingBounds.Width,
+                                Math.Max(0f, remainingBounds.Height - margin.Top - margin.Bottom));
+                            SKSize elementSize = GetHorizontalDockedSize(element, effectiveSize, measureOnly);
                             SkiaSharp.SKRect newElementBounds = SkiaSharp.SKRect.Create(
-                                remainingBounds.Right - elementSize.Width,
-                                remainingBounds.Top,
+                                remainingBounds.Right - margin.Right - elementSize.Width,
+                                remainingBounds.Top + margin.Top,
                                 elementSize.Width,
                                 elementSize.Height);
  
@@ -453,8 +466,7 @@ internal partial class DefaultLayout : LayoutEngine
  
                             if (!measureOnly)
                             {
-                                // What we are really doing here: right -= control.Bounds.Width;
-                                remainingBounds.Right -= element.Bounds.Width;
+                                remainingBounds.Right -= margin.Left + element.Bounds.Width + margin.Right;
                             }
                             break;
                         }

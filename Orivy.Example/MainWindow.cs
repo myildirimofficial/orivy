@@ -51,6 +51,7 @@ namespace Orivy.Example
         private Container? _backgroundPanel;
         private Container? _backgroundHero;
         private Element? _backgroundHeroCaption;
+        private Container? _backgroundBackdropDeck;
         private Element? _backgroundStatusCard;
         private Button? _backgroundPlayPauseButton;
         private bool _dangerModeEnabled;
@@ -826,7 +827,7 @@ namespace Orivy.Example
                 Padding = new Thickness(18),
                 BackColor = SKColors.Transparent,
                 TextAlign = ContentAlignment.MiddleLeft,
-                Text = "Background Image Showcase\nAsset-backed imagery, caption metadata, transition duration, slideshow interval and repeat behavior are all driven directly by ElementBase.",
+                Text = "Background Image Showcase\nAsset-backed imagery, caption metadata, transition duration, slideshow interval, repeat behavior and backdrop materials are all driven directly by ElementBase.",
             };
 
             _backgroundHero = new Container
@@ -869,6 +870,9 @@ namespace Orivy.Example
             };
 
             _backgroundHero.Controls.Add(_backgroundHeroCaption);
+
+            _backgroundBackdropDeck = CreateBackdropDemoDeck();
+            _backgroundHero.Controls.Add(_backgroundBackdropDeck);
 
             var actionRow = new Container
             {
@@ -1234,7 +1238,7 @@ namespace Orivy.Example
                 _backgroundHeroCaption.Radius = new Radius(18);
                 _backgroundHeroCaption.Shadow = BoxShadow.None;
                 _backgroundStatusCard.Text =
-                    "Background Slideshow\nNo background assets are available. Add images under assets/images to populate the showcase and window background mirror.";
+                    "Background Slideshow\nNo background assets are available. Add images under assets/images to populate the showcase and window background mirror. The backdrop deck above still demonstrates Tint, Glass, Acrylic and Mica element surfaces.";
 
                 if (_backgroundPlayPauseButton != null)
                     _backgroundPlayPauseButton.Text = "No Assets";
@@ -1250,12 +1254,52 @@ namespace Orivy.Example
             _backgroundHeroCaption.Text = caption.ToString();
             ApplyBackgroundCaptionVisuals(activeFrame);
             _backgroundStatusCard.Text =
-                $"Background Slideshow\nScene {index + 1}/{_backgroundSlides.Count}  •  Layout: {_backgroundHero.BackgroundImageLayout}  •  Effect: {_backgroundHero.BackgroundImageTransitionEffect}  •  Duration: {_backgroundTransitionDurationPreset} ms\nCaption: {activeFrame.CaptionDesignMode}  •  Align: {activeFrame.CaptionLayout}  •  Slideshow: {(_backgroundHero.BackgroundImageSlideshowEnabled ? "Active" : "Passive")}  •  Repeat: {(_backgroundHero.BackgroundImageSlideshowRepeat ? "Active" : "Passive")}  •  Interval: {_backgroundIntervalPreset} ms  •  Window Background: {(_windowBackgroundEnabled ? "Active" : "Passive")} ({_windowBackgroundMode})\nWindow Blur: {_windowBackgroundBlurAmountPreset} px  •  Mode: {BackgroundImageBlurMode}\nUse the Backgrounds menu to switch layout, effect, duration, caption design and slideshow mode in real time. Use the Window Background menu to mirror the active scene across the window and test blur modes on the root window surface.";
+                $"Background Slideshow\nScene {index + 1}/{_backgroundSlides.Count}  •  Layout: {_backgroundHero.BackgroundImageLayout}  •  Effect: {_backgroundHero.BackgroundImageTransitionEffect}  •  Duration: {_backgroundTransitionDurationPreset} ms\nCaption: {activeFrame.CaptionDesignMode}  •  Align: {activeFrame.CaptionLayout}  •  Slideshow: {(_backgroundHero.BackgroundImageSlideshowEnabled ? "Active" : "Passive")}  •  Repeat: {(_backgroundHero.BackgroundImageSlideshowRepeat ? "Active" : "Passive")}  •  Interval: {_backgroundIntervalPreset} ms  •  Window Background: {(_windowBackgroundEnabled ? "Active" : "Passive")} ({_windowBackgroundMode})\nWindow Blur: {_windowBackgroundBlurAmountPreset} px  •  Mode: {BackgroundImageBlurMode}  •  Backdrop Deck: Tint / Glass / Acrylic / Mica\nUse the Backgrounds menu to switch layout, effect, duration, caption design and slideshow mode in real time. Use the Window Background menu to mirror the active scene across the window and test blur modes on the root window surface.";
 
             if (_backgroundPlayPauseButton != null)
                 _backgroundPlayPauseButton.Text = _backgroundHero.BackgroundImageSlideshowEnabled ? "Pause Slideshow" : "Start Slideshow";
 
             RefreshBackgroundMenuChecks();
+        }
+
+        private static Container CreateBackdropDemoDeck()
+        {
+            var deck = new Container
+            {
+                Name = "backgroundBackdropDeck",
+                Dock = DockStyle.Top,
+                Height = 126,
+                Margin = new Thickness(0, 0, 0, 14),
+                Radius = new Radius(0),
+                Border = new Thickness(0),
+                BackColor = SKColors.Transparent,
+            };
+
+            deck.Controls.Add(CreateBackdropDemoCard("Mica", "Layered wash for quiet surfaces.", ElementBackdropMode.Mica, new SKColor(228, 232, 240, 164), 166, false));
+            deck.Controls.Add(CreateBackdropDemoCard("Acrylic", "Denser material with stronger body.", ElementBackdropMode.Acrylic, new SKColor(214, 222, 236, 150), 166));
+            deck.Controls.Add(CreateBackdropDemoCard("Glass", "Light glass treatment over imagery.", ElementBackdropMode.Glass, new SKColor(245, 247, 250, 110), 166));
+            deck.Controls.Add(CreateBackdropDemoCard("Tint", "Simple colored wash over the host.", ElementBackdropMode.Tint, ColorScheme.Primary.WithAlpha(110), 166));
+            return deck;
+        }
+
+        private static Element CreateBackdropDemoCard(string title, string body, ElementBackdropMode mode, SKColor backdropColor, int width, bool withTrailingMargin = true)
+        {
+            return new Element
+            {
+                Text = $"{title}\n{body}",
+                Dock = DockStyle.Left,
+                Width = width,
+                Margin = withTrailingMargin ? new Thickness(0, 0, 12, 0) : new Thickness(0),
+                Padding = new Thickness(14),
+                Radius = new Radius(18),
+                Border = new Thickness(0),
+                BackColor = SKColors.Transparent,
+                ForeColor = SKColors.White,
+                TextAlign = ContentAlignment.MiddleLeft,
+                BackdropMode = mode,
+                BackdropColor = backdropColor,
+                Shadow = new BoxShadow(0f, 10f, 20f, 0, ColorScheme.ShadowColor.WithAlpha(24)),
+            };
         }
 
         private void NotifBtnInfo_Click(object sender, EventArgs e)
@@ -1660,10 +1704,18 @@ namespace Orivy.Example
 
         private SKImage CreateGridListIcon(SKColor accent, GridListIconKind kind)
         {
-            var info = new SKImageInfo(18, 18);
+            const float designSize = 18f;
+            var info = new SKImageInfo(24, 24);
             using var surface = SKSurface.Create(info);
             var canvas = surface.Canvas;
             canvas.Clear(SKColors.Transparent);
+
+            var scale = Math.Min(info.Width, info.Height) / designSize;
+            var offsetX = (info.Width - (designSize * scale)) * 0.5f;
+            var offsetY = (info.Height - (designSize * scale)) * 0.5f;
+            var saveCount = canvas.Save();
+            canvas.Translate(offsetX, offsetY);
+            canvas.Scale(scale, scale);
 
             using var fill = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = accent };
             using var stroke = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.6f, Color = SKColors.White.WithAlpha(220) };
@@ -1720,6 +1772,8 @@ namespace Orivy.Example
                     }
                     break;
             }
+
+                    canvas.RestoreToCount(saveCount);
 
             var image = surface.Snapshot();
             _gridListImages.Add(image);

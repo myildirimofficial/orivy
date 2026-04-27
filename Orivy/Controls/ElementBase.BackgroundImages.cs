@@ -1,6 +1,7 @@
 using Orivy.Animation;
 using SkiaSharp;
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,9 +11,12 @@ namespace Orivy.Controls;
 public abstract partial class ElementBase
 {
     private const int DefaultBackgroundImageTransitionDurationMs = 280;
+    private const int MaxBackgroundBlurCacheEntries = 4;
 
     private readonly AnimationManager _backgroundImageTransitionAnimation = new(true);
     private readonly SKPaint _backgroundImagePaint = new() { IsAntialias = true };
+    private readonly object _backgroundBlurCacheSync = new();
+    private readonly List<BackgroundBlurCacheEntry> _backgroundBlurCacheEntries = new();
 
     private BackgroundImageFrame[] _backgroundImages = Array.Empty<BackgroundImageFrame>();
     private BackgroundImageCaption _backgroundImageCaption = BackgroundImageCaption.Empty;
@@ -336,6 +340,7 @@ public abstract partial class ElementBase
         _backgroundImageTransitionAnimation.OnAnimationProgress -= HandleBackgroundImageTransitionProgress;
         _backgroundImageTransitionAnimation.OnAnimationFinished -= HandleBackgroundImageTransitionFinished;
         _backgroundImageTransitionAnimation.Dispose();
+        ClearBackgroundBlurCache();
         _backgroundImageBlurFilter?.Dispose();
         _backgroundImageBlurFilter = null;
         _backgroundImagePaint.Dispose();
@@ -345,6 +350,7 @@ public abstract partial class ElementBase
 
     private void UpdateBackgroundImageBlurFilter()
     {
+        ClearBackgroundBlurCache();
         _backgroundImageBlurFilter?.Dispose();
         _backgroundImageBlurFilter = null;
 
@@ -411,6 +417,7 @@ public abstract partial class ElementBase
     private void ApplyBackgroundImageChange(SKImage? previousImage, SKImage? nextImage, int direction, bool allowTransition)
     {
         _backgroundImageTransitionDirection = direction >= 0 ? 1 : -1;
+        ClearBackgroundBlurCache();
 
         if (ReferenceEquals(previousImage, nextImage))
         {
@@ -652,23 +659,23 @@ public abstract partial class ElementBase
         switch (_backgroundImageTransitionEffect)
         {
             case BackgroundImageTransitionEffect.Fade:
-                DrawBackgroundImage(canvas, fromImage, bounds, ToAlpha(1f - progress));
-                DrawBackgroundImage(canvas, toImage, bounds, ToAlpha(progress));
+                DrawBackgroundImage(canvas, fromImage, bounds, ToAlpha(1f - progress), bounds);
+                DrawBackgroundImage(canvas, toImage, bounds, ToAlpha(progress), bounds);
                 break;
 
             case BackgroundImageTransitionEffect.SlideHorizontal:
-                DrawBackgroundImage(canvas, fromImage, OffsetRect(bounds, -_backgroundImageTransitionDirection * bounds.Width * progress, 0f), 255);
-                DrawBackgroundImage(canvas, toImage, OffsetRect(bounds, _backgroundImageTransitionDirection * bounds.Width * (1f - progress), 0f), 255);
+                DrawBackgroundImage(canvas, fromImage, OffsetRect(bounds, -_backgroundImageTransitionDirection * bounds.Width * progress, 0f), 255, bounds);
+                DrawBackgroundImage(canvas, toImage, OffsetRect(bounds, _backgroundImageTransitionDirection * bounds.Width * (1f - progress), 0f), 255, bounds);
                 break;
 
             case BackgroundImageTransitionEffect.SlideVertical:
-                DrawBackgroundImage(canvas, fromImage, OffsetRect(bounds, 0f, -_backgroundImageTransitionDirection * bounds.Height * progress), 255);
-                DrawBackgroundImage(canvas, toImage, OffsetRect(bounds, 0f, _backgroundImageTransitionDirection * bounds.Height * (1f - progress)), 255);
+                DrawBackgroundImage(canvas, fromImage, OffsetRect(bounds, 0f, -_backgroundImageTransitionDirection * bounds.Height * progress), 255, bounds);
+                DrawBackgroundImage(canvas, toImage, OffsetRect(bounds, 0f, _backgroundImageTransitionDirection * bounds.Height * (1f - progress)), 255, bounds);
                 break;
 
             case BackgroundImageTransitionEffect.ScaleFade:
-                DrawBackgroundImage(canvas, fromImage, ScaleRect(bounds, 1f - (0.04f * progress)), ToAlpha(1f - progress));
-                DrawBackgroundImage(canvas, toImage, ScaleRect(bounds, 1.04f - (0.04f * progress)), ToAlpha(progress));
+                DrawBackgroundImage(canvas, fromImage, ScaleRect(bounds, 1f - (0.04f * progress)), ToAlpha(1f - progress), bounds);
+                DrawBackgroundImage(canvas, toImage, ScaleRect(bounds, 1.04f - (0.04f * progress)), ToAlpha(progress), bounds);
                 break;
 
             default:
@@ -677,43 +684,66 @@ public abstract partial class ElementBase
         }
     }
 
-    private void DrawBackgroundImage(SKCanvas canvas, SKImage image, SKRect bounds, byte alpha)
+    private void DrawBackgroundImage(SKCanvas canvas, SKImage image, SKRect bounds, byte alpha, SKRect? blurCacheBounds = null)
     {
         if (image == null || alpha == 0 || bounds.Width <= 0f || bounds.Height <= 0f)
             return;
 
         _backgroundImagePaint.Color = SKColors.White.WithAlpha(alpha);
+
+        if (_backgroundImageBlurFilter != null)
+        {
+            lock (_backgroundBlurCacheSync)
+            {
+                var cachedBlurredImage = GetOrCreateBlurredBackgroundImage(image, blurCacheBounds ?? bounds);
+                if (cachedBlurredImage != null)
+                {
+                    _backgroundImagePaint.ImageFilter = null;
+                    canvas.DrawImage(cachedBlurredImage, bounds, _backgroundImagePaint);
+                    return;
+                }
+            }
+        }
+
         _backgroundImagePaint.ImageFilter = _backgroundImageBlurFilter;
+        DrawBackgroundImageCore(canvas, image, bounds, _backgroundImagePaint);
+        _backgroundImagePaint.ImageFilter = null;
+    }
+
+    private void DrawBackgroundImageCore(SKCanvas canvas, SKImage image, SKRect bounds, SKPaint paint)
+    {
+        if (image == null || bounds.Width <= 0f || bounds.Height <= 0f)
+            return;
 
         switch (BackgroundImageLayout)
         {
             case ImageLayout.None:
-                canvas.DrawImage(image, SKRect.Create(bounds.Left, bounds.Top, image.Width, image.Height), _backgroundImagePaint);
+                canvas.DrawImage(image, SKRect.Create(bounds.Left, bounds.Top, image.Width, image.Height), paint);
                 break;
 
             case ImageLayout.Center:
-                canvas.DrawImage(image, CreateCenteredImageRect(image, bounds), _backgroundImagePaint);
+                canvas.DrawImage(image, CreateCenteredImageRect(image, bounds), paint);
                 break;
 
             case ImageLayout.Stretch:
-                canvas.DrawImage(image, bounds, _backgroundImagePaint);
+                canvas.DrawImage(image, bounds, paint);
                 break;
 
             case ImageLayout.Zoom:
-                canvas.DrawImage(image, CreateZoomImageRect(image, bounds), _backgroundImagePaint);
+                canvas.DrawImage(image, CreateZoomImageRect(image, bounds), paint);
                 break;
 
             case ImageLayout.Tile:
-                DrawTiledBackgroundImage(canvas, image, bounds);
+                DrawTiledBackgroundImage(canvas, image, bounds, paint);
                 break;
 
             default:
-                canvas.DrawImage(image, bounds, _backgroundImagePaint);
+                canvas.DrawImage(image, bounds, paint);
                 break;
         }
     }
 
-    private void DrawTiledBackgroundImage(SKCanvas canvas, SKImage image, SKRect bounds)
+    private void DrawTiledBackgroundImage(SKCanvas canvas, SKImage image, SKRect bounds, SKPaint paint)
     {
         var tileWidth = Math.Max(1f, image.Width);
         var tileHeight = Math.Max(1f, image.Height);
@@ -722,8 +752,120 @@ public abstract partial class ElementBase
         {
             for (var x = bounds.Left; x < bounds.Right; x += tileWidth)
             {
-                canvas.DrawImage(image, SKRect.Create(x, y, tileWidth, tileHeight), _backgroundImagePaint);
+                canvas.DrawImage(image, SKRect.Create(x, y, tileWidth, tileHeight), paint);
             }
+        }
+    }
+
+    private SKImage? GetOrCreateBlurredBackgroundImage(SKImage sourceImage, SKRect bounds)
+    {
+        if (_backgroundImageBlurFilter == null || bounds.Width <= 0f || bounds.Height <= 0f)
+            return null;
+
+        var width = Math.Max(1, (int)Math.Ceiling(bounds.Width));
+        var height = Math.Max(1, (int)Math.Ceiling(bounds.Height));
+        var blurAmountKey = Math.Max(0, (int)Math.Round(_backgroundImageBlurAmount * 100f));
+        var layout = BackgroundImageLayout;
+
+        for (var i = 0; i < _backgroundBlurCacheEntries.Count; i++)
+        {
+            var entry = _backgroundBlurCacheEntries[i];
+            if (!entry.Matches(sourceImage, width, height, layout, blurAmountKey, _backgroundImageBlurMode))
+                continue;
+
+            if (i < _backgroundBlurCacheEntries.Count - 1)
+            {
+                _backgroundBlurCacheEntries.RemoveAt(i);
+                _backgroundBlurCacheEntries.Add(entry);
+            }
+
+            return entry.BlurredImage;
+        }
+
+        var blurredImage = BuildBlurredBackgroundImage(sourceImage, width, height);
+        if (blurredImage == null)
+            return null;
+
+        _backgroundBlurCacheEntries.Add(new BackgroundBlurCacheEntry(
+            sourceImage,
+            blurredImage,
+            width,
+            height,
+            layout,
+            blurAmountKey,
+            _backgroundImageBlurMode));
+
+        while (_backgroundBlurCacheEntries.Count > MaxBackgroundBlurCacheEntries)
+        {
+            _backgroundBlurCacheEntries[0].Dispose();
+            _backgroundBlurCacheEntries.RemoveAt(0);
+        }
+
+        return blurredImage;
+    }
+
+    private SKImage? BuildBlurredBackgroundImage(SKImage sourceImage, int width, int height)
+    {
+        var downsample = GetBackgroundBlurDownsampleFactor(_backgroundImageBlurAmount);
+        var surfaceWidth = Math.Max(1, (int)Math.Ceiling(width / (double)downsample));
+        var surfaceHeight = Math.Max(1, (int)Math.Ceiling(height / (double)downsample));
+        var info = new SKImageInfo(surfaceWidth, surfaceHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
+        using var surface = SKSurface.Create(info);
+        if (surface == null)
+            return null;
+
+        var (sigmaX, sigmaY) = GetBackgroundImageBlurSigma(_backgroundImageBlurAmount, _backgroundImageBlurMode);
+        sigmaX /= downsample;
+        sigmaY /= downsample;
+
+        using var paint = new SKPaint
+        {
+            IsAntialias = true,
+            Color = SKColors.White
+        };
+        using var blurFilter = sigmaX > 0f || sigmaY > 0f
+            ? SKImageFilter.CreateBlur(sigmaX, sigmaY, SKShaderTileMode.Clamp)
+            : null;
+
+        paint.ImageFilter = blurFilter;
+
+        var canvas = surface.Canvas;
+        canvas.Clear(SKColors.Transparent);
+        var saveCount = canvas.Save();
+        canvas.Scale(1f / downsample, 1f / downsample);
+        DrawBackgroundImageCore(canvas, sourceImage, SKRect.Create(0f, 0f, width, height), paint);
+        canvas.RestoreToCount(saveCount);
+        paint.ImageFilter = null;
+        canvas.Flush();
+
+        return surface.Snapshot();
+    }
+
+    private static int GetBackgroundBlurDownsampleFactor(float blurAmount)
+    {
+        if (blurAmount <= 3f)
+            return 1;
+
+        if (blurAmount <= 8f)
+            return 2;
+
+        if (blurAmount <= 14f)
+            return 3;
+
+        if (blurAmount <= 22f)
+            return 4;
+
+        return 5;
+    }
+
+    private void ClearBackgroundBlurCache()
+    {
+        lock (_backgroundBlurCacheSync)
+        {
+            for (var i = 0; i < _backgroundBlurCacheEntries.Count; i++)
+                _backgroundBlurCacheEntries[i].Dispose();
+
+            _backgroundBlurCacheEntries.Clear();
         }
     }
 
@@ -901,6 +1043,56 @@ public abstract partial class ElementBase
         var copy = new BackgroundImageFrame[images.Length];
         Array.Copy(images, copy, images.Length);
         return copy;
+    }
+
+    private sealed class BackgroundBlurCacheEntry : IDisposable
+    {
+        public BackgroundBlurCacheEntry(
+            SKImage sourceImage,
+            SKImage blurredImage,
+            int width,
+            int height,
+            ImageLayout layout,
+            int blurAmountKey,
+            BackgroundImageBlurMode blurMode)
+        {
+            SourceImage = sourceImage;
+            BlurredImage = blurredImage;
+            Width = width;
+            Height = height;
+            Layout = layout;
+            BlurAmountKey = blurAmountKey;
+            BlurMode = blurMode;
+        }
+
+        public SKImage SourceImage { get; }
+        public SKImage BlurredImage { get; }
+        public int Width { get; }
+        public int Height { get; }
+        public ImageLayout Layout { get; }
+        public int BlurAmountKey { get; }
+        public BackgroundImageBlurMode BlurMode { get; }
+
+        public bool Matches(
+            SKImage sourceImage,
+            int width,
+            int height,
+            ImageLayout layout,
+            int blurAmountKey,
+            BackgroundImageBlurMode blurMode)
+        {
+            return ReferenceEquals(SourceImage, sourceImage)
+                && Width == width
+                && Height == height
+                && Layout == layout
+                && BlurAmountKey == blurAmountKey
+                && BlurMode == blurMode;
+        }
+
+        public void Dispose()
+        {
+            BlurredImage.Dispose();
+        }
     }
 
 }
