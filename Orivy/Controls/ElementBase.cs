@@ -8,7 +8,6 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
-using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace Orivy.Controls;
@@ -49,6 +48,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     private readonly SKPath _renderInsetShadowOuterPath = new();
     private readonly SKPath _renderInsetShadowHolePath = new();
     private readonly Dictionary<int, SKMaskFilter> _shadowMaskFilters = new();
+    private readonly List<ElementBase> _tabNavigationBuffer = new();
     private SKPaintSurfaceEventArgs? _cachedPaintSurfaceEventArgs;
     private SKSurface? _cachedPaintSurface;
     private SKFont? _defaultTextRenderFont;
@@ -980,6 +980,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
             _margin = value;
 
+            if (Orivy.Layout.CommonProperties.GetMargin(this) != value)
+                Orivy.Layout.CommonProperties.SetMargin(this, value);
+
             OnMarginChanged(EventArgs.Empty);
             InvalidateMeasure();
             Invalidate();
@@ -1745,6 +1748,10 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     // Cached buffer for child rendering order — avoids per-frame rebuild/sort work
     private readonly List<ElementBase> _childRenderBuffer = new();
     private bool _childRenderBufferDirty = true;
+    // Per-frame categorization scratch lists — reused to avoid per-frame heap allocations
+    private readonly List<ElementBase> _renderNormalChildren = new();
+    private readonly List<ElementBase> _renderScrollBarChildren = new();
+    private readonly List<ElementBase> _renderFloatingChildren = new();
 
     private static int CompareChildRenderOrder(ElementBase a, ElementBase b)
     {
@@ -2110,60 +2117,44 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             Width / viewportScale,
             Height / viewportScale);
 
+        // Categorize in a single pass to avoid triple-traversal of the child buffer
+        _renderNormalChildren.Clear();
+        _renderScrollBarChildren.Clear();
+        _renderFloatingChildren.Clear();
+        for (var i = 0; i < _childRenderBuffer.Count; i++)
+        {
+            var child = _childRenderBuffer[i];
+            if (!IsRenderableChild(child))
+                continue;
+            if (IsScrollBar(child))
+                _renderScrollBarChildren.Add(child);
+            else if (IsFloatingPopup(child))
+                _renderFloatingChildren.Add(child);
+            else if (IntersectsViewport(child, viewport))
+                _renderNormalChildren.Add(child);
+        }
+
+        int saved = -1;
         if (shouldTranslate || shouldScale)
         {
-            var saved = canvas.Save();
+            saved = canvas.Save();
             if (shouldTranslate)
                 canvas.Translate(-scrollOffset.X, -scrollOffset.Y);
             if (shouldScale)
                 canvas.Scale(scale, scale);
+        }
 
-            for (var i = 0; i < _childRenderBuffer.Count; i++)
-            {
-                var child = _childRenderBuffer[i];
-                if (IsRenderableChild(child) && !IsScrollBar(child) && !IsFloatingPopup(child) && IntersectsViewport(child, viewport))
-                    child.Render(canvas);
-            }
+        for (var i = 0; i < _renderNormalChildren.Count; i++)
+            _renderNormalChildren[i].Render(canvas);
 
+        if (saved >= 0)
             canvas.RestoreToCount(saved);
 
-            for (var i = 0; i < _childRenderBuffer.Count; i++)
-            {
-                var child = _childRenderBuffer[i];
-                if (IsRenderableChild(child) && IsScrollBar(child))
-                    child.Render(canvas);
-            }
+        for (var i = 0; i < _renderScrollBarChildren.Count; i++)
+            _renderScrollBarChildren[i].Render(canvas);
 
-            for (var i = 0; i < _childRenderBuffer.Count; i++)
-            {
-                var child = _childRenderBuffer[i];
-                if (IsRenderableChild(child) && IsFloatingPopup(child))
-                    child.Render(canvas);
-            }
-        }
-        else
-        {
-            for (var i = 0; i < _childRenderBuffer.Count; i++)
-            {
-                var child = _childRenderBuffer[i];
-                if (IsRenderableChild(child) && !IsScrollBar(child) && !IsFloatingPopup(child) && IntersectsViewport(child, viewport))
-                    child.Render(canvas);
-            }
-
-            for (var i = 0; i < _childRenderBuffer.Count; i++)
-            {
-                var child = _childRenderBuffer[i];
-                if (IsRenderableChild(child) && IsScrollBar(child))
-                    child.Render(canvas);
-            }
-
-            for (var i = 0; i < _childRenderBuffer.Count; i++)
-            {
-                var child = _childRenderBuffer[i];
-                if (IsRenderableChild(child) && IsFloatingPopup(child))
-                    child.Render(canvas);
-            }
-        }
+        for (var i = 0; i < _renderFloatingChildren.Count; i++)
+            _renderFloatingChildren[i].Render(canvas);
     }
 
     public void Render(SKCanvas targetCanvas)
@@ -2213,24 +2204,30 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             {
                 var roundRect = GetScratchRoundRect(elementRect, _radius);
                 targetCanvas.ClipRoundRect(roundRect, antialias: true);
-            }
 
-            // ── Background ──
-            if (BackColor != SKColors.Transparent)
-            {
-                var paint = _renderBackgroundPaint;
-                paint.Color = BackColor;
-
-                if (hasRadius)
+                // ── Background ──
+                if (BackColor != SKColors.Transparent)
                 {
-                    var roundRect = GetScratchRoundRect(elementRect, _radius);
+                    var paint = _renderBackgroundPaint;
+                    paint.Color = BackColor;
+                    // roundRect is still valid — nothing overwrites the scratch between ClipRoundRect and here
                     targetCanvas.DrawRoundRect(roundRect, paint);
                 }
-                else
+            }
+            else
+            {
+                // ── Background ──
+                if (BackColor != SKColors.Transparent)
+                {
+                    var paint = _renderBackgroundPaint;
+                    paint.Color = BackColor;
                     targetCanvas.DrawRect(elementRect, paint);
+                }
             }
 
             RenderBackgroundImages(targetCanvas, elementRect);
+
+            RenderBackdropMaterial(targetCanvas, elementRect, hasRadius);
 
             RenderMotionEffects(targetCanvas, elementRect);
 
@@ -3175,27 +3172,32 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private bool HandleTabKey(bool isShift)
     {
-        var tabbableElements = Controls.OfType<ElementBase>()
-            .Where(e => e.Visible && e.Enabled && e.TabStop)
-            .OrderBy(e => e.TabIndex)
-            .ToList();
+        _tabNavigationBuffer.Clear();
+        for (var i = 0; i < Controls.Count; i++)
+        {
+            if (Controls[i] is ElementBase element && element.Visible && element.Enabled && element.TabStop)
+                _tabNavigationBuffer.Add(element);
+        }
 
-        if (tabbableElements.Count == 0) return false;
+        if (_tabNavigationBuffer.Count == 0) return false;
 
-        var currentIndex = _focusedElement != null ? tabbableElements.IndexOf(_focusedElement) : -1;
+        if (_tabNavigationBuffer.Count > 1)
+            _tabNavigationBuffer.Sort((left, right) => left.TabIndex.CompareTo(right.TabIndex));
+
+        var currentIndex = _focusedElement != null ? _tabNavigationBuffer.IndexOf(_focusedElement) : -1;
 
         if (isShift)
         {
             currentIndex--;
-            if (currentIndex < 0) currentIndex = tabbableElements.Count - 1;
+            if (currentIndex < 0) currentIndex = _tabNavigationBuffer.Count - 1;
         }
         else
         {
             currentIndex++;
-            if (currentIndex >= tabbableElements.Count) currentIndex = 0;
+            if (currentIndex >= _tabNavigationBuffer.Count) currentIndex = 0;
         }
 
-        FocusedElement = tabbableElements[currentIndex];
+        FocusedElement = _tabNavigationBuffer[currentIndex];
         return true;
     }
 
@@ -3552,6 +3554,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             DisposeMotionEffectsSystem();
             DisposeVisualStyleSystem();
             DisposeBackgroundImageTransitionSystem();
+            DisposeBackdropMaterialSystem();
             _defaultTextRenderFont?.Dispose();
             _defaultTextRenderFontSource?.Dispose();
             _renderBackgroundPaint.Dispose();

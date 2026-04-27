@@ -318,6 +318,16 @@ public abstract partial class ElementBase
         Invalidate();
     }
 
+    internal void SetEffectiveTranslateY(float value)
+    {
+        if (Math.Abs(_renderTranslateY - value) < 0.5f)
+            return;
+
+        _renderTranslateY = value;
+        _styleEffectiveSnapshot = _styleEffectiveSnapshot.WithTranslateY(value);
+        Invalidate();
+    }
+
     private void SetStyleBaseSize(SKSize size)
     {
         _styleBaseSnapshot = _styleBaseSnapshot.WithSize(size);

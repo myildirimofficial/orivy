@@ -463,9 +463,8 @@ public class ScrollBar : ElementBase
         SKColor trackBase = TrackColor == SKColors.Transparent ? ColorScheme.BorderColor : TrackColor;
         byte trackAlpha = _autoHide ? (byte)(38 * visibility) : (byte)255;
         _trackPaint.Color = trackBase.WithAlpha(trackAlpha);
-
-        using var trackRR = new SKRoundRect(_trackRect, Radius.All);
-        canvas.DrawRoundRect(trackRR, _trackPaint);
+        var radius = Radius.All >= 0 ? Radius.All : Radius.TopLeft;
+        canvas.DrawRoundRect(_trackRect, radius, radius, _trackPaint);
 
         if (_thumbRect.IsEmpty) return;
 
@@ -482,10 +481,8 @@ public class ScrollBar : ElementBase
         byte thumbAlpha = (byte)(220 * Math.Clamp(visibility, 0f, 1f));
         SKColor thumbColor = stateColor.WithAlpha(thumbAlpha);
 
-        using var thumbRR = new SKRoundRect(_thumbRect, Radius.All);
-
         _thumbPaint.Color = thumbColor;
-        canvas.DrawRoundRect(thumbRR, _thumbPaint);
+        canvas.DrawRoundRect(_thumbRect, radius, radius, _thumbPaint);
     }
 
     // =========================================================================

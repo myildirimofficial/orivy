@@ -331,7 +331,10 @@ public partial class Window : WindowBase
                 return;
 
             if (_titleBarMenuStrip != null)
+            {
+                _titleBarMenuStrip.ClearHostedTitleBarForeColorOverride();
                 RestoreTitleBarMenuStripLayout(_titleBarMenuStrip);
+            }
 
             _titleBarMenuStrip = value;
             _titleBarMenuStripRect = SKRect.Empty;
@@ -650,6 +653,7 @@ public partial class Window : WindowBase
 
         if (!HasVisibleTitleBarMenuStrip)
         {
+            _titleBarMenuStrip.ClearHostedTitleBarForeColorOverride();
             _titleBarMenuStripRect = SKRect.Empty;
             return;
         }
@@ -680,6 +684,20 @@ public partial class Window : WindowBase
 
         if (_titleBarMenuStrip.Size != newSize)
             _titleBarMenuStrip.Size = newSize;
+    }
+
+    private void SyncTitleBarMenuStripForeColor(SKColor foreColor)
+    {
+        if (_titleBarMenuStrip == null)
+            return;
+
+        if (!HasVisibleTitleBarMenuStrip)
+        {
+            _titleBarMenuStrip.ClearHostedTitleBarForeColorOverride();
+            return;
+        }
+
+        _titleBarMenuStrip.SetHostedTitleBarForeColorOverride(foreColor);
     }
 
     private float GetTitleBarMenuReservedWidth()
@@ -1547,6 +1565,7 @@ public partial class Window : WindowBase
 
         if (!ShowTitle)
         {
+            _titleBarMenuStrip?.ClearHostedTitleBarForeColorOverride();
             return;
         }
 

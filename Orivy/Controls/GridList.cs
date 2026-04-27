@@ -82,6 +82,19 @@ public class GridList : ElementBase
     private readonly SKPaint _fillPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _gridLinePaint = new() { IsAntialias = false, Style = SKPaintStyle.Stroke, StrokeWidth = 1f };
     private readonly SKPaint _textPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _groupAccentPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _groupAccentBorderPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke };
+    private readonly SKPaint _chevronPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round };
+    private readonly SKPath _chevronPath = new();
+    // Cached paints for DrawCheckBox — prevents allocations per visible row per frame
+    private readonly SKPaint _checkBoxBackPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _checkBoxBorderPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f };
+    private readonly SKPaint _checkBoxCheckPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2f, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round, Color = SKColors.White };
+    private readonly SKPath _checkBoxCheckPath = new();
+    // Cached paints for single-call per-frame draw helpers
+    private readonly SKPaint _headerDividerPaint = new() { IsAntialias = false, Style = SKPaintStyle.Stroke, StrokeWidth = 1f };
+    private readonly SKPaint _columnResizeGripPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round };
+    private readonly SKPaint _rowResizePaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.4f, StrokeCap = SKStrokeCap.Round };
 
     public GridList()
     {
@@ -761,14 +774,8 @@ public class GridList : ElementBase
             var stickyHeaderRect = GetStickyHeaderRect(outerRect);
             DrawHeader(canvas, stickyHeaderRect, roundedHorizontalOffset, renderFont);
 
-            using var dividerPaint = new SKPaint
-            {
-                Color = GridLineColor.WithAlpha(180),
-                IsAntialias = false,
-                Style = SKPaintStyle.Stroke,
-                StrokeWidth = 1f
-            };
-            canvas.DrawLine(stickyHeaderRect.Left, stickyHeaderRect.Bottom, stickyHeaderRect.Right, stickyHeaderRect.Bottom, dividerPaint);
+            _headerDividerPaint.Color = GridLineColor.WithAlpha(180);
+            canvas.DrawLine(stickyHeaderRect.Left, stickyHeaderRect.Bottom, stickyHeaderRect.Right, stickyHeaderRect.Bottom, _headerDividerPaint);
         }
     }
 
@@ -782,6 +789,17 @@ public class GridList : ElementBase
                 animation.Dispose();
 
             _groupAnimations.Clear();
+            _groupAccentPaint.Dispose();
+            _groupAccentBorderPaint.Dispose();
+            _chevronPaint.Dispose();
+            _chevronPath.Dispose();
+            _checkBoxBackPaint.Dispose();
+            _checkBoxBorderPaint.Dispose();
+            _checkBoxCheckPaint.Dispose();
+            _checkBoxCheckPath.Dispose();
+            _headerDividerPaint.Dispose();
+            _columnResizeGripPaint.Dispose();
+            _rowResizePaint.Dispose();
         }
 
         base.Dispose(disposing);
@@ -1410,44 +1428,30 @@ public class GridList : ElementBase
 
     private void DrawColumnResizeGrip(SKCanvas canvas, SKRect cellRect, bool emphasized, bool resizeHot)
     {
-        var gripColor = resizeHot ? ColorScheme.Primary : HeaderForeColor.WithAlpha(110);
-        using var gripPaint = new SKPaint
-        {
-            Color = gripColor,
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = resizeHot ? 2f : 1f,
-            StrokeCap = SKStrokeCap.Round
-        };
+        _columnResizeGripPaint.Color = resizeHot ? ColorScheme.Primary : HeaderForeColor.WithAlpha(110);
+        _columnResizeGripPaint.StrokeWidth = resizeHot ? 2f : 1f;
 
-        var x = cellRect.Right - gripPaint.StrokeWidth / 2f;
+        var x = cellRect.Right - _columnResizeGripPaint.StrokeWidth / 2f;
         var y1 = cellRect.Top + 8f;
         var y2 = cellRect.Bottom - 8f;
 
-        canvas.DrawLine(x, y1, x, y2, gripPaint);
+        canvas.DrawLine(x, y1, x, y2, _columnResizeGripPaint);
     }
 
     private void DrawChevronGlyph(SKCanvas canvas, SKPoint center, SKColor color, float strokeWidth, float size, float rotationDegrees)
     {
-        using var chevronPaint = new SKPaint
-        {
-            Color = color,
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = strokeWidth,
-            StrokeCap = SKStrokeCap.Round,
-            StrokeJoin = SKStrokeJoin.Round
-        };
+        _chevronPaint.Color = color;
+        _chevronPaint.StrokeWidth = strokeWidth;
 
-        using var chevronPath = new SKPath();
-        chevronPath.MoveTo(-size, -size * 0.5f);
-        chevronPath.LineTo(0f, size * 0.5f);
-        chevronPath.LineTo(size, -size * 0.5f);
+        _chevronPath.Reset();
+        _chevronPath.MoveTo(-size, -size * 0.5f);
+        _chevronPath.LineTo(0f, size * 0.5f);
+        _chevronPath.LineTo(size, -size * 0.5f);
 
         var saveCount = canvas.Save();
         canvas.Translate(center.X, center.Y);
         canvas.RotateDegrees(rotationDegrees);
-        canvas.DrawPath(chevronPath, chevronPaint);
+        canvas.DrawPath(_chevronPath, _chevronPaint);
         canvas.RestoreToCount(saveCount);
     }
 
@@ -1459,14 +1463,15 @@ public class GridList : ElementBase
         canvas.DrawRect(bounds, _fillPaint);
 
         var scale = ScaleFactor;
-        using var accentPaint = new SKPaint { Color = GroupHeaderBackColor.Brightness(0.12f).WithAlpha(180), IsAntialias = true, Style = SKPaintStyle.Fill };
-        using var accentBorder = new SKPaint { Color = ForeColor.WithAlpha(28), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = Math.Max(1f, scale) };
+        _groupAccentPaint.Color = GroupHeaderBackColor.Brightness(0.12f).WithAlpha(180);
+        _groupAccentBorderPaint.Color = ForeColor.WithAlpha(28);
+        _groupAccentBorderPaint.StrokeWidth = Math.Max(1f, scale);
         var accentInsetY = Math.Max(3f, 5f * scale);
         var accentWidth = Math.Max(18f, 22f * scale);
         var accentRect = new SKRect(bounds.Left + CellPadding, bounds.Top + accentInsetY, bounds.Left + CellPadding + accentWidth, bounds.Bottom - accentInsetY);
         var accentRadius = Math.Min(accentRect.Width, accentRect.Height) * 0.5f;
-        canvas.DrawRoundRect(accentRect, accentRadius, accentRadius, accentPaint);
-        canvas.DrawRoundRect(accentRect, accentRadius, accentRadius, accentBorder);
+        canvas.DrawRoundRect(accentRect, accentRadius, accentRadius, _groupAccentPaint);
+        canvas.DrawRoundRect(accentRect, accentRadius, accentRadius, _groupAccentBorderPaint);
 
         var chevronCenter = new SKPoint(accentRect.MidX, accentRect.MidY);
         DrawChevronGlyph(canvas, chevronCenter, ForeColor.WithAlpha(220), Math.Max(1.2f, 1.8f * scale), Math.Max(2.8f, 3.6f * scale), -90f + expansion * 90f);
@@ -1555,16 +1560,9 @@ public class GridList : ElementBase
 
         if (AllowRowResize && (_hoveredRowResizeIndex == itemIndex || _isResizingRow && _resizingRowIndex == itemIndex))
         {
-            using var resizePaint = new SKPaint
-            {
-                Color = ColorScheme.Primary.WithAlpha(160),
-                IsAntialias = true,
-                Style = SKPaintStyle.Stroke,
-                StrokeWidth = 1.4f,
-                StrokeCap = SKStrokeCap.Round
-            };
+            _rowResizePaint.Color = ColorScheme.Primary.WithAlpha(160);
             var y = bounds.Bottom - 1f;
-            canvas.DrawLine(bounds.Left + 12f, y, bounds.Right - 12f, y, resizePaint);
+            canvas.DrawLine(bounds.Left + 12f, y, bounds.Right - 12f, y, _rowResizePaint);
         }
 
         if (ShowGridLines)
@@ -1586,48 +1584,26 @@ public class GridList : ElementBase
 
     private void DrawCheckBox(SKCanvas canvas, SKRect rect, CheckState state, bool isSelected)
     {
-        using var checkBack = new SKPaint
-        {
-            Color = state == CheckState.Unchecked ? ColorScheme.Surface : ColorScheme.Primary.WithAlpha(isSelected ? (byte)220 : (byte)180),
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
-        };
+        _checkBoxBackPaint.Color = state == CheckState.Unchecked ? ColorScheme.Surface : ColorScheme.Primary.WithAlpha(isSelected ? (byte)220 : (byte)180);
+        _checkBoxBorderPaint.Color = state == CheckState.Unchecked ? ColorScheme.BorderColor : ColorScheme.Primary;
 
-        using var checkBorder = new SKPaint
-        {
-            Color = state == CheckState.Unchecked ? ColorScheme.BorderColor : ColorScheme.Primary,
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 1.5f
-        };
-
-        canvas.DrawRoundRect(rect, 4f, 4f, checkBack);
-        canvas.DrawRoundRect(rect, 4f, 4f, checkBorder);
+        canvas.DrawRoundRect(rect, 4f, 4f, _checkBoxBackPaint);
+        canvas.DrawRoundRect(rect, 4f, 4f, _checkBoxBorderPaint);
 
         if (state == CheckState.Unchecked)
             return;
 
-        using var checkPaint = new SKPaint
-        {
-            Color = SKColors.White,
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 2f,
-            StrokeCap = SKStrokeCap.Round,
-            StrokeJoin = SKStrokeJoin.Round
-        };
-
         if (state == CheckState.Checked)
         {
-            using var path = new SKPath();
-            path.MoveTo(rect.Left + 3, rect.MidY);
-            path.LineTo(rect.Left + 7, rect.Bottom - 4);
-            path.LineTo(rect.Right - 3, rect.Top + 4);
-            canvas.DrawPath(path, checkPaint);
+            _checkBoxCheckPath.Reset();
+            _checkBoxCheckPath.MoveTo(rect.Left + 3, rect.MidY);
+            _checkBoxCheckPath.LineTo(rect.Left + 7, rect.Bottom - 4);
+            _checkBoxCheckPath.LineTo(rect.Right - 3, rect.Top + 4);
+            canvas.DrawPath(_checkBoxCheckPath, _checkBoxCheckPaint);
         }
         else
         {
-            canvas.DrawLine(rect.Left + 3, rect.MidY, rect.Right - 3, rect.MidY, checkPaint);
+            canvas.DrawLine(rect.Left + 3, rect.MidY, rect.Right - 3, rect.MidY, _checkBoxCheckPaint);
         }
     }
 
@@ -1691,23 +1667,43 @@ public class GridList : ElementBase
         var contentX = location.X - bodyViewport.Left + _horizontalOffset;
         var contentY = location.Y - bodyViewport.Top + _verticalOffset;
 
-        for (var i = 0; i < _layoutEntries.Count; i++)
-        {
-            var entry = _layoutEntries[i];
-            if (contentY < entry.Bounds.Top || contentY > entry.Bounds.Bottom)
-                continue;
+        var entryIndex = FindLayoutEntryIndexAt(contentY);
+        if (entryIndex < 0)
+            return HitInfo.None;
 
-            if (entry.Kind == EntryKind.Header)
-                return HitTestHeader(location, new SKRect(bodyViewport.Left, bodyViewport.Top + entry.Bounds.Top - _verticalOffset, bodyViewport.Left + _bodyViewportWidth, bodyViewport.Top + entry.Bounds.Bottom - _verticalOffset), _horizontalOffset);
+        var entry = _layoutEntries[entryIndex];
+        if (entry.Kind == EntryKind.Header)
+            return HitTestHeader(location, new SKRect(bodyViewport.Left, bodyViewport.Top + entry.Bounds.Top - _verticalOffset, bodyViewport.Left + _bodyViewportWidth, bodyViewport.Top + entry.Bounds.Bottom - _verticalOffset), _horizontalOffset);
 
-            if (entry.Kind == EntryKind.GroupHeader)
-                return HitInfo.ForGroup(entry.GroupKey, entry.GroupText, entry.GroupIndex);
+        if (entry.Kind == EntryKind.GroupHeader)
+            return HitInfo.ForGroup(entry.GroupKey, entry.GroupText, entry.GroupIndex);
 
-            if (entry.Kind == EntryKind.Item)
-                return HitTestItemCell(location, contentX, contentY, entry);
-        }
+        if (entry.Kind == EntryKind.Item)
+            return HitTestItemCell(location, contentX, contentY, entry);
 
         return HitInfo.None;
+    }
+
+    private int FindLayoutEntryIndexAt(float contentY)
+    {
+        // Layout entries are appended in vertical order during layout generation, so a first-match binary search is safe here.
+        var low = 0;
+        var high = _layoutEntries.Count - 1;
+
+        while (low < high)
+        {
+            var mid = low + ((high - low) >> 1);
+            if (_layoutEntries[mid].Bounds.Bottom < contentY)
+                low = mid + 1;
+            else
+                high = mid;
+        }
+
+        if (low < 0 || low >= _layoutEntries.Count)
+            return -1;
+
+        var candidate = _layoutEntries[low];
+        return contentY >= candidate.Bounds.Top && contentY <= candidate.Bounds.Bottom ? low : -1;
     }
 
     private HitInfo HitTestHeader(SKPoint location, SKRect headerRect, float horizontalOffset)

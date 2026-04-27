@@ -84,6 +84,7 @@ public class WindowPageControl : ElementBase
     private bool _hasWindowChromeLayoutContext;
     private int _windowChromeLayoutPageCount = -1;
     private float _tabStripHeight = 44f;
+    private float _verticalTabStripWidth = 44f;
     private float _verticalTabScrollOffset;
     private float _verticalTabScrollableExtent;
     private bool _showTabStripResizer;
@@ -115,6 +116,7 @@ public class WindowPageControl : ElementBase
     private int _transitionToIndex = -1;
     private SKImage? _transitionFromSnapshot;
     private SKImage? _transitionToSnapshot;
+    private SKRect _transitionViewport = SKRect.Empty;
     private readonly SKPaint _transitionPaint;
     internal event EventHandler? TabModeChanged;
 
@@ -165,6 +167,7 @@ public class WindowPageControl : ElementBase
     public WindowPageControl()
     {
         MouseWheel += HandleMouseWheelRouting;
+        ImageAlign = ContentAlignment.MiddleLeft;
 
         _tabBackgroundPaint = new SKPaint
         {
@@ -319,21 +322,36 @@ public class WindowPageControl : ElementBase
     [DefaultValue(44f)]
     public float TabStripHeight
     {
-        get => _tabStripHeight;
+        get => UsesVerticalTabLayout ? _verticalTabStripWidth : _tabStripHeight;
         set
         {
             var clamped = Math.Max(32f, value);
-            if (Math.Abs(_tabStripHeight - clamped) < 0.001f)
+            if (Math.Abs(_tabStripHeight - clamped) < 0.001f && Math.Abs(_verticalTabStripWidth - clamped) < 0.001f)
                 return;
 
             _tabStripHeight = clamped;
-            EnsureSelectedVerticalTabVisible();
-
-            CancelTransitionPreservingSelection();
-            PerformLayout();
-            InvalidateRenderTree();
-            Invalidate();
+            _verticalTabStripWidth = clamped;
+            ApplyTabStripThicknessChange();
         }
+    }
+
+    private void ApplyTabStripThicknessChange()
+    {
+        EnsureSelectedVerticalTabVisible();
+        CancelTransitionPreservingSelection();
+        PerformLayout();
+        InvalidateRenderTree();
+        Invalidate();
+    }
+
+    private void SetVerticalTabStripWidth(float value)
+    {
+        var clamped = Math.Max(VerticalTabMinWidth, value);
+        if (Math.Abs(_verticalTabStripWidth - clamped) < 0.001f)
+            return;
+
+        _verticalTabStripWidth = clamped;
+        ApplyTabStripThicknessChange();
     }
 
     [Category("Layout")]
@@ -663,6 +681,7 @@ public class WindowPageControl : ElementBase
         _transitionFromIndex = -1;
         _transitionToIndex = -1;
         _isTransitionDirty = false;
+        _transitionViewport = SKRect.Empty;
 
         if (commitTargetPage)
             CommitSelectedPageVisibility();
@@ -1006,6 +1025,12 @@ public class WindowPageControl : ElementBase
         }
     }
 
+    protected override void OnImageAlignChanged(EventArgs e)
+    {
+        base.OnImageAlignChanged(e);
+        InvalidateTabChrome();
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
@@ -1190,6 +1215,7 @@ public class WindowPageControl : ElementBase
         _transitionFromIndex = -1;
         _transitionToIndex = -1;
         _isTransitionDirty = false;
+        _transitionViewport = SKRect.Empty;
         CommitSelectedPageVisibility();
         InvalidateRenderTree();
         Invalidate();
@@ -1220,6 +1246,12 @@ public class WindowPageControl : ElementBase
 
         SyncPageBounds(fromPage);
         SyncPageBounds(toPage);
+
+        var viewport = DisplayRectangle;
+        if (viewport.Width <= 0f || viewport.Height <= 0f)
+            return false;
+
+        _transitionViewport = viewport;
 
         var fromSnapshot = fromSnapshotOverride ?? CapturePageSnapshot(fromPage);
         var toSnapshot = CapturePageSnapshot(toPage);
@@ -2089,22 +2121,20 @@ public class WindowPageControl : ElementBase
                     closeButtonRect = OffsetTabRectAlongPrimaryAxis(closeButtonRect, shift);
             }
 
-            if (ShouldDrawTabIcons && page.Image != null)
-            {
-                iconRect = SKRect.Create(
-                    rect.Left + horizontalPadding,
-                    rect.MidY - iconSize / 2f,
-                    iconSize,
-                    iconSize);
-
-                canvas.DrawImage(page.Image, iconRect);
-            }
-
             if (closeButtonRect.Width > 0)
                 DrawTabCloseButton(canvas, closeButtonRect, tabIndex == _hoveredTabCloseIndex, activeTextColor);
 
-            var textRect = WindowPageTabGeometry.CreateTextRect(rect, horizontalPadding, iconRect, iconSpacing,
-                closeButtonRect, closeButtonSpacing + (tabGap > 0f ? tabGap * 0.5f : 0f));
+            var hasTabIcon = ShouldDrawTabIcons && page.Image != null;
+            var tabTrailingReserve = closeButtonRect.Width > 0f ? closeButtonRect.Width + closeButtonSpacing : 0f;
+            var innerVertPad = UsesVerticalTabLayout
+                ? TabVerticalInset * ScaleFactor * 2f
+                : TabVerticalInset * ScaleFactor;
+            SKRect textRect;
+            (iconRect, textRect) = ComputeTabContentRects(rect, page.Text, hasTabIcon,
+                horizontalPadding, innerVertPad, iconSize, iconSpacing, tabTrailingReserve);
+
+            if (hasTabIcon)
+                canvas.DrawImage(page.Image, iconRect);
 
             _tabTextPaint.Color = isSelected ? activeTextColor : inactiveTextColor;
             TextRenderer.DrawText(canvas, page.Text ?? string.Empty, textRect, _tabTextPaint, _tabFont, TextAlign, true, false);
@@ -2132,19 +2162,16 @@ public class WindowPageControl : ElementBase
             var ghostPage = GetPageAt(_dragTabSourceIndex);
             if (ghostPage != null)
             {
-                var ghostIconRect = SKRect.Empty;
-                if (ShouldDrawTabIcons && ghostPage.Image != null)
-                {
-                    ghostIconRect = SKRect.Create(
-                        ghostRect.Left + horizontalPadding,
-                        ghostRect.MidY - iconSize / 2f,
-                        iconSize, iconSize);
-                    canvas.DrawImage(ghostPage.Image, ghostIconRect);
-                }
+                var hasGhostIcon = ShouldDrawTabIcons && ghostPage.Image != null;
+                (var ghostIconRect, var ghostTextRect) = ComputeTabContentRects(
+                    ghostRect, ghostPage.Text, hasGhostIcon,
+                    horizontalPadding, TabVerticalInset * ScaleFactor, iconSize, iconSpacing, 0f);
 
-                var textRect = WindowPageTabGeometry.CreateTextRect(ghostRect, horizontalPadding, ghostIconRect, iconSpacing, SKRect.Empty, 0f);
+                if (hasGhostIcon)
+                    canvas.DrawImage(ghostPage.Image, ghostIconRect);
+
                 _tabTextPaint.Color = activeTextColor;
-                TextRenderer.DrawText(canvas, ghostPage.Text ?? string.Empty, textRect, _tabTextPaint, _tabFont, TextAlign, true, false);
+                TextRenderer.DrawText(canvas, ghostPage.Text ?? string.Empty, ghostTextRect, _tabTextPaint, _tabFont, TextAlign, true, false);
             }
 
             canvas.RestoreToCount(layerSaved);
@@ -2205,25 +2232,19 @@ public class WindowPageControl : ElementBase
 
             _tabTextPaint.Color = GetWindowChromeTextColor(isSelected, isHovered, foreColor);
 
-            if (DrawTabIcons && page.Image != null)
-            {
-                var iconSize = WindowChromeTabIconSize * ScaleFactor;
-                iconRect = SKRect.Create(
-                    rect.Left + WindowChromeTabHorizontalPadding * ScaleFactor,
-                    context.CenterY - iconSize / 2f,
-                    iconSize,
-                    iconSize);
-                canvas.DrawImage(page.Image, iconRect);
-            }
+            var chromePad     = WindowChromeTabHorizontalPadding * ScaleFactor;
+            var chromeIcon    = WindowChromeTabIconSize * ScaleFactor;
+            var chromeSpacing = WindowChromeTabIconSpacing * ScaleFactor;
+            var hasChromeIcon = DrawTabIcons && page.Image != null;
+            var chromeTrailingR = pageIndex == _selectedIndex && _windowChromeCloseButtonRect.Width > 0f
+                ? _windowChromeCloseButtonRect.Width + chromePad : 0f;
 
-            var trailingRect = pageIndex == _selectedIndex ? _windowChromeCloseButtonRect : SKRect.Empty;
-            var textRect = WindowPageTabGeometry.CreateTextRect(
-                rect,
-                WindowChromeTabHorizontalPadding * ScaleFactor,
-                iconRect,
-                WindowChromeTabIconSpacing * ScaleFactor,
-                trailingRect,
-                Math.Max(6f * ScaleFactor, ResolvedTabGap * ScaleFactor * 0.5f));
+            var chromeVertPad = WindowChromeTabCloseButtonInset * ScaleFactor;
+            (iconRect, var textRect) = ComputeTabContentRects(rect, page.Text, hasChromeIcon,
+                chromePad, chromeVertPad, chromeIcon, chromeSpacing, chromeTrailingR);
+
+            if (hasChromeIcon)
+                canvas.DrawImage(page.Image, iconRect);
 
             TextRenderer.DrawText(canvas, page.Text ?? string.Empty, textRect, _tabTextPaint, _tabFont,
                 TextAlign, true, false);
@@ -2349,7 +2370,8 @@ public class WindowPageControl : ElementBase
         PrepareTabFont((DrawTabIcons ? WindowChromeTabFontSizeWithIcon : WindowChromeTabFontSize).Topx(this));
 
         var horizontalPadding = WindowChromeTabHorizontalPadding * ScaleFactor;
-        var iconAllowance = (WindowChromeTabIconSize + WindowChromeTabIconSpacing) * ScaleFactor;
+        var chromeIconSize    = WindowChromeTabIconSize    * ScaleFactor;
+        var chromeIconSpacing = WindowChromeTabIconSpacing * ScaleFactor;
         var closeButtonAllowance = TabCloseButton ? (WindowChromeTabCloseButtonSize + WindowChromeTabIconSpacing) * ScaleFactor : 0f;
         var newTabButtonSize = 24f * ScaleFactor;
         var newTabButtonGap = Math.Max(ResolvedTabGap * ScaleFactor, newTabButtonSize / 2f);
@@ -2366,12 +2388,14 @@ public class WindowPageControl : ElementBase
                 page,
                 _tabFont,
                 horizontalPadding,
-                iconAllowance,
+                chromeIconSize,
+                chromeIconSpacing,
                 closeButtonAllowance,
                 0f,
                 maxTabWidth,
                 DrawTabIcons,
-                TabCloseButton);
+                TabCloseButton,
+                ImageAlign);
 
             _windowChromeTabWidthBuffer.Add(desiredWidth);
         }
@@ -2384,12 +2408,46 @@ public class WindowPageControl : ElementBase
             availableWidth,
             ResolvedTabGap * ScaleFactor,
             maxTabWidth,
-            true,
+            false,
             _windowChromeTabRects);
 
         _lastWindowChromeLayoutContext = context;
         _hasWindowChromeLayoutContext = true;
         _windowChromeLayoutPageCount = Count;
+    }
+
+    internal float MeasureWindowChromeRequiredHeight()
+    {
+        if (TabMode != WindowPageTabMode.WindowChrome || Count <= 0)
+            return 0f;
+
+        PrepareTabFont((DrawTabIcons ? WindowChromeTabFontSizeWithIcon : WindowChromeTabFontSize).Topx(this));
+        var closeButtonSize = TabCloseButton ? WindowChromeTabCloseButtonSize * ScaleFactor : 0f;
+        var verticalPadding = WindowChromeTabCloseButtonInset * ScaleFactor;
+        var iconSize = WindowChromeTabIconSize * ScaleFactor;
+        var iconSpacing = WindowChromeTabIconSpacing * ScaleFactor;
+        var neededHeight = 0f;
+
+        for (var pageIndex = 0; pageIndex < Count; pageIndex++)
+        {
+            var page = GetPageAt(pageIndex);
+            if (page == null)
+                continue;
+
+            neededHeight = Math.Max(
+                neededHeight,
+                MeasureDesiredTabHeight(
+                    page,
+                    DrawTabIcons,
+                    verticalPadding,
+                    iconSize,
+                    iconSpacing,
+                    closeButtonSize,
+                    0f,
+                    float.MaxValue));
+        }
+
+        return MathF.Ceiling(neededHeight);
     }
 
     private void UpdateWindowChromeAuxiliaryRects()
@@ -2507,7 +2565,8 @@ public class WindowPageControl : ElementBase
         var isLightTitle = titleColor != SKColor.Empty && !titleColor.IsDark();
         var sf = ScaleFactor;
 
-        var selectedBg = (isDark ? ColorScheme.SurfaceContainerHigh : ColorScheme.Surface).WithAlpha(150);
+        var selectedBg = (isDark ? ColorScheme.SurfaceContainerHigh : ColorScheme.Surface)
+            .WithAlpha(titleColor == SKColor.Empty ? (byte)255 : (byte)150);
         var hoverBg = foreColor.WithAlpha(isLightTitle ? (byte)14 : (byte)18);
         var backgroundColor = isSelected ? selectedBg : hoverBg;
         var borderColor = isSelected
@@ -3134,14 +3193,10 @@ public class WindowPageControl : ElementBase
             canvas.DrawCircle(midX, midY, circleR, _tabBackgroundPaint);
         }
 
-        using var xPaint = new SKPaint
-        {
-            Color = foreground.WithAlpha(isHovered ? (byte)220 : (byte)150),
-            StrokeWidth = MathF.Max(1f, MathF.Round(1.5f * sf)),
-            StrokeCap = SKStrokeCap.Round,
-            IsAntialias = true,
-            IsStroke = true
-        };
+        var xPaint = PrepareTabGlyphPaint(
+            foreground.WithAlpha(isHovered ? (byte)220 : (byte)150),
+            MathF.Max(1f, MathF.Round(1.5f * sf)),
+            isAntialias: true);
         var size = MathF.Round(3f * sf);
         canvas.DrawLine(midX - size, midY - size, midX + size, midY + size, xPaint);
         canvas.DrawLine(midX + size, midY - size, midX - size, midY + size, xPaint);
@@ -3224,11 +3279,41 @@ public class WindowPageControl : ElementBase
 
     private float GetTabHeaderThickness()
     {
-        var minimumThickness = TabStripHeight * ScaleFactor;
-        if (!UsesVerticalTabLayout || Count <= 0)
+        var minimumThickness = (UsesVerticalTabLayout ? _verticalTabStripWidth : _tabStripHeight) * ScaleFactor;
+
+        if (!UsesVerticalTabLayout)
+            return MeasureHorizontalTabHeaderThickness(minimumThickness);
+
+        if (Count <= 0)
             return minimumThickness;
 
         return MeasureVerticalTabHeaderThickness(minimumThickness);
+    }
+
+    private float MeasureHorizontalTabHeaderThickness(float minimumThickness)
+    {
+        if (!ShouldDrawTabIcons)
+            return minimumThickness;
+
+        var isHorizontalIcon = ImageAlign is
+            ContentAlignment.MiddleLeft or ContentAlignment.MiddleRight;
+        if (isHorizontalIcon)
+            return minimumThickness;
+
+        PrepareTabFont();
+        var iconSize    = TabIconSize    * ScaleFactor;
+        var iconSpacing = TabIconSpacing * ScaleFactor;
+        var vertInset   = TabVerticalInset * ScaleFactor;
+
+        // blockH = iconSize + iconSpacing + textH via MeasureContentBlockSize (text=null → just font metrics)
+        var (_, blockH) = WindowPageTabGeometry.MeasureContentBlockSize(
+            null, true, _tabFont, iconSize, iconSpacing, ContentAlignment.TopCenter);
+
+        // Header height = blockH + 4*vertInset
+        // (LayoutTabs will strip 2*vertInset at strip level → tab rect height = blockH + 2*vertInset)
+        // (ComputeTabContentRects will strip 1*vertInset per side → available area = blockH) ✓
+        var needed = blockH + 4f * vertInset;
+        return Math.Max(minimumThickness, MathF.Ceiling(needed));
     }
 
     private float GetTabStripResizerThickness()
@@ -3244,7 +3329,8 @@ public class WindowPageControl : ElementBase
         var horizontalPadding = TabHorizontalPadding * ScaleFactor;
         var minWidth = Math.Max(VerticalTabMinWidth * ScaleFactor, minimumThickness);
         var maxWidth = Math.Max(VerticalTabMaxWidth * ScaleFactor, minWidth);
-        var iconAllowance = (TabIconSize + TabIconSpacing) * ScaleFactor;
+        var iconSize    = TabIconSize    * ScaleFactor;
+        var iconSpacing = TabIconSpacing  * ScaleFactor;
         var closeButtonSize = TabCloseButtonSize * ScaleFactor;
         var closeButtonSpacing = TabCloseButtonSpacing * ScaleFactor;
         var closeButtonAllowance = ShouldDrawTabCloseButtons ? closeButtonSize + closeButtonSpacing : 0f;
@@ -3260,12 +3346,14 @@ public class WindowPageControl : ElementBase
                 page,
                 _tabFont,
                 horizontalPadding,
-                iconAllowance,
+                iconSize,
+                iconSpacing,
                 closeButtonAllowance,
                 minWidth,
                 maxWidth,
                 ShouldDrawTabIcons,
-                ShouldDrawTabCloseButtons);
+                ShouldDrawTabCloseButtons,
+                ImageAlign);
 
             requiredThickness = Math.Max(requiredThickness, desiredWidth + axisPadding * 2f);
         }
@@ -3366,7 +3454,8 @@ public class WindowPageControl : ElementBase
         var verticalInset = TabVerticalInset * ScaleFactor;
         var minWidth = TabMinWidth * ScaleFactor;
         var maxWidth = TabMaxWidth * ScaleFactor;
-        var iconAllowance = (TabIconSize + TabIconSpacing) * ScaleFactor;
+        var iconSize    = TabIconSize    * ScaleFactor;
+        var iconSpacing = TabIconSpacing  * ScaleFactor;
         var closeButtonSize = TabCloseButtonSize * ScaleFactor;
         var closeButtonSpacing = TabCloseButtonSpacing * ScaleFactor;
         var closeButtonAllowance = ShouldDrawTabCloseButtons ? closeButtonSize + closeButtonSpacing : 0f;
@@ -3378,7 +3467,9 @@ public class WindowPageControl : ElementBase
             var axisPadding = Math.Max(4f * ScaleFactor, verticalInset);
             var tabWidth = Math.Max(0f, headerRect.Width - (axisPadding * 2f));
             var contentHeight = Math.Max(0f, headerRect.Height - (axisPadding * 2f) - newTabReserve);
-            var tabHeight = Math.Min(GetVerticalTabHeight(iconAllowance, closeButtonAllowance), VerticalTabMaxHeight * ScaleFactor);
+            var verticalPadding = verticalInset * 2f;
+            var minHeight = VerticalTabMinHeight * ScaleFactor;
+            var maxHeight = VerticalTabMaxHeight * ScaleFactor;
 
             for (var pageIndex = 0; pageIndex < pageCount; pageIndex++)
             {
@@ -3386,7 +3477,15 @@ public class WindowPageControl : ElementBase
                 if (page == null)
                     continue;
 
-                _tabWidthBuffer.Add(tabHeight);
+                _tabWidthBuffer.Add(MeasureDesiredTabHeight(
+                    page,
+                    ShouldDrawTabIcons,
+                    verticalPadding,
+                    iconSize,
+                    iconSpacing,
+                    closeButtonSize,
+                    minHeight,
+                    maxHeight));
             }
 
             var totalTabHeight = 0f;
@@ -3402,10 +3501,17 @@ public class WindowPageControl : ElementBase
 
             _tabRects.Clear();
             var currentY = startY;
-            for (var i = 0; i < _tabWidthBuffer.Count; i++)
+            for (var pageIndex = 0; pageIndex < pageCount; pageIndex++)
             {
-                _tabRects.Add(SKRect.Create(headerRect.Left + axisPadding, currentY, tabWidth, _tabWidthBuffer[i]));
-                currentY += _tabWidthBuffer[i] + gap;
+                var page = GetPageAt(pageIndex);
+                if (page == null)
+                    continue;
+
+                var bufferIndex = _tabRects.Count;
+                var slotHeight = _tabWidthBuffer[bufferIndex];
+                var slotRect = SKRect.Create(headerRect.Left + axisPadding, currentY, tabWidth, slotHeight);
+                _tabRects.Add(slotRect);
+                currentY += slotHeight + gap;
             }
 
             if (_tabRects.Count > 0)
@@ -3440,8 +3546,8 @@ public class WindowPageControl : ElementBase
                 continue;
 
             var width = WindowPageTabGeometry.MeasureDesiredTabWidth(page, _tabFont, horizontalPadding,
-                iconAllowance, closeButtonAllowance, minWidth, maxWidth,
-                ShouldDrawTabIcons, ShouldDrawTabCloseButtons);
+                iconSize, iconSpacing, closeButtonAllowance, minWidth, maxWidth,
+                ShouldDrawTabIcons, ShouldDrawTabCloseButtons, ImageAlign);
             _tabWidthBuffer.Add(width);
         }
 
@@ -3477,14 +3583,32 @@ public class WindowPageControl : ElementBase
         }
     }
 
-    private float GetVerticalTabHeight(float iconAllowance, float closeButtonAllowance)
+    private float GetVerticalTabHeight(float iconSize, float iconSpacing, float closeButtonAllowance)
     {
-        var iconWidth = Math.Max(0f, iconAllowance - (TabIconSpacing * ScaleFactor));
-        var closeButtonWidth = Math.Max(0f, closeButtonAllowance - (TabCloseButtonSpacing * ScaleFactor));
-        var textHeight = Math.Max(1f, _tabFont.Metrics.Descent - _tabFont.Metrics.Ascent);
-        var contentHeight = Math.Max(textHeight, Math.Max(iconWidth, closeButtonWidth));
-        var minimumHeight = VerticalTabMinHeight * ScaleFactor;
-        return Math.Max(minimumHeight, MathF.Ceiling(contentHeight + (TabVerticalInset * ScaleFactor * 4f)));
+        var closeButtonW = Math.Max(0f, closeButtonAllowance - (TabCloseButtonSpacing * ScaleFactor));
+
+        var (_, blockH) = WindowPageTabGeometry.MeasureContentBlockSize(
+            null, ShouldDrawTabIcons, _tabFont, iconSize, iconSpacing, ImageAlign);
+
+        var contentH = Math.Max(blockH, closeButtonW);
+        return Math.Max(VerticalTabMinHeight * ScaleFactor, MathF.Ceiling(contentH + TabVerticalInset * ScaleFactor * 4f));
+    }
+
+    private float MeasureDesiredTabHeight(ElementBase page, bool includeIcon, float verticalPadding,
+        float iconSize, float iconSpacing, float trailingButtonSize, float minHeight, float maxHeight)
+    {
+        var hasIcon = includeIcon && page.Image != null;
+        return WindowPageTabGeometry.MeasureDesiredTabHeight(
+            page.Text,
+            hasIcon,
+            _tabFont,
+            verticalPadding,
+            iconSize,
+            iconSpacing,
+            trailingButtonSize,
+            minHeight,
+            maxHeight,
+            ImageAlign);
     }
 
     private bool TryBeginTabStripResize(SKPoint point)
@@ -3495,7 +3619,7 @@ public class WindowPageControl : ElementBase
         _isResizingTabStrip = true;
         _hoveredTabStripResizer = true;
         _tabStripResizeOrigin = point.X;
-        _tabStripResizeStartHeight = _tabStripHeight;
+        _tabStripResizeStartHeight = _verticalTabStripWidth;
         _tabStripResizerAnimation.SetProgress(1d);
         Cursor = GetTabStripResizerCursor();
         GetParentWindow()?.UpdateCursor(this);
@@ -3518,8 +3642,8 @@ public class WindowPageControl : ElementBase
             VerticalTabMinWidth,
             GetMaximumVerticalTabStripWidth());
 
-        if (Math.Abs(nextThickness - _tabStripHeight) >= 0.25f)
-            TabStripHeight = nextThickness;
+        if (Math.Abs(nextThickness - _verticalTabStripWidth) >= 0.25f)
+            SetVerticalTabStripWidth(nextThickness);
 
         Cursor = GetTabStripResizerCursor();
     }
@@ -3540,36 +3664,31 @@ public class WindowPageControl : ElementBase
             return;
         }
 
-        PrepareTabFont();
-
         var headerRect = GetTabHeaderRect();
         if (headerRect.Width <= 0f || headerRect.Height <= 0f)
             return;
 
         var gap = ResolvedTabGap * ScaleFactor;
         var axisPadding = Math.Max(4f * ScaleFactor, TabVerticalInset * ScaleFactor);
-        var iconAllowance = (TabIconSize + TabIconSpacing) * ScaleFactor;
-        var closeButtonAllowance = ShouldDrawTabCloseButtons
-            ? (TabCloseButtonSize + TabCloseButtonSpacing) * ScaleFactor
-            : 0f;
         var newTabReserve = ShouldDrawNewTabButton ? (NewTabButtonSize * ScaleFactor) + gap : 0f;
         var viewportHeight = Math.Max(0f, headerRect.Height - (axisPadding * 2f) - newTabReserve);
-        var tabHeight = Math.Min(GetVerticalTabHeight(iconAllowance, closeButtonAllowance), VerticalTabMaxHeight * ScaleFactor);
-        var totalTabHeight = (Count * tabHeight) + (Math.Max(0, Count - 1) * gap);
 
-        UpdateVerticalTabScrollMetrics(totalTabHeight, viewportHeight);
+        UpdateTabRects();
         if (_verticalTabScrollableExtent <= 0.01f)
             return;
 
-        var slotHeight = tabHeight + gap;
-        var selectedTop = _selectedIndex * slotHeight;
-        var selectedBottom = selectedTop + tabHeight;
+        if (_selectedIndex >= _tabRects.Count)
+            return;
+
+        var viewportTop = headerRect.Top + axisPadding;
+        var viewportBottom = viewportTop + viewportHeight;
+        var selectedRect = _tabRects[_selectedIndex];
         var nextOffset = _verticalTabScrollOffset;
 
-        if (selectedTop < nextOffset)
-            nextOffset = selectedTop;
-        else if (selectedBottom > nextOffset + viewportHeight)
-            nextOffset = selectedBottom - viewportHeight;
+        if (selectedRect.Top < viewportTop)
+            nextOffset -= viewportTop - selectedRect.Top;
+        else if (selectedRect.Bottom > viewportBottom)
+            nextOffset += selectedRect.Bottom - viewportBottom;
 
         _verticalTabScrollOffset = Math.Clamp(nextOffset, 0f, _verticalTabScrollableExtent);
     }
@@ -3630,6 +3749,238 @@ public class WindowPageControl : ElementBase
         _tabStripResizeStartHeight = 0f;
         _tabStripResizerAnimation.SetProgress(0d);
         Cursor = Cursors.Default;
+    }
+
+    private (SKRect iconRect, SKRect textRect) ComputeTabContentRects(
+        SKRect tabRect, string? text, bool hasIcon,
+        float horizontalPadding, float verticalPadding,
+        float iconSize, float iconSpacing, float trailingReserve)
+    {
+        var availLeft   = tabRect.Left   + horizontalPadding;
+        var availRight  = Math.Max(tabRect.Left + horizontalPadding,
+                                   tabRect.Right - horizontalPadding - trailingReserve);
+        var availTop    = tabRect.Top    + verticalPadding;
+        var availBottom = Math.Max(tabRect.Top + verticalPadding,
+                                   tabRect.Bottom - verticalPadding);
+        var hasText = !string.IsNullOrEmpty(text);
+        var metrics = _tabFont.Metrics;
+        var textH = Math.Max(1f, metrics.Descent - metrics.Ascent);
+
+        if (!hasIcon)
+        {
+            if (!hasText)
+                return (SKRect.Empty, SKRect.Empty);
+
+            var textOnly = new SKRect(availLeft, availTop, availRight, availBottom);
+            return (SKRect.Empty, WindowPageTabGeometry.EnsureEllipsisTextRect(textOnly));
+        }
+
+        if (!hasText)
+        {
+            var iconOnly = CreateAlignedRect(ImageAlign, availLeft, availRight, availTop, availBottom, iconSize, iconSize);
+            return (iconOnly, SKRect.Empty);
+        }
+
+        var imageHorizontalGroup = GetAlignmentHorizontalGroup(ImageAlign);
+        var textHorizontalGroup = GetAlignmentHorizontalGroup(TextAlign);
+        var imageVerticalGroup = GetAlignmentVerticalGroup(ImageAlign);
+        var textVerticalGroup = GetAlignmentVerticalGroup(TextAlign);
+
+        var splitVertically = imageVerticalGroup != textVerticalGroup
+            ? true
+            : imageHorizontalGroup != textHorizontalGroup
+                ? false
+                : ImageAlign is not (ContentAlignment.MiddleLeft or ContentAlignment.MiddleRight);
+
+        return splitVertically
+            ? ComputeVerticalTabContentRects(availLeft, availRight, availTop, availBottom, iconSize, iconSpacing,
+                textH, imageHorizontalGroup, imageVerticalGroup, textVerticalGroup)
+            : ComputeHorizontalTabContentRects(availLeft, availRight, availTop, availBottom, iconSize, iconSpacing,
+                imageHorizontalGroup, textHorizontalGroup);
+    }
+
+    private (SKRect iconRect, SKRect textRect) ComputeHorizontalTabContentRects(
+        float left, float right, float top, float bottom,
+        float iconSize, float iconSpacing,
+        int imageHorizontalGroup, int textHorizontalGroup)
+    {
+        var availableWidth = Math.Max(0f, right - left);
+        var iconWidth = Math.Min(iconSize, availableWidth);
+        var remainingWidth = Math.Max(0f, availableWidth - iconWidth);
+        var spacing = ResolveInterItemSpacing(remainingWidth, iconSpacing);
+        var textWidth = Math.Max(0f, remainingWidth - spacing);
+        var iconFirst = ResolvePrimaryOrder(imageHorizontalGroup, textHorizontalGroup);
+
+        float iconSlotLeft;
+        float iconSlotRight;
+        SKRect textRect;
+
+        if (iconFirst)
+        {
+            iconSlotLeft = left;
+            iconSlotRight = left + iconWidth;
+            textRect = new SKRect(
+                Math.Min(right, iconSlotRight + spacing),
+                top,
+                right,
+                bottom);
+        }
+        else
+        {
+            iconSlotLeft = Math.Max(left, right - iconWidth);
+            iconSlotRight = right;
+            textRect = new SKRect(
+                left,
+                top,
+                Math.Max(left, iconSlotLeft - spacing),
+                bottom);
+        }
+
+        var iconRect = CreateAlignedRect(ImageAlign, iconSlotLeft, iconSlotRight, top, bottom, iconSize, iconSize);
+        return (iconRect, WindowPageTabGeometry.EnsureEllipsisTextRect(textRect));
+    }
+
+    private (SKRect iconRect, SKRect textRect) ComputeVerticalTabContentRects(
+        float left, float right, float top, float bottom,
+        float iconSize, float iconSpacing, float textHeight,
+        int imageHorizontalGroup, int imageVerticalGroup, int textVerticalGroup)
+    {
+        var availableHeight = Math.Max(0f, bottom - top);
+        var iconHeight = Math.Min(iconSize, availableHeight);
+        var remainingHeight = Math.Max(0f, availableHeight - iconHeight);
+        var spacing = ResolveInterItemSpacing(remainingHeight, iconSpacing);
+        var iconFirst = ResolvePrimaryOrder(imageVerticalGroup, textVerticalGroup);
+
+        float iconSlotTop;
+        float iconSlotBottom;
+        SKRect textRect;
+
+        if (iconFirst)
+        {
+            iconSlotTop = top;
+            iconSlotBottom = top + iconHeight;
+            textRect = new SKRect(
+                left,
+                Math.Min(bottom, iconSlotBottom + spacing),
+                right,
+                bottom);
+        }
+        else
+        {
+            iconSlotTop = Math.Max(top, bottom - iconHeight);
+            iconSlotBottom = bottom;
+            textRect = new SKRect(
+                left,
+                top,
+                right,
+                Math.Max(top, iconSlotTop - spacing));
+        }
+
+        if (textRect.Height < textHeight && availableHeight > iconHeight)
+        {
+            var adjustedSpacing = Math.Max(0f, availableHeight - iconHeight - textHeight);
+            if (iconFirst)
+            {
+                textRect = new SKRect(left, Math.Min(bottom, iconSlotBottom + adjustedSpacing), right, bottom);
+            }
+            else
+            {
+                textRect = new SKRect(left, top, right, Math.Max(top, iconSlotTop - adjustedSpacing));
+            }
+        }
+
+        var iconAlign = imageHorizontalGroup switch
+        {
+            < 0 when imageVerticalGroup < 0 => ContentAlignment.TopLeft,
+            < 0 when imageVerticalGroup > 0 => ContentAlignment.BottomLeft,
+            > 0 when imageVerticalGroup < 0 => ContentAlignment.TopRight,
+            > 0 when imageVerticalGroup > 0 => ContentAlignment.BottomRight,
+            < 0 => ContentAlignment.MiddleLeft,
+            > 0 => ContentAlignment.MiddleRight,
+            _ when imageVerticalGroup < 0 => ContentAlignment.TopCenter,
+            _ when imageVerticalGroup > 0 => ContentAlignment.BottomCenter,
+            _ => ContentAlignment.MiddleCenter,
+        };
+
+        var iconRect = CreateAlignedRect(iconAlign, left, right, iconSlotTop, iconSlotBottom, iconSize, iconSize);
+        return (iconRect, WindowPageTabGeometry.EnsureEllipsisTextRect(textRect));
+    }
+
+    private static bool ResolvePrimaryOrder(int imageGroup, int textGroup)
+    {
+        if (imageGroup < textGroup)
+            return true;
+
+        if (imageGroup > textGroup)
+            return false;
+
+        return imageGroup != 1;
+    }
+
+    private static float ResolveInterItemSpacing(float remainingSpace, float desiredSpacing)
+    {
+        if (remainingSpace <= 1f)
+            return 0f;
+
+        return Math.Min(desiredSpacing, remainingSpace - 1f);
+    }
+
+    private static SKRect CreateAlignedRect(ContentAlignment align, float left, float right, float top, float bottom, float width, float height)
+    {
+        var availableWidth = Math.Max(0f, right - left);
+        var availableHeight = Math.Max(0f, bottom - top);
+        var clampedWidth = Math.Clamp(width, 0f, availableWidth);
+        var clampedHeight = Math.Clamp(height, 0f, availableHeight);
+        var alignedLeft = Math.Clamp(
+            AlignH(align, left, right, clampedWidth),
+            left,
+            Math.Max(left, right - clampedWidth));
+        var alignedTop = Math.Clamp(
+            AlignV(align, top, bottom, clampedHeight),
+            top,
+            Math.Max(top, bottom - clampedHeight));
+        return SKRect.Create(alignedLeft, alignedTop, clampedWidth, clampedHeight);
+    }
+
+    private static int GetAlignmentHorizontalGroup(ContentAlignment alignment)
+    {
+        return alignment switch
+        {
+            ContentAlignment.TopLeft or ContentAlignment.MiddleLeft or ContentAlignment.BottomLeft => -1,
+            ContentAlignment.TopRight or ContentAlignment.MiddleRight or ContentAlignment.BottomRight => 1,
+            _ => 0,
+        };
+    }
+
+    private static int GetAlignmentVerticalGroup(ContentAlignment alignment)
+    {
+        return alignment switch
+        {
+            ContentAlignment.TopLeft or ContentAlignment.TopCenter or ContentAlignment.TopRight => -1,
+            ContentAlignment.BottomLeft or ContentAlignment.BottomCenter or ContentAlignment.BottomRight => 1,
+            _ => 0,
+        };
+    }
+
+
+    private static float AlignH(ContentAlignment align, float left, float right, float contentW)
+    {
+        return align switch
+        {
+            ContentAlignment.TopLeft    or ContentAlignment.MiddleLeft    or ContentAlignment.BottomLeft    => left,
+            ContentAlignment.TopRight   or ContentAlignment.MiddleRight   or ContentAlignment.BottomRight   => right - contentW,
+            _ => left + (right - left - contentW) * 0.5f,
+        };
+    }
+
+    private static float AlignV(ContentAlignment align, float top, float bottom, float contentH)
+    {
+        return align switch
+        {
+            ContentAlignment.TopLeft    or ContentAlignment.TopCenter    or ContentAlignment.TopRight    => top,
+            ContentAlignment.BottomLeft or ContentAlignment.BottomCenter or ContentAlignment.BottomRight => bottom - contentH,
+            _ => top + (bottom - top - contentH) * 0.5f,
+        };
     }
 
     private float ComputeTabStartX(SKRect headerRect, float horizontalPadding, float newTabReserve, float contentWidth, float gap)
@@ -3723,6 +4074,8 @@ public class WindowPageControl : ElementBase
     private void InvalidateTabChrome()
     {
         InvalidateWindowChromeLayout();
+        if (GetParentWindow() is Window hostWindow)
+            hostWindow.RefreshWindowChromeTabsHostLayout();
         InvalidateRenderTree();
         Invalidate();
     }
@@ -3737,6 +4090,9 @@ public class WindowPageControl : ElementBase
 
     private SKRect GetTransitionViewport()
     {
+        if (_transitionViewport.Width > 0f && _transitionViewport.Height > 0f)
+            return _transitionViewport;
+
         var selectedPage = GetPageAt(_selectedIndex) ?? GetPageAt(_transitionFromIndex) ?? GetPageAt(_transitionToIndex);
         if (selectedPage != null)
         {
@@ -3774,6 +4130,8 @@ public class WindowPageControl : ElementBase
             _transitionToSnapshot?.Dispose();
             _transitionToSnapshot = null;
         }
+
+        _transitionViewport = SKRect.Empty;
     }
 
     private void FinalizeCompletedTransitionIfPending()
@@ -3786,6 +4144,7 @@ public class WindowPageControl : ElementBase
         _transitionFromIndex = -1;
         _transitionToIndex = -1;
         _isTransitionDirty = false;
+        _transitionViewport = SKRect.Empty;
         InvalidateRenderTree();
     }
 

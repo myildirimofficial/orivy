@@ -13,7 +13,7 @@ namespace Orivy.Controls;
 public partial class WindowBase
 {
     private readonly object _rendererSync = new();
-    private bool _showPerfOverlay = true;
+    private bool _showPerfOverlay;
     private bool _softwareUpdateQueued;
     private Timer? _idleMaintenanceTimer;
     private long _lastRenderMaintenanceTick;
@@ -55,7 +55,8 @@ public partial class WindowBase
 
     /// <summary>
     ///     Maximum interval (ms) between maintenance passes while the window is continuously repainting.
-    ///     Set to 0 (or less) to disable active maintenance and rely on idle only.
+    ///     Keep this on at a moderate cadence so long-running hover, transition, and toast sessions do not retain
+    ///     progressively larger renderer and Skia caches until the UI finally goes idle.
     /// </summary>
     public static int ActiveRenderMaintenanceIntervalMs { get; set; } = 8000;
 

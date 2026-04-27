@@ -1127,7 +1127,7 @@ internal partial class MainWindow
         this.Width = 1100;
         this.Height = 650;
         this.DwmMargin = 1000;
-        this.Padding = new(10);
+        //this.Padding = new(10);
         this.WindowThemeType = WindowThemeType.Tabbed;
         RefreshWindowThemeMenuChecks();
         this.ContextMenuStrip = this.extendMenu;
@@ -1711,7 +1711,7 @@ internal partial class MainWindow
         {
             Name       = "embeddedTabToolbar",
             Dock       = DockStyle.Top,
-            Height     = 402,
+            Height     = 564,
             Margin     = new Thickness(0, 0, 0, 16),
             Padding    = new Thickness(16),
             Radius     = new Radius(16),
@@ -1861,6 +1861,60 @@ internal partial class MainWindow
             Border    = new Thickness(0),
         };
 
+        // ── Row 5 label ───────────────────────────────────────────────────────
+        var iconAlignmentLabel = new Element
+        {
+            Text      = "Icon Alignment",
+            Dock      = DockStyle.Top,
+            Height    = 22,
+            Margin    = new Thickness(0, 0, 0, 6),
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+            ForeColor = ColorScheme.ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)180 : (byte)160),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
+        };
+
+        // ── Row 5: icon alignment buttons ─────────────────────────────────────
+        var embeddedIconAlignButtons = new Container
+        {
+            Name      = "embeddedIconAlignButtons",
+            Dock      = DockStyle.Top,
+            Height    = 124,
+            Margin    = new Thickness(0, 0, 0, 10),
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+        };
+
+        var embeddedIconAlignTopButtons = new Container
+        {
+            Name      = "embeddedIconAlignTopButtons",
+            Dock      = DockStyle.Top,
+            Height    = 36,
+            Margin    = new Thickness(0, 0, 0, 8),
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+        };
+
+        var embeddedIconAlignMiddleButtons = new Container
+        {
+            Name      = "embeddedIconAlignMiddleButtons",
+            Dock      = DockStyle.Top,
+            Height    = 36,
+            Margin    = new Thickness(0, 0, 0, 8),
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+        };
+
+        var embeddedIconAlignBottomButtons = new Container
+        {
+            Name      = "embeddedIconAlignBottomButtons",
+            Dock      = DockStyle.Top,
+            Height    = 36,
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+        };
+
         // ── Design mode buttons ───────────────────────────────────────────────
         Button MakeToolButton(string name, string text) => new Button
         {
@@ -1914,6 +1968,7 @@ internal partial class MainWindow
         var textAlignBottomRightButton  = MakeTextAlignButton("textAlignBottomRightButton",  "Bottom Right");
         var textAlignButtons = new[]
         {
+
             textAlignTopLeftButton,
             textAlignTopCenterButton,
             textAlignTopRightButton,
@@ -1923,6 +1978,28 @@ internal partial class MainWindow
             textAlignBottomLeftButton,
             textAlignBottomCenterButton,
             textAlignBottomRightButton,
+        };
+
+        var iconAlignTopLeftButton      = MakeTextAlignButton("iconAlignTopLeftButton",      "Top Left");
+        var iconAlignTopCenterButton    = MakeTextAlignButton("iconAlignTopCenterButton",    "Top Center");
+        var iconAlignTopRightButton     = MakeTextAlignButton("iconAlignTopRightButton",     "Top Right");
+        var iconAlignMiddleLeftButton   = MakeTextAlignButton("iconAlignMiddleLeftButton",   "Middle Left");
+        var iconAlignMiddleCenterButton = MakeTextAlignButton("iconAlignMiddleCenterButton", "Middle Center");
+        var iconAlignMiddleRightButton  = MakeTextAlignButton("iconAlignMiddleRightButton",  "Middle Right");
+        var iconAlignBottomLeftButton   = MakeTextAlignButton("iconAlignBottomLeftButton",   "Bottom Left");
+        var iconAlignBottomCenterButton = MakeTextAlignButton("iconAlignBottomCenterButton", "Bottom Center");
+        var iconAlignBottomRightButton  = MakeTextAlignButton("iconAlignBottomRightButton",  "Bottom Right");
+        var iconAlignButtons = new[]
+        {
+            iconAlignTopLeftButton,
+            iconAlignTopCenterButton,
+            iconAlignTopRightButton,
+            iconAlignMiddleLeftButton,
+            iconAlignMiddleCenterButton,
+            iconAlignMiddleRightButton,
+            iconAlignBottomLeftButton,
+            iconAlignBottomCenterButton,
+            iconAlignBottomRightButton,
         };
 
         // ── Helper: visual active/inactive state for tool buttons ─────────────
@@ -2035,6 +2112,32 @@ internal partial class MainWindow
             SetButtonActive(activeButton, true);
         }
 
+        // ── Apply icon alignment ──────────────────────────────────────────────
+        void ApplyEmbeddedIconAlign(ContentAlignment align)
+        {
+            embeddedPageControl.ImageAlign = align;
+            windowPageControl.ImageAlign   = align;
+
+            for (var buttonIndex = 0; buttonIndex < iconAlignButtons.Length; buttonIndex++)
+                SetButtonActive(iconAlignButtons[buttonIndex], false);
+
+            var activeButton = align switch
+            {
+                ContentAlignment.TopLeft     => iconAlignTopLeftButton,
+                ContentAlignment.TopCenter   => iconAlignTopCenterButton,
+                ContentAlignment.TopRight    => iconAlignTopRightButton,
+                ContentAlignment.MiddleLeft  => iconAlignMiddleLeftButton,
+                ContentAlignment.MiddleCenter => iconAlignMiddleCenterButton,
+                ContentAlignment.MiddleRight  => iconAlignMiddleRightButton,
+                ContentAlignment.BottomLeft   => iconAlignBottomLeftButton,
+                ContentAlignment.BottomCenter => iconAlignBottomCenterButton,
+                ContentAlignment.BottomRight  => iconAlignBottomRightButton,
+                _                             => iconAlignMiddleLeftButton,
+            };
+
+            SetButtonActive(activeButton, true);
+        }
+
         roundedCompactModeButton.Click += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.RoundedCompact);
         rectangleModeButton.Click      += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Rectangle);
         roundedModeButton.Click        += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Rounded);
@@ -2061,6 +2164,16 @@ internal partial class MainWindow
         textAlignBottomLeftButton.Click   += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.BottomLeft);
         textAlignBottomCenterButton.Click += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.BottomCenter);
         textAlignBottomRightButton.Click  += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.BottomRight);
+
+        iconAlignTopLeftButton.Click      += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.TopLeft);
+        iconAlignTopCenterButton.Click    += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.TopCenter);
+        iconAlignTopRightButton.Click     += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.TopRight);
+        iconAlignMiddleLeftButton.Click   += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.MiddleLeft);
+        iconAlignMiddleCenterButton.Click += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.MiddleCenter);
+        iconAlignMiddleRightButton.Click  += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.MiddleRight);
+        iconAlignBottomLeftButton.Click   += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.BottomLeft);
+        iconAlignBottomCenterButton.Click += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.BottomCenter);
+        iconAlignBottomRightButton.Click  += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.BottomRight);
 
         embeddedModeButtons.Controls.Add(minimalModeButton);
         embeddedModeButtons.Controls.Add(outlinedModeButton);
@@ -2098,7 +2211,25 @@ internal partial class MainWindow
         embeddedTextAlignButtons.Controls.Add(embeddedTextAlignMiddleButtons);
         embeddedTextAlignButtons.Controls.Add(embeddedTextAlignTopButtons);
 
+        embeddedIconAlignTopButtons.Controls.Add(iconAlignTopRightButton);
+        embeddedIconAlignTopButtons.Controls.Add(iconAlignTopCenterButton);
+        embeddedIconAlignTopButtons.Controls.Add(iconAlignTopLeftButton);
+
+        embeddedIconAlignMiddleButtons.Controls.Add(iconAlignMiddleRightButton);
+        embeddedIconAlignMiddleButtons.Controls.Add(iconAlignMiddleCenterButton);
+        embeddedIconAlignMiddleButtons.Controls.Add(iconAlignMiddleLeftButton);
+
+        embeddedIconAlignBottomButtons.Controls.Add(iconAlignBottomRightButton);
+        embeddedIconAlignBottomButtons.Controls.Add(iconAlignBottomCenterButton);
+        embeddedIconAlignBottomButtons.Controls.Add(iconAlignBottomLeftButton);
+
+        embeddedIconAlignButtons.Controls.Add(embeddedIconAlignBottomButtons);
+        embeddedIconAlignButtons.Controls.Add(embeddedIconAlignMiddleButtons);
+        embeddedIconAlignButtons.Controls.Add(embeddedIconAlignTopButtons);
+
         embeddedToolbar.Controls.Add(embeddedModeStatus);
+        embeddedToolbar.Controls.Add(embeddedIconAlignButtons);
+        embeddedToolbar.Controls.Add(iconAlignmentLabel);
         embeddedToolbar.Controls.Add(embeddedTextAlignButtons);
         embeddedToolbar.Controls.Add(textAlignmentLabel);
         embeddedToolbar.Controls.Add(embeddedLayoutButtons);
@@ -2235,6 +2366,7 @@ internal partial class MainWindow
         ApplyEmbeddedTabAlignment(embeddedPageControl.TabAlignment);
         ApplyEmbeddedTabLayout(embeddedPageControl.TabLayoutMode);
         ApplyEmbeddedTextAlign(embeddedPageControl.TextAlign);
+        ApplyEmbeddedIconAlign(embeddedPageControl.ImageAlign);
 
         embeddedPageControl.NewTabButtonClick += (_, _) =>
             NotificationToast.Show(

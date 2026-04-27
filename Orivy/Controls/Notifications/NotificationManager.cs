@@ -1,4 +1,5 @@
 using Orivy;
+using Orivy.Animation;
 using SkiaSharp;
 using System;
 using System.Collections.Generic;
@@ -11,7 +12,11 @@ internal sealed class NotificationManager : IDisposable
 	private const int MaxVisibleStackDepth = 3;
 	private const int ExpandedVisibleStackDepth = 4;
 	private const int MouseWheelStepDelta = 120;
-	private const int StackWheelCooldownMs = 170;
+	private const double MaxStackWheelMomentum = 3.0d;
+	private const double StackWheelStepIncrement = 0.135d;
+	private const double StackWheelMomentumDecayFactor = 0.70d;
+	private const double StackWheelMomentumBias = 0.75d;
+	private const double StackWheelMomentumStopThreshold = 0.25d;
 
 	private float MarginRight  => 4f * _owner.ScaleFactor;
 	private float MarginLeft   => 4f * _owner.ScaleFactor;
@@ -35,7 +40,8 @@ internal sealed class NotificationManager : IDisposable
 	private readonly HashSet<(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode)> _expandedStacks = new();
 	private readonly Dictionary<(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode), int> _stackFrontIndices = new();
 	private readonly Dictionary<(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode), int> _stackWheelRemainders = new();
-	private readonly Dictionary<(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode), long> _stackLastWheelTicks = new();
+	private readonly Dictionary<(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode), double> _stackWheelMomentum = new();
+	private readonly Dictionary<(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode), AnimationManager> _stackWheelDrivers = new();
 	private bool _disposed;
 	private NotificationToastPalette? _customPalette;
 	private NotificationToastLayoutMode _defaultLayoutMode = NotificationToastLayoutMode.List;
@@ -360,32 +366,21 @@ internal sealed class NotificationManager : IDisposable
 			accumulatedDelta = 0;
 
 		accumulatedDelta += delta;
-		if (Math.Abs(accumulatedDelta) < MouseWheelStepDelta)
+		var queuedStepCount = accumulatedDelta / MouseWheelStepDelta;
+		if (queuedStepCount == 0)
 		{
 			_stackWheelRemainders[key] = accumulatedDelta;
 			return;
 		}
 
-		var steps = Math.Sign(accumulatedDelta);
-		accumulatedDelta -= steps * MouseWheelStepDelta;
-		var now = Environment.TickCount64;
-		if (_stackLastWheelTicks.TryGetValue(key, out var lastWheelTick) && now - lastWheelTick < StackWheelCooldownMs)
-		{
-			ClearStackWheelState(key);
-			return;
-		}
-
-		_stackLastWheelTicks[key] = now;
+		accumulatedDelta -= queuedStepCount * MouseWheelStepDelta;
 
 		if (accumulatedDelta == 0)
 			_stackWheelRemainders.Remove(key);
 		else
 			_stackWheelRemainders[key] = accumulatedDelta;
 
-		// Accept one visible step per wheel burst so fast scrolling cannot skip
-		// multiple stack states before the reflow animation becomes readable.
-		ShiftStackFrontIndex(key, activeList.Count, -steps);
-		SyncTray(key);
+		AccumulateStackWheelMomentum(key, activeList.Count, -queuedStepCount);
 	}
 
 	private void OnOwnerDpiChanged(object? sender, EventArgs e)
@@ -845,10 +840,123 @@ internal sealed class NotificationManager : IDisposable
 		return activeList[actualIndex];
 	}
 
+	private void AccumulateStackWheelMomentum(
+		(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode) key,
+		int itemCount,
+		int requestedSteps)
+	{
+		if (itemCount <= 1 || requestedSteps == 0)
+			return;
+
+		// Clamp bursty wheel/touchpad input into a short-lived momentum value so stack reflow
+		// stays stable and direction changes do not have to drain a long queued step list.
+		var momentum = _stackWheelMomentum.TryGetValue(key, out var existingMomentum) ? existingMomentum : 0d;
+		if (Math.Abs(momentum) > 0.001d && Math.Sign(momentum) != Math.Sign(requestedSteps))
+			momentum = 0d;
+
+		momentum = Math.Clamp(momentum + requestedSteps, -MaxStackWheelMomentum, MaxStackWheelMomentum);
+		if (Math.Abs(momentum) < StackWheelMomentumStopThreshold)
+		{
+			_stackWheelMomentum.Remove(key);
+			return;
+		}
+
+		_stackWheelMomentum[key] = momentum;
+
+		var driver = GetOrCreateStackWheelDriver(key);
+		if (!driver.IsAnimating())
+			ProcessNextStackWheelMomentumStep(key);
+	}
+
+	private void ProcessNextStackWheelMomentumStep(
+		(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode) key)
+	{
+		if (_disposed)
+			return;
+
+		if (!_activeByAlignment.TryGetValue(key, out var activeList) || activeList.Count <= 1)
+		{
+			ClearStackWheelState(key);
+			return;
+		}
+
+		if (!_stackWheelMomentum.TryGetValue(key, out var momentum) || Math.Abs(momentum) < StackWheelMomentumStopThreshold)
+		{
+			_stackWheelMomentum.Remove(key);
+			return;
+		}
+
+		var step = Math.Sign(momentum);
+
+		ShiftStackFrontIndex(key, activeList.Count, step);
+		SyncTray(key);
+
+		var nextMomentum = DecayStackWheelMomentum(momentum);
+		if (Math.Abs(nextMomentum) < StackWheelMomentumStopThreshold)
+		{
+			_stackWheelMomentum.Remove(key);
+			return;
+		}
+
+		_stackWheelMomentum[key] = nextMomentum;
+
+		var driver = GetOrCreateStackWheelDriver(key);
+		driver.SetData(new object[] { key });
+		driver.StartNewAnimation(AnimationDirection.In);
+	}
+
+	private static double DecayStackWheelMomentum(double momentum)
+	{
+		var magnitude = (Math.Abs(momentum) - StackWheelMomentumBias) * StackWheelMomentumDecayFactor;
+		if (magnitude < StackWheelMomentumStopThreshold)
+			return 0d;
+
+		return Math.CopySign(magnitude, momentum);
+	}
+
+	private AnimationManager GetOrCreateStackWheelDriver(
+		(ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode) key)
+	{
+		if (_stackWheelDrivers.TryGetValue(key, out var existingDriver))
+			return existingDriver;
+
+		var driver = new AnimationManager
+		{
+			Singular = true,
+			InterruptAnimation = true,
+			Increment = StackWheelStepIncrement,
+			SecondaryIncrement = StackWheelStepIncrement,
+			AnimationType = AnimationType.QuarticEaseOut,
+		};
+		driver.SetData(new object[] { key });
+		driver.OnAnimationFinished += HandleStackWheelDriverFinished;
+		_stackWheelDrivers[key] = driver;
+		return driver;
+	}
+
+	private void HandleStackWheelDriverFinished(object sender)
+	{
+		if (_disposed || sender is not AnimationManager driver)
+			return;
+
+		var data = driver.GetData();
+		if (data.Length == 0 || data[0] is not ValueTuple<ContentAlignment, NotificationToastLayoutMode, NotificationToastPresentationMode> key)
+			return;
+
+		ProcessNextStackWheelMomentumStep(key);
+	}
+
 	private void ClearStackWheelState((ContentAlignment Alignment, NotificationToastLayoutMode LayoutMode, NotificationToastPresentationMode PresentationMode) key)
 	{
 		_stackWheelRemainders.Remove(key);
-		_stackLastWheelTicks.Remove(key);
+		_stackWheelMomentum.Remove(key);
+
+		if (_stackWheelDrivers.Remove(key, out var driver))
+		{
+			driver.OnAnimationFinished -= HandleStackWheelDriverFinished;
+			driver.Stop();
+			driver.Dispose();
+		}
 	}
 
 	private float GetStackOffset(int depth)
@@ -903,7 +1011,16 @@ internal sealed class NotificationManager : IDisposable
 		_expandedStacks.Clear();
 		_stackFrontIndices.Clear();
 		_stackWheelRemainders.Clear();
-		_stackLastWheelTicks.Clear();
+		_stackWheelMomentum.Clear();
+
+		foreach (var driver in _stackWheelDrivers.Values)
+		{
+			driver.OnAnimationFinished -= HandleStackWheelDriverFinished;
+			driver.Stop();
+			driver.Dispose();
+		}
+
+		_stackWheelDrivers.Clear();
 
 		foreach (var tray in _trays.Values)
 		{

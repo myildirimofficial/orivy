@@ -1593,7 +1593,6 @@ public class ComboBox : ElementBase
             Shadow = new BoxShadow(0f, 6f, 18f, 0, ColorScheme.ShadowColor);
             ShowCheckMargin = false;
             ShowIcons = false;
-            ShowImageMargin = false;
             ShowShortcutKeys = false;
             ShowSubmenuArrow = false;
             OpeningEffect = OpeningEffectType.PopFade;
@@ -1628,7 +1627,6 @@ public class ComboBox : ElementBase
 
             var showColorIcons = _owner.ShouldShowColorIcons();
             ShowIcons = showColorIcons;
-            ShowImageMargin = showColorIcons;
 
             for (var i = 0; i < _owner.Items.Count; i++)
             {
