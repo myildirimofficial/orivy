@@ -232,7 +232,8 @@ public partial class Window : WindowBase
         //WindowsHelper.ApplyRoundCorner(this.Handle);
     }
 
-    private float _titleHeightDPI => _titleHeight * ScaleFactor;
+    private float _configuredTitleHeightDPI => _titleHeight * ScaleFactor;
+    private float _titleHeightDPI => Math.Max(_configuredTitleHeightDPI, GetWindowChromeRequiredTitleHeightDpi());
     private float _maximizedTitleInsetDPI => GetMaximizedTitleInsetDpi();
     private float _maximizedHorizontalInsetDPI => GetMaximizedHorizontalInsetDpi();
     private float _titleBarLeftInsetDPI => _maximizedHorizontalInsetDPI;
@@ -240,6 +241,14 @@ public partial class Window : WindowBase
     private float _titleBarTopDPI => _maximizedTitleInsetDPI;
     private float _titleBarBottomDPI => _titleBarTopDPI + _titleHeightDPI;
     private float _titleBarCenterYDPI => _titleBarTopDPI + (_titleHeightDPI / 2f);
+
+    private float GetWindowChromeRequiredTitleHeightDpi()
+    {
+        if (!UsesWindowChromeTabs || _windowPageControl == null)
+            return 0f;
+
+        return _windowPageControl.MeasureWindowChromeRequiredHeight();
+    }
 
     private float GetMaximizedTitleInsetDpi()
     {
@@ -276,7 +285,7 @@ public partial class Window : WindowBase
     [Description("Gets or sets form can movable")]
     public bool Movable { get; set; } = true;
 
-    [DefaultValue(false)] 
+    [DefaultValue(false)]
     public bool AllowAddControlOnTitle { get; set; }
 
     [DefaultValue(false)]
@@ -624,6 +633,11 @@ public partial class Window : WindowBase
         NeedsFullChildRedraw = true;
         InvalidateRenderTree();
         Invalidate();
+    }
+
+    internal void RefreshWindowChromeTabsHostLayout()
+    {
+        RefreshHostedTitleBarLayout();
     }
 
     private float GetTitleBarLeadingContentX()
@@ -1295,10 +1309,6 @@ public partial class Window : WindowBase
 
         IsStayAtTopBorder = false;
         Cursor.Clip = null;
-        // Always release capture on mouse-up regardless of which code path acquired it
-        // (title-bar drag, tab-header drag detection, or child element capture). If capture
-        // is not released here, WM_NCHITTEST is never sent and resize stops working until
-        // the window is maximised/restored.
         ReleaseCapture();
         _formMoveMouseDown = false;
 

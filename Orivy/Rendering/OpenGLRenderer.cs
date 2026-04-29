@@ -44,10 +44,11 @@ internal sealed class OpenGLRenderer : IWindowRenderer
             {
                 nSize = (short)Marshal.SizeOf<PIXELFORMATDESCRIPTOR>(),
                 nVersion = 1,
-                // PFD sabitlerinin numeric değerleri
-                dwFlags = 0x00000004 | 0x00000020 | 0x00000001, // PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER
+                // PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER
+                dwFlags = 0x00000004 | 0x00000020 | 0x00000001,
                 iPixelType = 0, // PFD_TYPE_RGBA
                 cColorBits = 32,
+                cAlphaBits = 8,  // request alpha channel so DWM can composite correctly
                 cDepthBits = 24,
                 cStencilBits = 8,
                 iLayerType = 0 // PFD_MAIN_PLANE
@@ -147,28 +148,37 @@ internal sealed class OpenGLRenderer : IWindowRenderer
 
         try
         {
+            // Set the viewport every frame so the first rendered frame is never empty
+            // even when Resize() was not called before the first Render() invocation.
+            WglNativeMethods.glViewport(0, 0, width, height);
+
             // Recreate surface if needed (size changed or first render)
             if (_surface == null || _width != width || _height != height)
             {
                 _surface?.Dispose();
                 _surface = null;
 
-                // GRBackendRenderTarget oluştur: default framebuffer (0), GL_RGBA8 format
-                var framebufferInfo = new GRGlFramebufferInfo(0, 0x8058); // 0x8058 = GL_RGBA8
+                // Query the actual framebuffer, stencil bits, and MSAA sample count from
+                // the driver instead of assuming values of 0.  Assuming wrong values is
+                // brittle and can produce a blank first frame on some GPU/driver combinations.
+                WglNativeMethods.glGetIntegerv(0x8CA6 /* GL_FRAMEBUFFER_BINDING */, out int fboId);
+                WglNativeMethods.glGetIntegerv(0x0D57 /* GL_STENCIL_BITS */, out int stencilBits);
+                WglNativeMethods.glGetIntegerv(0x80A9 /* GL_SAMPLES */, out int sampleCount);
+
+                var framebufferInfo = new GRGlFramebufferInfo((uint)fboId, 0x8058); // GL_RGBA8
                 var backendRenderTarget = new GRBackendRenderTarget(
                     width,
                     height,
-                    0,  // sample count
-                    0,  // stencil bits
+                    sampleCount,
+                    stencilBits,
                     framebufferInfo);
 
-                // SKSurface.Create overload: GRContext, GRBackendRenderTarget, origin, colorType
                 _surface = SKSurface.Create(
                     _grContext,
                     backendRenderTarget,
                     GRSurfaceOrigin.BottomLeft,
                     SKColorType.Rgba8888);
-                
+
                 if (_surface == null)
                     return false;
 

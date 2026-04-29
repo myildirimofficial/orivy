@@ -59,6 +59,7 @@ public partial class Methods
     public const int WS_SIZEBOX = 0x00040000;
     public const int WS_SYSMENU = 0x00080000;
     public const int CS_DBLCLKS = 0x8;
+    public const int CS_OWNDC = 0x0020;
     public const int SC_MOVE = 0xF010;
     public const int LVCDI_ITEM = 0x0;
     public const int LVCDI_GROUP = 0x1;

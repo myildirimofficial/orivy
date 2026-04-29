@@ -318,6 +318,11 @@ public partial class WindowBase
                 _renderBackend = activeBackend;
             }
 
+            // Immediately size the renderer so the first presented frame has a valid viewport
+            // and surface rather than an empty/blank first frame.
+            if (IsHandleCreated && ClientSize.Width > 0 && ClientSize.Height > 0)
+                newRenderer.Resize((int)ClientSize.Width, (int)ClientSize.Height);
+
             Debug.WriteLine($"[WindowBase] RecreateRenderer completed. Active={activeBackend}");
         }
         catch (Exception ex)
@@ -397,10 +402,13 @@ public partial class WindowBase
         var noRedirect = (nint)(uint)SetWindowLongFlags.WS_EX_NOREDIRECTIONBITMAP;
         var composited = (nint)(uint)SetWindowLongFlags.WS_EX_COMPOSITED;
 
-        // WS_EX_NOREDIRECTIONBITMAP is required for GPU rendering.
-        // Software (GDI) renderer must NOT have this flag — GetDC+BitBlt requires DWM's
-        // redirection bitmap; setting this flag causes the window to render as white/blank.
-        if (isGpuActive)
+        // WGL (OpenGL) uses SwapBuffers and relies on DWM's own redirection surface to
+        // compose the window. Setting WS_EX_NOREDIRECTIONBITMAP removes that surface and
+        // causes a blank window even when SwapBuffers succeeds.
+        // Only DXGI-based backends (DirectX11/12) should set WS_EX_NOREDIRECTIONBITMAP
+        // to redirect composition to the DXGI swapchain instead.
+        bool requiresNoRedirect = isGpuActive && _renderBackend != RenderBackend.OpenGL;
+        if (requiresNoRedirect)
         {
             exStyle |= noRedirect;
             exStyle &= ~composited;

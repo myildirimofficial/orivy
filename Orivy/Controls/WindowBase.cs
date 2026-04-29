@@ -313,12 +313,17 @@ public partial class WindowBase : ElementBase
             {
                 cp.Style |= (int)(SetWindowLongFlags.WS_CLIPCHILDREN |
                                   SetWindowLongFlags.WS_CLIPSIBLINGS);
-                // WS_EX_NOREDIRECTIONBITMAP is required for GPU renderers so DWM does not
-                // create a competing redirection surface that would cause flickering/blanking.
-                // NOTE: Software (GDI) rendering uses GetDC+BitBlt which requires DWM's redirection
-                // bitmap — setting this flag on a GDI window makes it render white/blank.
-                cp.ExStyle |= (uint)SetWindowLongFlags.WS_EX_NOREDIRECTIONBITMAP;
-                cp.ExStyle &= ~(uint)SetWindowLongFlags.WS_EX_COMPOSITED;
+            }
+
+            if (_renderBackend == Orivy.Rendering.RenderBackend.OpenGL)
+            {
+                // WGL uses SwapBuffers with DWM's own redirection surface for composition.
+                // WS_EX_NOREDIRECTIONBITMAP removes that surface and causes DWM to present
+                // a blank window even when SwapBuffers succeeds.
+                // CS_OWNDC gives each window a dedicated DC so the WGL device context is
+                // stable across message processing and does not drift or present on the wrong DC.
+                cp.ExStyle &= ~(uint)SetWindowLongFlags.WS_EX_NOREDIRECTIONBITMAP;
+                cp.ClassStyle |= CS_OWNDC;
             }
 
             return cp;

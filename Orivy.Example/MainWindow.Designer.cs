@@ -1133,7 +1133,8 @@ internal partial class MainWindow
         this.ContextMenuStrip = this.extendMenu;
         this.WindowPageControl = windowPageControl;
         this.FormStartPosition = Orivy.FormStartPosition.CenterScreen;
-        this.RenderBackend = Orivy.Rendering.RenderBackend.Software;
+        this.RenderBackend = Orivy.Rendering.RenderBackend.OpenGL;
+        this.ShowPerfOverlay = true;
         this.Controls.Add(this.windowPageControl);
         this.Controls.Add(this.menuStrip);
         this.menuStrip.BringToFront();
@@ -1681,6 +1682,7 @@ internal partial class MainWindow
             Dock    = DockStyle.Fill,
             Radius  = new Radius(0),
             Border  = new Thickness(0),
+            AutoScroll = true
         };
 
         // ── Main embedded tab control ─────────────────────────────────────────
@@ -1703,6 +1705,7 @@ internal partial class MainWindow
             TransitionDurationMs      = 300,
             LockInputDuringTransition = true,
             TextAlign                   = ContentAlignment.MiddleCenter,
+            MinimumSize = new SKSize(0, 300),
         };
         _embeddedPageControl = embeddedPageControl;
 
