@@ -8,5 +8,7 @@ public enum WindowPageTabDesignMode
     RoundedCompact,
     Pill,
     Outlined,
-    Minimal
+    Minimal,
+    Fluent,
+    MacOS
 }

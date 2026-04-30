@@ -19,10 +19,10 @@ public class WindowPageControl : ElementBase
     private const float TabVerticalInset = 4f;
     private const float TabIndicatorHeight = 3f;
     private const float TabIconSize = 24f;
-    private const float TabIconSpacing = 8f;
+    private const float TabIconSpacing = 4f;
     private const float TabCloseButtonSize = 18f;
     private const float TabCloseButtonSpacing = 8f;
-    private const float TabMinWidth = 130f;
+    private const float TabMinWidth = 30f;
     private const float TabMaxWidth = 240f;
     private const float VerticalTabMinWidth = 160f;
     private const float VerticalTabMaxWidth = 360f;
@@ -36,9 +36,9 @@ public class WindowPageControl : ElementBase
     private const float NewTabButtonSize = 22f;
     private const float TabSelectionAnimationSpeed = 0.14f;
     private const float TabDragThreshold = 6f;
-    private const float WindowChromeTabHorizontalPadding = 10f;
+    private const float WindowChromeTabHorizontalPadding = 8f;
     private const float WindowChromeTabIconSize = 16f;
-    private const float WindowChromeTabIconSpacing = 8f;
+    private const float WindowChromeTabIconSpacing = 4f;
     private const float WindowChromeTabCloseButtonSize = 20f;
     private const float WindowChromeTabCloseButtonInset = 4.5f;
     private const float WindowChromeTabSelectionAnimationSpeed = 0.10f;
@@ -2206,17 +2206,65 @@ public class WindowPageControl : ElementBase
 
         DrawWindowChromeTabDividers(canvas, context, titleColor);
 
+        var tabGap = ResolvedTabGap * ScaleFactor;
+
+        float ComputeDragTabTarget(int tIdx)
+        {
+            var srcSlotWidth = GetTabPrimaryLength(_windowChromeTabRects[_dragTabSourceIndex]) + tabGap;
+            var adjIns = _dragTabInsertIndex > _dragTabSourceIndex ? _dragTabInsertIndex - 1 : _dragTabInsertIndex;
+            var j = tIdx < _dragTabSourceIndex ? tIdx : tIdx - 1;
+            return (tIdx > _dragTabSourceIndex ? -srcSlotWidth : 0f) + (j >= adjIns ? srcSlotWidth : 0f);
+        }
+
+        if (_isDraggingTab && _dragTabSourceIndex >= 0)
+        {
+            if (_tabDodgeAnimOffsets.Length != _windowChromeTabRects.Count)
+            {
+                var prev = _tabDodgeAnimOffsets;
+                _tabDodgeAnimOffsets = new float[_windowChromeTabRects.Count];
+                for (var k = 0; k < Math.Min(prev.Length, _tabDodgeAnimOffsets.Length); k++)
+                    _tabDodgeAnimOffsets[k] = prev[k];
+            }
+
+            const float LerpFactor = 0.3f;
+            const float SettleTolerance = 0.5f;
+            var needsMoreFrames = false;
+
+            for (var k = 0; k < _tabDodgeAnimOffsets.Length; k++)
+            {
+                if (k == _dragTabSourceIndex) { _tabDodgeAnimOffsets[k] = 0f; continue; }
+                var target = _dragTabInsertIndex >= 0 ? ComputeDragTabTarget(k) : 0f;
+                var delta = target - _tabDodgeAnimOffsets[k];
+                if (MathF.Abs(delta) > SettleTolerance)
+                {
+                    _tabDodgeAnimOffsets[k] += delta * LerpFactor;
+                    needsMoreFrames = true;
+                }
+                else _tabDodgeAnimOffsets[k] = target;
+            }
+            if (needsMoreFrames) Invalidate();
+        }
+        else
+        {
+            _tabDodgeAnimOffsets = Array.Empty<float>();
+        }
+
         if (_selectedIndex < 0 || _selectedIndex >= _windowChromeTabRects.Count)
             return;
 
         var effectiveHoverColor = titleColor != SKColor.Empty && !titleColor.IsDark()
             ? foreColor.WithAlpha(60)
             : hoverColor;
+        var animOffset = _isDraggingTab && _selectedIndex < _tabDodgeAnimOffsets.Length ? _tabDodgeAnimOffsets[_selectedIndex] : 0f;
+        var selectedRect = OffsetTabRectAlongPrimaryAxis(GetWindowChromeSelectedVisualRect(), animOffset);
 
-        if (_hoveredWindowChromeTabIndex >= 0 && _hoveredWindowChromeTabIndex < _windowChromeTabRects.Count && _hoveredWindowChromeTabIndex != _selectedIndex)
-            DrawWindowChromeTabSurface(canvas, _windowChromeTabRects[_hoveredWindowChromeTabIndex], false, true, effectiveHoverColor, foreColor, titleColor);
+        if (_hoveredWindowChromeTabIndex >= 0 && _hoveredWindowChromeTabIndex < _windowChromeTabRects.Count && _hoveredWindowChromeTabIndex != _selectedIndex) {
+            var hoveredAnimOffset = _isDraggingTab && _hoveredWindowChromeTabIndex < _tabDodgeAnimOffsets.Length ? _tabDodgeAnimOffsets[_hoveredWindowChromeTabIndex] : 0f;
+            DrawWindowChromeTabSurface(canvas, OffsetTabRectAlongPrimaryAxis(_windowChromeTabRects[_hoveredWindowChromeTabIndex], hoveredAnimOffset), false, true, effectiveHoverColor, foreColor, titleColor);
+        }
 
-        DrawWindowChromeTabSurface(canvas, GetWindowChromeSelectedVisualRect(), true, false, effectiveHoverColor, foreColor, titleColor);
+        if (!_isDraggingTab || _selectedIndex != _dragTabSourceIndex)
+            DrawWindowChromeTabSurface(canvas, selectedRect, true, false, effectiveHoverColor, foreColor, titleColor);
         PrepareTabFont((DrawTabIcons ? WindowChromeTabFontSizeWithIcon : WindowChromeTabFontSize).Topx(this));
 
         for (var pageIndex = 0; pageIndex < _windowChromeTabRects.Count; pageIndex++)
@@ -2225,7 +2273,12 @@ public class WindowPageControl : ElementBase
             if (page == null)
                 continue;
 
+            if (_isDraggingTab && pageIndex == _dragTabSourceIndex)
+                continue;
+
             var rect = _windowChromeTabRects[pageIndex];
+            if (_isDraggingTab && pageIndex < _tabDodgeAnimOffsets.Length)
+                rect = OffsetTabRectAlongPrimaryAxis(rect, _tabDodgeAnimOffsets[pageIndex]);
             var iconRect = SKRect.Empty;
             var isSelected = pageIndex == _selectedIndex;
             var isHovered = pageIndex == _hoveredWindowChromeTabIndex;
@@ -2237,7 +2290,7 @@ public class WindowPageControl : ElementBase
             var chromeSpacing = WindowChromeTabIconSpacing * ScaleFactor;
             var hasChromeIcon = DrawTabIcons && page.Image != null;
             var chromeTrailingR = pageIndex == _selectedIndex && _windowChromeCloseButtonRect.Width > 0f
-                ? _windowChromeCloseButtonRect.Width + chromePad : 0f;
+                ? _windowChromeCloseButtonRect.Width + chromeSpacing : 0f;
 
             var chromeVertPad = WindowChromeTabCloseButtonInset * ScaleFactor;
             (iconRect, var textRect) = ComputeTabContentRects(rect, page.Text, hasChromeIcon,
@@ -2248,6 +2301,32 @@ public class WindowPageControl : ElementBase
 
             TextRenderer.DrawText(canvas, page.Text ?? string.Empty, textRect, _tabTextPaint, _tabFont,
                 TextAlign, true, false);
+        }
+
+        if (_isDraggingTab && _dragTabSourceIndex >= 0 && _dragTabSourceIndex < _windowChromeTabRects.Count)
+        {
+            var srcRect  = _windowChromeTabRects[_dragTabSourceIndex];
+            var ghostLeft = Math.Clamp(
+                _dragTabCurrentX - _dragTabGrabX,
+                context.StartX,
+                context.StartX + context.AvailableWidth - GetTabPrimaryLength(srcRect));
+            var ghostRect = CreatePrimaryAxisRect(srcRect, ghostLeft);
+
+            using var ghostLayerPaint = new SKPaint { Color = new SKColor(255, 255, 255, 210) };
+            var layerSaved = canvas.SaveLayer(ghostLayerPaint);
+
+            DrawWindowChromeTabSurface(canvas, ghostRect, true, false, effectiveHoverColor, foreColor, titleColor);
+            
+            var ghostPage = GetPageAt(_dragTabSourceIndex);
+            if (ghostPage != null) {
+                var hasGhostIcon = DrawTabIcons && ghostPage.Image != null;
+                var chromePad = WindowChromeTabHorizontalPadding * ScaleFactor;
+                (var ghostIconRect, var ghostTextRect) = ComputeTabContentRects(
+                    ghostRect, ghostPage.Text, hasGhostIcon, chromePad, WindowChromeTabCloseButtonInset * ScaleFactor, WindowChromeTabIconSize * ScaleFactor, WindowChromeTabIconSpacing * ScaleFactor, 0f);
+                if (hasGhostIcon) canvas.DrawImage(ghostPage.Image, ghostIconRect);
+                TextRenderer.DrawText(canvas, ghostPage.Text ?? string.Empty, ghostTextRect, _tabTextPaint, _tabFont, TextAlign, true, false);
+            }
+            canvas.RestoreToCount(layerSaved);
         }
 
         if (_windowChromeCloseButtonRect.Width > 0)
@@ -2332,6 +2411,107 @@ public class WindowPageControl : ElementBase
         return true;
     }
 
+    internal bool ProcessWindowChromeMouseDown(MouseEventArgs e, WindowPageChromeLayoutContext context)
+    {
+        if (TabMode != WindowPageTabMode.WindowChrome || Count <= 0)
+            return false;
+
+        UpdateWindowChromeLayout(context);
+
+        if (e.Button == MouseButtons.Left)
+        {
+            if (_windowChromeNewTabButtonRect.Contains(e.Location))
+            {
+                RaiseNewTabButtonClick();
+                return true;
+            }
+
+            if (_windowChromeCloseButtonRect.Contains(e.Location))
+            {
+                return true; // Handle in mouse up
+            }
+
+            if (TryGetWindowChromeTabIndexAtPoint(e.Location, context, out var tabIndex))
+            {
+                SelectedIndex = tabIndex;
+                if (_allowTabDrag)
+                {
+                    _dragTabSourceIndex = tabIndex;
+                    _dragTabGrabX = tabIndex < _windowChromeTabRects.Count
+                        ? GetTabPrimaryCoordinate(e.Location) - GetTabPrimaryStart(_windowChromeTabRects[tabIndex])
+                        : 0f;
+                    _dragTabCurrentX = GetTabPrimaryCoordinate(e.Location);
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    internal bool ProcessWindowChromeMouseMove(MouseEventArgs e, WindowPageChromeLayoutContext context)
+    {
+        if (TabMode != WindowPageTabMode.WindowChrome || Count <= 0)
+            return false;
+
+        if (_dragTabSourceIndex >= 0)
+        {
+            var pointerPrimary = GetTabPrimaryCoordinate(e.Location);
+            var grabOriginX = _dragTabSourceIndex < _windowChromeTabRects.Count
+                ? GetTabPrimaryStart(_windowChromeTabRects[_dragTabSourceIndex]) + _dragTabGrabX
+                : _dragTabCurrentX;
+
+            if (!_isDraggingTab && Math.Abs(pointerPrimary - grabOriginX) > TabDragThreshold * ScaleFactor)
+                _isDraggingTab = true;
+
+            if (_isDraggingTab)
+            {
+                _dragTabCurrentX = pointerPrimary;
+                _dragTabInsertIndex = ComputeWindowChromeDragInsertIndex(pointerPrimary);
+                Invalidate();
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    private int ComputeWindowChromeDragInsertIndex(float pointerPrimary)
+    {
+        for (var i = 0; i < _windowChromeTabRects.Count; i++)
+        {
+            if (i == _dragTabSourceIndex) continue;
+            var tabMid = GetTabPrimaryMidpoint(_windowChromeTabRects[i]);
+            if (pointerPrimary < tabMid)
+                return i;
+        }
+        return Count;
+    }
+
+    internal bool ProcessWindowChromeMouseUp(MouseEventArgs e, WindowPageChromeLayoutContext context)
+    {
+        if (TabMode != WindowPageTabMode.WindowChrome || Count <= 0)
+            return false;
+
+        if (_isDraggingTab && _dragTabSourceIndex >= 0 && _dragTabInsertIndex >= 0)
+            CommitTabDrag(_dragTabSourceIndex, _dragTabInsertIndex);
+
+        var handled = _dragTabSourceIndex >= 0 || _isDraggingTab;
+
+        _isDraggingTab = false;
+        _dragTabSourceIndex = -1;
+        _dragTabInsertIndex = -1;
+        _tabDodgeAnimOffsets = Array.Empty<float>();
+        Invalidate();
+
+        if (!handled && e.Button == MouseButtons.Left && _windowChromeCloseButtonRect.Contains(e.Location) && _selectedIndex >= 0)
+        {
+            RaiseTabCloseButtonClick(_selectedIndex);
+            handled = true;
+        }
+
+        return handled;
+    }
+
     internal bool ResetWindowChromeHoverState()
     {
         if (_hoveredWindowChromeTabIndex < 0 && !_hoveredWindowChromeCloseButton && !_hoveredWindowChromeNewTabButton)
@@ -2400,13 +2580,27 @@ public class WindowPageControl : ElementBase
             _windowChromeTabWidthBuffer.Add(desiredWidth);
         }
 
+        var totalDesiredWidth = 0f;
+        var gap = ResolvedTabGap * ScaleFactor;
+        for (var i = 0; i < _windowChromeTabWidthBuffer.Count; i++)
+            totalDesiredWidth += _windowChromeTabWidthBuffer[i];
+        totalDesiredWidth += gap * MathF.Max(0f, _windowChromeTabWidthBuffer.Count - 1);
+        
+        var clampedTotalWidth = MathF.Min(totalDesiredWidth, availableWidth);
+        var startX = context.StartX;
+        
+        if (TabAlignment == WindowPageTabAlignment.Center)
+            startX += (availableWidth - clampedTotalWidth) / 2f;
+        else if (TabAlignment == WindowPageTabAlignment.End)
+            startX += (availableWidth - clampedTotalWidth);
+
         WindowPageTabGeometry.LayoutTabs(
             _windowChromeTabWidthBuffer,
-            context.StartX,
+            startX,
             context.Top,
             context.Height,
             availableWidth,
-            ResolvedTabGap * ScaleFactor,
+            gap,
             maxTabWidth,
             false,
             _windowChromeTabRects);
@@ -2701,6 +2895,44 @@ public class WindowPageControl : ElementBase
                     _tabIndicatorPaint.Color = ColorScheme.Primary;
                     var indH = MathF.Max(2f, MathF.Round(3f * sf));
                     canvas.DrawRect(minRect.Left, minRect.Bottom - indH, minRect.Width, indH, _tabIndicatorPaint);
+                }
+                break;
+            }
+
+            case WindowPageTabDesignMode.Fluent:
+            {
+                if (!isSelected && !isHovered)
+                    break;
+                var fluentRect = new SKRect(
+                    MathF.Round(rect.Left + 4f * sf),
+                    MathF.Round(rect.Top + 6f * sf),
+                    MathF.Round(rect.Right - 4f * sf),
+                    MathF.Round(rect.Bottom - 4f * sf));
+                _tabBackgroundPaint.Color = isSelected ? selectedBg : hoverBg;
+                canvas.DrawRoundRect(fluentRect, 4f * sf, 4f * sf, _tabBackgroundPaint);
+                if (isSelected)
+                {
+                    _tabIndicatorPaint.Color = ColorScheme.Primary;
+                    canvas.DrawRect(fluentRect.Left + 8f * sf, fluentRect.Bottom - 2f * sf, fluentRect.Width - 16f * sf, 2f * sf, _tabIndicatorPaint);
+                }
+                break;
+            }
+
+            case WindowPageTabDesignMode.MacOS:
+            {
+                if (!isSelected && !isHovered)
+                    break;
+                var macRect = new SKRect(
+                    MathF.Round(rect.Left + 2f * sf),
+                    MathF.Round(rect.Top + 4f * sf),
+                    MathF.Round(rect.Right - 2f * sf),
+                    MathF.Round(rect.Bottom - 4f * sf));
+                _tabBackgroundPaint.Color = isSelected ? selectedBg : hoverBg;
+                canvas.DrawRoundRect(macRect, macRect.Height / 2f, macRect.Height / 2f, _tabBackgroundPaint);
+                if (isSelected)
+                {
+                    _tabBorderPaint.Color = ColorScheme.BorderColor;
+                    canvas.DrawRoundRect(macRect, macRect.Height / 2f, macRect.Height / 2f, _tabBorderPaint);
                 }
                 break;
             }
@@ -3025,6 +3257,44 @@ public class WindowPageControl : ElementBase
                     canvas.DrawRect(
                         new SKRect(MathF.Round(rect.Left), MathF.Round(rect.Top), MathF.Round(rect.Right), MathF.Round(rect.Bottom)),
                         _tabBackgroundPaint);
+                }
+                break;
+            }
+
+            case WindowPageTabDesignMode.Fluent:
+            {
+                if (!isSelected && !isHovered)
+                    break;
+                var fluentRect = new SKRect(
+                    MathF.Round(rect.Left + 4f * sf),
+                    MathF.Round(rect.Top + 6f * sf),
+                    MathF.Round(rect.Right - 4f * sf),
+                    MathF.Round(rect.Bottom - 4f * sf));
+                _tabBackgroundPaint.Color = isSelected ? selectedBackground : hoverBackground;
+                canvas.DrawRoundRect(fluentRect, 4f * sf, 4f * sf, _tabBackgroundPaint);
+                if (isSelected)
+                {
+                    _tabIndicatorPaint.Color = ColorScheme.Primary;
+                    canvas.DrawRect(fluentRect.Left + 8f * sf, fluentRect.Bottom - 2f * sf, fluentRect.Width - 16f * sf, 2f * sf, _tabIndicatorPaint);
+                }
+                break;
+            }
+
+            case WindowPageTabDesignMode.MacOS:
+            {
+                if (!isSelected && !isHovered)
+                    break;
+                var macRect = new SKRect(
+                    MathF.Round(rect.Left + 2f * sf),
+                    MathF.Round(rect.Top + 4f * sf),
+                    MathF.Round(rect.Right - 2f * sf),
+                    MathF.Round(rect.Bottom - 4f * sf));
+                _tabBackgroundPaint.Color = isSelected ? selectedBackground : hoverBackground;
+                canvas.DrawRoundRect(macRect, macRect.Height / 2f, macRect.Height / 2f, _tabBackgroundPaint);
+                if (isSelected)
+                {
+                    _tabBorderPaint.Color = borderColor;
+                    canvas.DrawRoundRect(macRect, macRect.Height / 2f, macRect.Height / 2f, _tabBorderPaint);
                 }
                 break;
             }

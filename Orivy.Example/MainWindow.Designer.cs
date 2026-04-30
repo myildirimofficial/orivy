@@ -1133,7 +1133,7 @@ internal partial class MainWindow
         this.ContextMenuStrip = this.extendMenu;
         this.WindowPageControl = windowPageControl;
         this.FormStartPosition = Orivy.FormStartPosition.CenterScreen;
-        this.RenderBackend = Orivy.Rendering.RenderBackend.OpenGL;
+        this.RenderBackend = Orivy.Rendering.RenderBackend.Software;
         this.ShowPerfOverlay = true;
         this.Controls.Add(this.windowPageControl);
         this.Controls.Add(this.menuStrip);
@@ -1950,6 +1950,8 @@ internal partial class MainWindow
         var pillModeButton           = MakeToolButton("pillModeButton",           "Pill");
         var outlinedModeButton       = MakeToolButton("outlinedModeButton",       "Outlined");
         var minimalModeButton        = MakeToolButton("minimalModeButton",        "Minimal");
+        var fluentModeButton         = MakeToolButton("fluentModeButton",         "Fluent");
+        var macOSModeButton          = MakeToolButton("macOSModeButton",          "MacOS");
 
         var startAlignButton  = MakeToolButton("startAlignButton",  "· Start");
         var centerAlignButton = MakeToolButton("centerAlignButton", "· Center");
@@ -2052,6 +2054,8 @@ internal partial class MainWindow
             SetButtonActive(pillModeButton,           mode == WindowPageTabDesignMode.Pill);
             SetButtonActive(outlinedModeButton,       mode == WindowPageTabDesignMode.Outlined);
             SetButtonActive(minimalModeButton,        mode == WindowPageTabDesignMode.Minimal);
+            SetButtonActive(fluentModeButton,         mode == WindowPageTabDesignMode.Fluent);
+            SetButtonActive(macOSModeButton,          mode == WindowPageTabDesignMode.MacOS);
         }
 
         // ── Apply alignment ───────────────────────────────────────────────────
@@ -2148,6 +2152,8 @@ internal partial class MainWindow
         pillModeButton.Click           += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Pill);
         outlinedModeButton.Click       += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Outlined);
         minimalModeButton.Click        += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Minimal);
+        fluentModeButton.Click         += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Fluent);
+        macOSModeButton.Click          += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.MacOS);
 
         startAlignButton.Click  += (_, _) => ApplyEmbeddedTabAlignment(WindowPageTabAlignment.Start);
         centerAlignButton.Click += (_, _) => ApplyEmbeddedTabAlignment(WindowPageTabAlignment.Center);
@@ -2178,9 +2184,8 @@ internal partial class MainWindow
         iconAlignBottomCenterButton.Click += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.BottomCenter);
         iconAlignBottomRightButton.Click  += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.BottomRight);
 
-        embeddedModeButtons.Controls.Add(minimalModeButton);
-        embeddedModeButtons.Controls.Add(outlinedModeButton);
-        embeddedModeButtons.Controls.Add(pillModeButton);
+        embeddedModeButtons.Controls.Add(macOSModeButton);
+        embeddedModeButtons.Controls.Add(fluentModeButton);
         embeddedModeButtons.Controls.Add(minimalModeButton);
         embeddedModeButtons.Controls.Add(outlinedModeButton);
         embeddedModeButtons.Controls.Add(pillModeButton);

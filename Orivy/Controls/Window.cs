@@ -152,7 +152,6 @@ public partial class Window : WindowBase
     private long _stickyBorderTime = 5000000;
 
     private float _symbolSize = 24;
-    private int _pendingTabSelectionIndex = -1;
     private SKPoint _pendingTabMouseDownScreen;
 
     /// <summary>
@@ -578,7 +577,6 @@ public partial class Window : WindowBase
         if (_windowPageControl == null)
             return;
 
-        _pendingTabSelectionIndex = -1;
         _windowPageControl.ResetWindowChromeHoverState();
         _windowPageControl.InvalidateWindowChromeLayout();
         CalcSystemBoxPos();
@@ -1177,24 +1175,20 @@ public partial class Window : WindowBase
         }
 
         // Title bar drag has absolute priority over child controls.
-        // Check this BEFORE hit-testing children so that a misplaced child
-        // (e.g. during the first layout pass) cannot steal the drag.
         var inTitleArea = ShowTitle && e.Y < Padding.Top;
-        var clickedTabIndex = -1;
         var inTitleBarMenu = IsPointOverTitleBarMenuStrip(e.Location);
-        var inTabHeader = UsesWindowChromeTabs && TryGetTabIndexAtPoint(e.Location, out clickedTabIndex);
-        var inControlBox = _inCloseBox || _inMaxBox || _inMinBox || _inExtendBox
-                   || (UsesWindowChromeTabs && (_windowPageControl.IsPointOverWindowChromeCloseButton(e.Location, CreateWindowChromeLayoutContext()) ||
-                                               _windowPageControl.IsPointOverWindowChromeNewTabButton(e.Location, CreateWindowChromeLayoutContext())))
-               || _inFormMenuBox
-               || inTitleBarMenu;
+        var inTabHeader = UsesWindowChromeTabs && _windowPageControl != null && _windowPageControl.TryGetWindowChromeTabIndexAtPoint(e.Location, CreateWindowChromeLayoutContext(), out _);
+        
+        var inWindowChromeButtons = UsesWindowChromeTabs && _windowPageControl != null && 
+                                    (_windowPageControl.IsPointOverWindowChromeCloseButton(e.Location, CreateWindowChromeLayoutContext()) || 
+                                     _windowPageControl.IsPointOverWindowChromeNewTabButton(e.Location, CreateWindowChromeLayoutContext()));
+        
+        var inControlBox = _inCloseBox || _inMaxBox || _inMinBox || _inExtendBox || _inFormMenuBox || inTitleBarMenu || inWindowChromeButtons;
 
-        if (e.Button == MouseButtons.Left && inTabHeader && !inControlBox)
+        if (UsesWindowChromeTabs && _windowPageControl != null && 
+            _windowPageControl.ProcessWindowChromeMouseDown(e, CreateWindowChromeLayoutContext()))
         {
-            _pendingTabSelectionIndex = clickedTabIndex;
-            _pendingTabMouseDownScreen = CursorScreenPosition;
             SetCapture(Handle);
-
             return;
         }
 
@@ -1276,9 +1270,6 @@ public partial class Window : WindowBase
             TryRouteMouseEventToOpenPopup(e, static (popup, localEvent) => popup.OnMouseUp(localEvent)))
             return;
 
-        var pendingTabSelectionIndex = _pendingTabSelectionIndex;
-        var shouldSelectPendingTab = e.Button == MouseButtons.Left && pendingTabSelectionIndex >= 0 && !_formMoveMouseDown;
-
         // If an element captured the mouse, forward the mouse up to it and release capture if left button
         if (_mouseCapturedElement != null)
         {
@@ -1312,12 +1303,10 @@ public partial class Window : WindowBase
         ReleaseCapture();
         _formMoveMouseDown = false;
 
-        if (shouldSelectPendingTab && UsesWindowChromeTabs && _windowPageControl != null && pendingTabSelectionIndex < _windowPageControl.Count)
+        if (UsesWindowChromeTabs && _windowPageControl != null)
         {
-            _windowPageControl.SelectedIndex = pendingTabSelectionIndex;
+            _windowPageControl.ProcessWindowChromeMouseUp(e, CreateWindowChromeLayoutContext());
         }
-
-        _pendingTabSelectionIndex = -1;
 
         animationSource = e.Location;
 
@@ -1353,28 +1342,14 @@ public partial class Window : WindowBase
         // (e.g. due to a wrong initial layout position) would block all window movement.
         var screenCursor = CursorScreenPosition;
 
-        if (!_formMoveMouseDown && _mouseCapturedElement == null && _pendingTabSelectionIndex < 0 &&
+        if (!_formMoveMouseDown && _mouseCapturedElement == null && 
             TryRouteMouseEventToOpenPopup(e, static (popup, localEvent) => popup.OnMouseMove(localEvent)))
             return;
 
-        if (!_formMoveMouseDown && _pendingTabSelectionIndex >= 0)
+        if (!_formMoveMouseDown && UsesWindowChromeTabs && _windowPageControl != null && 
+            _windowPageControl.ProcessWindowChromeMouseMove(e, CreateWindowChromeLayoutContext()))
         {
-            var deltaX = screenCursor.X - _pendingTabMouseDownScreen.X;
-            var deltaY = screenCursor.Y - _pendingTabMouseDownScreen.Y;
-            var dragDistanceSquared = (deltaX * deltaX) + (deltaY * deltaY);
-            var dragThresholdSquared = TAB_DRAG_THRESHOLD * TAB_DRAG_THRESHOLD;
-
-            if (Movable && dragDistanceSquared >= dragThresholdSquared)
-            {
-                _formMoveMouseDown = true;
-                _dragStartLocation = Location;
-                _mouseOffset = _pendingTabMouseDownScreen;
-            }
-            else
-            {
-                base.OnMouseMove(e);
-                return;
-            }
+            return;
         }
 
         if (!_formMoveMouseDown && _mouseCapturedElement != null)
