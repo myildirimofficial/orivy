@@ -1,4 +1,4 @@
-using Orivy.Animation;
+﻿using Orivy.Animation;
 using Orivy;
 using Orivy.Extensions;
 using Orivy.Helpers;
@@ -1979,6 +1979,30 @@ public class WindowPageControl : ElementBase
                 inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)155 : (byte)138) : ForeColor.WithAlpha(110);
                 break;
 
+            case WindowPageTabDesignMode.Fluent:
+                headerBackground    = (isDark ? ColorScheme.SurfaceContainerHigh : ColorScheme.SurfaceContainer).WithAlpha(isDark ? (byte)184 : (byte)218);
+                headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)44 : (byte)34);
+                inactiveBackground  = SKColors.Transparent;
+                hoverBackground     = ColorScheme.Primary.WithAlpha(isDark ? (byte)22 : (byte)14);
+                selectedBackground  = (isDark ? ColorScheme.SurfaceContainerHigh : ColorScheme.Surface).WithAlpha(isDark ? (byte)232 : (byte)242);
+                inactiveBorderColor = SKColors.Transparent;
+                selectedBorderColor = SKColors.White.WithAlpha(isDark ? (byte)36 : (byte)144);
+                activeTextColor     = Enabled ? ForeColor : ForeColor.WithAlpha(170);
+                inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)166 : (byte)150) : ForeColor.WithAlpha(110);
+                break;
+
+            case WindowPageTabDesignMode.MacOS:
+                headerBackground    = ColorScheme.SurfaceContainer.WithAlpha(isDark ? (byte)150 : (byte)178);
+                headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)54 : (byte)42);
+                inactiveBackground  = SKColors.Transparent;
+                hoverBackground     = SKColors.White.WithAlpha(isDark ? (byte)16 : (byte)70);
+                selectedBackground  = SKColors.White.WithAlpha(isDark ? (byte)34 : (byte)232);
+                inactiveBorderColor = SKColors.Transparent;
+                selectedBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)70 : (byte)46);
+                activeTextColor     = Enabled ? ForeColor : ForeColor.WithAlpha(170);
+                inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)164 : (byte)146) : ForeColor.WithAlpha(110);
+                break;
+
             case WindowPageTabDesignMode.Chromed:
             default:
                 // Browser chrome tabs: surface strip, elevated selected card, divider line
@@ -2014,9 +2038,16 @@ public class WindowPageControl : ElementBase
             }
         }
 
+        var activeTabsRect = SKRect.Empty;
+        for (var i = 0; i < _tabRects.Count; i++)
+        {
+            if (activeTabsRect.IsEmpty) activeTabsRect = _tabRects[i];
+            else activeTabsRect.Union(_tabRects[i]);
+        }
+
         DrawTabHeaderSurface(canvas, headerRect,
             _tabStripBackground == SKColors.Transparent ? headerBackground : _tabStripBackground,
-            headerBorderColor);
+            headerBorderColor, activeTabsRect);
         DrawTabStripResizer(canvas);
 
         var clippedTabContent = UsesVerticalTabLayout;
@@ -2285,14 +2316,14 @@ public class WindowPageControl : ElementBase
 
             _tabTextPaint.Color = GetWindowChromeTextColor(isSelected, isHovered, foreColor);
 
-            var chromePad     = WindowChromeTabHorizontalPadding * ScaleFactor;
+            var chromePad     = GetWindowChromeTabHorizontalContentPadding();
             var chromeIcon    = WindowChromeTabIconSize * ScaleFactor;
             var chromeSpacing = WindowChromeTabIconSpacing * ScaleFactor;
             var hasChromeIcon = DrawTabIcons && page.Image != null;
             var chromeTrailingR = pageIndex == _selectedIndex && _windowChromeCloseButtonRect.Width > 0f
                 ? _windowChromeCloseButtonRect.Width + chromeSpacing : 0f;
 
-            var chromeVertPad = WindowChromeTabCloseButtonInset * ScaleFactor;
+            var chromeVertPad = GetWindowChromeTabVerticalContentPadding();
             (iconRect, var textRect) = ComputeTabContentRects(rect, page.Text, hasChromeIcon,
                 chromePad, chromeVertPad, chromeIcon, chromeSpacing, chromeTrailingR);
 
@@ -2320,9 +2351,9 @@ public class WindowPageControl : ElementBase
             var ghostPage = GetPageAt(_dragTabSourceIndex);
             if (ghostPage != null) {
                 var hasGhostIcon = DrawTabIcons && ghostPage.Image != null;
-                var chromePad = WindowChromeTabHorizontalPadding * ScaleFactor;
+                var chromePad = GetWindowChromeTabHorizontalContentPadding();
                 (var ghostIconRect, var ghostTextRect) = ComputeTabContentRects(
-                    ghostRect, ghostPage.Text, hasGhostIcon, chromePad, WindowChromeTabCloseButtonInset * ScaleFactor, WindowChromeTabIconSize * ScaleFactor, WindowChromeTabIconSpacing * ScaleFactor, 0f);
+                    ghostRect, ghostPage.Text, hasGhostIcon, chromePad, GetWindowChromeTabVerticalContentPadding(), WindowChromeTabIconSize * ScaleFactor, WindowChromeTabIconSpacing * ScaleFactor, 0f);
                 if (hasGhostIcon) canvas.DrawImage(ghostPage.Image, ghostIconRect);
                 TextRenderer.DrawText(canvas, ghostPage.Text ?? string.Empty, ghostTextRect, _tabTextPaint, _tabFont, TextAlign, true, false);
             }
@@ -2549,7 +2580,7 @@ public class WindowPageControl : ElementBase
         _windowChromeTabWidthBuffer.Clear();
         PrepareTabFont((DrawTabIcons ? WindowChromeTabFontSizeWithIcon : WindowChromeTabFontSize).Topx(this));
 
-        var horizontalPadding = WindowChromeTabHorizontalPadding * ScaleFactor;
+        var horizontalPadding = GetWindowChromeTabHorizontalContentPadding();
         var chromeIconSize    = WindowChromeTabIconSize    * ScaleFactor;
         var chromeIconSpacing = WindowChromeTabIconSpacing * ScaleFactor;
         var closeButtonAllowance = TabCloseButton ? (WindowChromeTabCloseButtonSize + WindowChromeTabIconSpacing) * ScaleFactor : 0f;
@@ -2617,7 +2648,7 @@ public class WindowPageControl : ElementBase
 
         PrepareTabFont((DrawTabIcons ? WindowChromeTabFontSizeWithIcon : WindowChromeTabFontSize).Topx(this));
         var closeButtonSize = TabCloseButton ? WindowChromeTabCloseButtonSize * ScaleFactor : 0f;
-        var verticalPadding = WindowChromeTabCloseButtonInset * ScaleFactor;
+        var verticalPadding = GetWindowChromeTabVerticalContentPadding();
         var iconSize = WindowChromeTabIconSize * ScaleFactor;
         var iconSpacing = WindowChromeTabIconSpacing * ScaleFactor;
         var neededHeight = 0f;
@@ -2642,6 +2673,29 @@ public class WindowPageControl : ElementBase
         }
 
         return MathF.Ceiling(neededHeight);
+    }
+
+    private bool UsesStackedCenteredWindowChromeIcon()
+    {
+        return DrawTabIcons && ImageAlign is ContentAlignment.TopCenter or ContentAlignment.BottomCenter;
+    }
+
+    private float GetWindowChromeTabHorizontalContentPadding()
+    {
+        var padding = UsesStackedCenteredWindowChromeIcon()
+            ? 12f
+            : WindowChromeTabHorizontalPadding;
+
+        return padding * ScaleFactor;
+    }
+
+    private float GetWindowChromeTabVerticalContentPadding()
+    {
+        var padding = UsesStackedCenteredWindowChromeIcon()
+            ? 6.5f
+            : WindowChromeTabCloseButtonInset;
+
+        return padding * ScaleFactor;
     }
 
     private void UpdateWindowChromeAuxiliaryRects()
@@ -3029,7 +3083,7 @@ public class WindowPageControl : ElementBase
         return _tabGlyphPaint;
     }
 
-    private void DrawTabHeaderSurface(SKCanvas canvas, SKRect headerRect, SKColor backgroundColor, SKColor borderColor)
+    private void DrawTabHeaderSurface(SKCanvas canvas, SKRect headerRect, SKColor backgroundColor, SKColor borderColor, SKRect activeTabsRect)
     {
         var sf = ScaleFactor;
         _tabBorderPaint.Color = borderColor;
@@ -3037,6 +3091,47 @@ public class WindowPageControl : ElementBase
 
         if (UsesNonTopEmbeddedTabLayout)
         {
+            if (backgroundColor != SKColors.Transparent)
+            {
+                _tabBackgroundPaint.Color = backgroundColor;
+                switch (TabDesignMode)
+                {
+                    case WindowPageTabDesignMode.Rounded:
+                    case WindowPageTabDesignMode.RoundedCompact:
+                    case WindowPageTabDesignMode.Pill:
+                    case WindowPageTabDesignMode.MacOS:
+                    {
+                        if (activeTabsRect.Width > 0 && activeTabsRect.Height > 0)
+                        {
+                            var pad = MathF.Round((TabDesignMode == WindowPageTabDesignMode.MacOS ? 6f : 4f) * sf);
+                            var wrapRect = new SKRect(
+                                activeTabsRect.Left - pad,
+                                activeTabsRect.Top - pad,
+                                activeTabsRect.Right + pad,
+                                activeTabsRect.Bottom + pad);
+                            var wrapRadius = TabDesignMode == WindowPageTabDesignMode.MacOS
+                                ? MathF.Min(wrapRect.Width, wrapRect.Height) * 0.12f
+                                : MathF.Round(10f * sf);
+                            canvas.DrawRoundRect(wrapRect, wrapRadius, wrapRadius, _tabBackgroundPaint);
+                        }
+
+                        break;
+                    }
+
+                    case WindowPageTabDesignMode.Fluent:
+                    {
+                        DrawFluentTabSurface(canvas, headerRect, MathF.Round(8f * sf), backgroundColor, false);
+                        break;
+                    }
+
+                    default:
+                    {
+                        canvas.DrawRect(headerRect, _tabBackgroundPaint);
+                        break;
+                    }
+                }
+            }
+
             switch (_tabLayoutMode)
             {
                 case WindowPageTabLayoutMode.Left:
@@ -3060,6 +3155,39 @@ public class WindowPageControl : ElementBase
             }
 
             return;
+        }
+
+        if (backgroundColor != SKColors.Transparent)
+        {
+            _tabBackgroundPaint.Color = backgroundColor;
+            switch (TabDesignMode)
+            {
+                case WindowPageTabDesignMode.Rounded:
+                case WindowPageTabDesignMode.RoundedCompact:
+                case WindowPageTabDesignMode.Pill:
+                {
+                    if (activeTabsRect.Width > 0 && activeTabsRect.Height > 0)
+                    {
+                        var padX = MathF.Round(4f * sf);
+                        var padY = MathF.Round(4f * sf);
+                        var wrapRect = new SKRect(
+                            activeTabsRect.Left - padX,
+                            activeTabsRect.Top - padY,
+                            activeTabsRect.Right + padX,
+                            activeTabsRect.Bottom + padY);
+
+                        var wrapRadius = MathF.Round(10f * sf);
+                        canvas.DrawRoundRect(wrapRect, wrapRadius, wrapRadius, _tabBackgroundPaint);
+                    }
+                    break;
+                }
+                
+                default:
+                {
+                    canvas.DrawRect(headerRect, _tabBackgroundPaint);
+                    break;
+                }
+            }
         }
 
         switch (TabDesignMode)
@@ -3125,203 +3253,6 @@ public class WindowPageControl : ElementBase
         _tabBorderPaint.Color = borderColor;
         _tabBorderPaint.StrokeWidth = MathF.Max(1f, MathF.Round(sf));
 
-        if (UsesNonTopEmbeddedTabLayout)
-        {
-            DrawOrientedEmbeddedTabBackground(canvas, rect, isSelected, isHovered, backgroundColor, borderColor);
-            return;
-        }
-
-        switch (TabDesignMode)
-        {
-            case WindowPageTabDesignMode.Rectangle:
-            {
-                // Tailwind underline tabs: ghost hover tint + primary bottom indicator
-                if (isHovered && !isSelected)
-                {
-                    var ghostRect = new SKRect(
-                        MathF.Round(rect.Left + 2f * sf), MathF.Round(rect.Top + sf),
-                        MathF.Round(rect.Right - 2f * sf), MathF.Round(rect.Bottom - sf));
-                    var ghostRadius = MathF.Round(6f * sf);
-                    canvas.DrawRoundRect(ghostRect, ghostRadius, ghostRadius, _tabBackgroundPaint);
-                }
-                if (isSelected)
-                {
-                    // Full-width 2px primary indicator at the bottom edge
-                    _tabIndicatorPaint.Color = ColorScheme.Primary;
-                    var indH = MathF.Max(2f, MathF.Round(2.5f * sf));
-                    canvas.DrawRect(MathF.Round(rect.Left), MathF.Round(rect.Bottom) - indH, rect.Width, indH, _tabIndicatorPaint);
-                }
-                break;
-            }
-
-            case WindowPageTabDesignMode.Rounded:
-            {
-                // Segmented control: fills against the container background
-                if (isSelected || isHovered)
-                {
-                    var vIn = MathF.Round(2.5f * sf);
-                    var hIn = MathF.Round(2f * sf);
-                    var pillRect = new SKRect(
-                        MathF.Round(rect.Left + hIn), MathF.Round(rect.Top + vIn),
-                        MathF.Round(rect.Right - hIn), MathF.Round(rect.Bottom - vIn));
-                    var radius = MathF.Round(8f * sf);
-                    canvas.DrawRoundRect(pillRect, radius, radius, _tabBackgroundPaint);
-                    if (isSelected)
-                        canvas.DrawRoundRect(pillRect, radius, radius, _tabBorderPaint);
-                }
-                break;
-            }
-
-            case WindowPageTabDesignMode.RoundedCompact:
-            {
-                // shadcn/ui TabsTrigger: transparent until selected (card lift)
-                if (isSelected || isHovered)
-                {
-                    var vIn = MathF.Round(3f * sf);
-                    var hIn = MathF.Round(3f * sf);
-                    var cardRect = new SKRect(
-                        MathF.Round(rect.Left + hIn), MathF.Round(rect.Top + vIn + 3f * sf),
-                        MathF.Round(rect.Right - hIn), MathF.Round(rect.Bottom - vIn - 3f * sf));
-                    var radius = MathF.Round(6f * sf);
-                    canvas.DrawRoundRect(cardRect, radius, radius, _tabBackgroundPaint);
-                    if (isSelected)
-                        canvas.DrawRoundRect(cardRect, radius, radius, _tabBorderPaint);
-                }
-                break;
-            }
-
-            case WindowPageTabDesignMode.Pill:
-            {
-                // Full-height pill: selected gets opaque Primary fill, hover gets faint tint
-                if (isSelected || isHovered)
-                {
-                    var vIn = MathF.Round(3.5f * sf);
-                    var hIn = MathF.Round(3f * sf);
-                    var pillRect = new SKRect(
-                        MathF.Round(rect.Left + hIn),  MathF.Round(rect.Top + vIn),
-                        MathF.Round(rect.Right - hIn), MathF.Round(rect.Bottom - vIn));
-                    var radius = pillRect.Height / 2f;
-                    canvas.DrawRoundRect(pillRect, radius, radius, _tabBackgroundPaint);
-                }
-                break;
-            }
-
-            case WindowPageTabDesignMode.Outlined:
-            {
-                // Classic HTML tab: 3-sided border (left/top/right), open bottom merges with content
-                var sw   = _tabBorderPaint.StrokeWidth;
-                var half = sw * 0.5f;
-                var offTop = MathF.Round(4f * sf);
-                if (isSelected)
-                {
-                    var fillRect = new SKRect(
-                        MathF.Round(rect.Left), MathF.Round(rect.Top + offTop),
-                        MathF.Round(rect.Right), MathF.Round(rect.Bottom + sw));
-                    canvas.DrawRect(fillRect, _tabBackgroundPaint);
-                    var l = MathF.Round(rect.Left) + half;
-                    var t = MathF.Round(rect.Top + offTop) + half;
-                    var r = MathF.Round(rect.Right) - half;
-                    var b = MathF.Round(rect.Bottom) + sw;
-                    canvas.DrawLine(l, b, l, t, _tabBorderPaint);
-                    canvas.DrawLine(l, t, r, t, _tabBorderPaint);
-                    canvas.DrawLine(r, t, r, b, _tabBorderPaint);
-                }
-                else if (isHovered)
-                {
-                    var ghostRect = new SKRect(
-                        MathF.Round(rect.Left + 2f * sf), MathF.Round(rect.Top + offTop + 2f * sf),
-                        MathF.Round(rect.Right - 2f * sf), MathF.Round(rect.Bottom - sf));
-                    canvas.DrawRect(ghostRect, _tabBackgroundPaint);
-                }
-                break;
-            }
-
-            case WindowPageTabDesignMode.Minimal:
-            {
-                // Linear/Raycast: subtle full-height tint fill + 3px Primary left-edge accent bar
-                if (isSelected)
-                {
-                    canvas.DrawRect(
-                        new SKRect(MathF.Round(rect.Left), MathF.Round(rect.Top), MathF.Round(rect.Right), MathF.Round(rect.Bottom)),
-                        _tabBackgroundPaint);
-                    var indW   = MathF.Max(2f, MathF.Round(3f * sf));
-                    var indTop = MathF.Round(rect.Top + 8f * sf);
-                    var indBot = MathF.Round(rect.Bottom - 8f * sf);
-                    _tabIndicatorPaint.Color = _tabBorderPaint.Color;
-                    canvas.DrawRoundRect(
-                        SKRect.Create(MathF.Round(rect.Left), indTop, indW, MathF.Max(0f, indBot - indTop)),
-                        indW / 2f, indW / 2f, _tabIndicatorPaint);
-                }
-                else if (isHovered)
-                {
-                    canvas.DrawRect(
-                        new SKRect(MathF.Round(rect.Left), MathF.Round(rect.Top), MathF.Round(rect.Right), MathF.Round(rect.Bottom)),
-                        _tabBackgroundPaint);
-                }
-                break;
-            }
-
-            case WindowPageTabDesignMode.Fluent:
-            {
-                if (!isSelected && !isHovered)
-                    break;
-                var fluentRect = new SKRect(
-                    MathF.Round(rect.Left + 4f * sf),
-                    MathF.Round(rect.Top + 6f * sf),
-                    MathF.Round(rect.Right - 4f * sf),
-                    MathF.Round(rect.Bottom - 4f * sf));
-                _tabBackgroundPaint.Color = isSelected ? selectedBackground : hoverBackground;
-                canvas.DrawRoundRect(fluentRect, 4f * sf, 4f * sf, _tabBackgroundPaint);
-                if (isSelected)
-                {
-                    _tabIndicatorPaint.Color = ColorScheme.Primary;
-                    canvas.DrawRect(fluentRect.Left + 8f * sf, fluentRect.Bottom - 2f * sf, fluentRect.Width - 16f * sf, 2f * sf, _tabIndicatorPaint);
-                }
-                break;
-            }
-
-            case WindowPageTabDesignMode.MacOS:
-            {
-                if (!isSelected && !isHovered)
-                    break;
-                var macRect = new SKRect(
-                    MathF.Round(rect.Left + 2f * sf),
-                    MathF.Round(rect.Top + 4f * sf),
-                    MathF.Round(rect.Right - 2f * sf),
-                    MathF.Round(rect.Bottom - 4f * sf));
-                _tabBackgroundPaint.Color = isSelected ? selectedBackground : hoverBackground;
-                canvas.DrawRoundRect(macRect, macRect.Height / 2f, macRect.Height / 2f, _tabBackgroundPaint);
-                if (isSelected)
-                {
-                    _tabBorderPaint.Color = borderColor;
-                    canvas.DrawRoundRect(macRect, macRect.Height / 2f, macRect.Height / 2f, _tabBorderPaint);
-                }
-                break;
-            }
-
-            case WindowPageTabDesignMode.Chromed:
-            default:
-            {
-                if (isSelected || isHovered)
-                {
-                    var chrTop = isSelected ? MathF.Round(rect.Top + 4f * sf) : MathF.Round(rect.Top + 7f * sf);
-                    var chrBot = isSelected ? MathF.Round(rect.Bottom + sf) : MathF.Round(rect.Bottom - 3f * sf);
-                    var chromedRect = new SKRect(MathF.Round(rect.Left), chrTop, MathF.Round(rect.Right), chrBot);
-                    WindowPageTabGeometry.BuildTopRoundedTabPath(_tabChromePath, chromedRect, MathF.Round(10f * sf));
-                    canvas.DrawPath(_tabChromePath, _tabBackgroundPaint);
-                    if (isSelected)
-                        canvas.DrawPath(_tabChromePath, _tabBorderPaint);
-                }
-                break;
-            }
-        }
-    }
-
-    private void DrawOrientedEmbeddedTabBackground(SKCanvas canvas, SKRect rect, bool isSelected, bool isHovered,
-        SKColor backgroundColor, SKColor borderColor)
-    {
-        var sf = ScaleFactor;
-
         switch (TabDesignMode)
         {
             case WindowPageTabDesignMode.Rectangle:
@@ -3383,24 +3314,146 @@ public class WindowPageControl : ElementBase
             }
 
             case WindowPageTabDesignMode.Rounded:
+            {
+                if (!isSelected && !isHovered)
+                    break;
+
+                var vIn = MathF.Round(2.5f * sf);
+                var hIn = MathF.Round(2f * sf);
+                var pillRect = new SKRect(
+                    MathF.Round(rect.Left + hIn), MathF.Round(rect.Top + vIn),
+                    MathF.Round(rect.Right - hIn), MathF.Round(rect.Bottom - vIn));
+                var radius = MathF.Round(8f * sf);
+                canvas.DrawRoundRect(pillRect, radius, radius, _tabBackgroundPaint);
+                if (isSelected)
+                    canvas.DrawRoundRect(pillRect, radius, radius, _tabBorderPaint);
+                break;
+            }
+
             case WindowPageTabDesignMode.RoundedCompact:
+            {
+                if (!isSelected && !isHovered)
+                    break;
+
+                var vIn = MathF.Round(3f * sf);
+                var hIn = MathF.Round(3f * sf);
+                var cardRect = new SKRect(
+                    MathF.Round(rect.Left + hIn), MathF.Round(rect.Top + vIn),
+                    MathF.Round(rect.Right - hIn), MathF.Round(rect.Bottom - vIn));
+                var radius = MathF.Round(6f * sf);
+                canvas.DrawRoundRect(cardRect, radius, radius, _tabBackgroundPaint);
+                if (isSelected)
+                    canvas.DrawRoundRect(cardRect, radius, radius, _tabBorderPaint);
+                break;
+            }
+
+            case WindowPageTabDesignMode.Fluent:
+            {
+                if (!isSelected && !isHovered)
+                    break;
+
+                var fluentRect = new SKRect(
+                    MathF.Round(rect.Left + 4f * sf), MathF.Round(rect.Top + 4f * sf),
+                    MathF.Round(rect.Right - 4f * sf), MathF.Round(rect.Bottom - 4f * sf));
+                var radius = MathF.Round(6f * sf);
+                DrawFluentTabSurface(canvas, fluentRect, radius, backgroundColor, isSelected);
+                if (isSelected)
+                    DrawContentEdgeIndicator(canvas, rect, MathF.Max(2f, MathF.Round(2.5f * sf)), ColorScheme.Primary);
+                break;
+            }
+
+            case WindowPageTabDesignMode.MacOS:
+            {
+                if (!isSelected && !isHovered)
+                    break;
+
+                var macRect = new SKRect(
+                    MathF.Round(rect.Left + 2f * sf), MathF.Round(rect.Top + 4f * sf),
+                    MathF.Round(rect.Right - 2f * sf), MathF.Round(rect.Bottom - 4f * sf));
+                var radius = MathF.Min(macRect.Width, macRect.Height) * 0.5f;
+                canvas.DrawRoundRect(macRect, radius, radius, _tabBackgroundPaint);
+                if (isSelected)
+                    canvas.DrawRoundRect(macRect, radius, radius, _tabBorderPaint);
+                break;
+            }
+
             case WindowPageTabDesignMode.Chromed:
             default:
             {
                 if (!isSelected && !isHovered)
                     break;
 
-                var inset = MathF.Round(3f * sf);
-                var roundedRect = new SKRect(
-                    MathF.Round(rect.Left + inset), MathF.Round(rect.Top + inset),
-                    MathF.Round(rect.Right - inset), MathF.Round(rect.Bottom - inset));
-                var radius = MathF.Round(TabDesignMode == WindowPageTabDesignMode.Chromed ? 10f * sf : 8f * sf);
-                canvas.DrawRoundRect(roundedRect, radius, radius, _tabBackgroundPaint);
+                var inset = MathF.Round(isSelected ? 1f * sf : 4f * sf);
+                var chromedRect = new SKRect(
+                    MathF.Round(rect.Left + inset), MathF.Round(rect.Top + 3f * sf),
+                    MathF.Round(rect.Right - inset), MathF.Round(rect.Bottom - 3f * sf));
+                var radius = MathF.Round(10f * sf);
+                canvas.DrawRoundRect(chromedRect, radius, radius, _tabBackgroundPaint);
                 if (isSelected)
-                    canvas.DrawRoundRect(roundedRect, radius, radius, _tabBorderPaint);
+                {
+                    canvas.DrawRoundRect(chromedRect, radius, radius, _tabBorderPaint);
+                    DrawContentEdgeIndicator(canvas, rect, MathF.Max(1f, MathF.Round(1.5f * sf)), selectedBorderColor);
+                }
                 break;
             }
         }
+    }
+
+    private void DrawFluentTabSurface(SKCanvas canvas, SKRect rect, float radius, SKColor baseColor, bool elevated)
+    {
+        if (rect.Width <= 0f || rect.Height <= 0f)
+            return;
+
+        var topTint = ColorScheme.IsDarkMode
+            ? baseColor.WithAlpha((byte)Math.Min(255, baseColor.Alpha + 18))
+            : SKColors.White.WithAlpha(elevated ? (byte)210 : (byte)132);
+        var bottomTint = ColorScheme.IsDarkMode
+            ? baseColor.WithAlpha((byte)Math.Max(0, baseColor.Alpha - 10))
+            : baseColor;
+
+        using var fillPaint = new SKPaint
+        {
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill,
+            Shader = SKShader.CreateLinearGradient(
+                new SKPoint(rect.Left, rect.Top),
+                new SKPoint(rect.Right, rect.Bottom),
+                new[] { topTint, bottomTint },
+                new[] { 0f, 1f },
+                SKShaderTileMode.Clamp)
+        };
+
+        canvas.DrawRoundRect(rect, radius, radius, fillPaint);
+
+        using var revealPaint = new SKPaint
+        {
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = MathF.Max(1f, MathF.Round(ScaleFactor)),
+            Color = ColorScheme.IsDarkMode
+                ? SKColors.White.WithAlpha(elevated ? (byte)42 : (byte)24)
+                : SKColors.White.WithAlpha(elevated ? (byte)170 : (byte)96)
+        };
+        canvas.DrawRoundRect(rect, radius, radius, revealPaint);
+
+        if (!elevated)
+            return;
+
+        var shineRect = new SKRect(
+            rect.Left + MathF.Round(8f * ScaleFactor),
+            rect.Top + MathF.Round(4f * ScaleFactor),
+            rect.Right - MathF.Round(8f * ScaleFactor),
+            rect.Top + MathF.Round(5f * ScaleFactor));
+        if (shineRect.Width <= 0f || shineRect.Height <= 0f)
+            return;
+
+        using var shinePaint = new SKPaint
+        {
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill,
+            Color = SKColors.White.WithAlpha(ColorScheme.IsDarkMode ? (byte)36 : (byte)120)
+        };
+        canvas.DrawRoundRect(shineRect, shineRect.Height * 0.5f, shineRect.Height * 0.5f, shinePaint);
     }
 
     private void DrawContentEdgeIndicator(SKCanvas canvas, SKRect rect, float thickness, SKColor color)
