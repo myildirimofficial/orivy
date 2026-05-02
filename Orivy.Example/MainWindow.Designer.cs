@@ -1714,7 +1714,7 @@ internal partial class MainWindow
         {
             Name       = "embeddedTabToolbar",
             Dock       = DockStyle.Top,
-            Height     = 564,
+            Height     = 640,
             Margin     = new Thickness(0, 0, 0, 16),
             Padding    = new Thickness(16),
             Radius     = new Radius(16),
@@ -1755,6 +1755,29 @@ internal partial class MainWindow
         var embeddedModeButtons = new Container
         {
             Name      = "embeddedModeButtons",
+            Dock      = DockStyle.Top,
+            Height    = 36,
+            Margin    = new Thickness(0, 0, 0, 12),
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+        };
+
+        var customStyleLabel = new Element
+        {
+            Text      = "Custom Style",
+            Dock      = DockStyle.Top,
+            Height    = 22,
+            Margin    = new Thickness(0, 0, 0, 6),
+            BackColor = SKColors.Transparent,
+            Border    = new Thickness(0),
+            ForeColor = ColorScheme.ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)180 : (byte)160),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
+        };
+
+        var customStyleButtons = new Container
+        {
+            Name      = "customStyleButtons",
             Dock      = DockStyle.Top,
             Height    = 36,
             Margin    = new Thickness(0, 0, 0, 12),
@@ -1952,6 +1975,8 @@ internal partial class MainWindow
         var minimalModeButton        = MakeToolButton("minimalModeButton",        "Minimal");
         var fluentModeButton         = MakeToolButton("fluentModeButton",         "Fluent");
         var macOSModeButton          = MakeToolButton("macOSModeButton",          "MacOS");
+        var customStyleButton        = MakeToolButton("customStyleButton",        "Custom");
+        var clearStyleButton         = MakeToolButton("clearStyleButton",         "Clear");
 
         var startAlignButton  = MakeToolButton("startAlignButton",  "· Start");
         var centerAlignButton = MakeToolButton("centerAlignButton", "· Center");
@@ -2030,6 +2055,8 @@ internal partial class MainWindow
                 WindowPageTabDesignMode.Pill           => "Pill — filled Primary pill on selected, no container background.",
                 WindowPageTabDesignMode.Outlined       => "Outlined — classic 3-sided border tab, open bottom merges with content.",
                 WindowPageTabDesignMode.Minimal        => "Minimal — no chrome, Primary left-accent bar and tint on selected.",
+                WindowPageTabDesignMode.Fluent         => "Fluent — soft acrylic tint, reveal highlight, rounded selected surface.",
+                WindowPageTabDesignMode.MacOS          => "MacOS — compact inset capsule, subtle outline, sidebar-friendly spacing.",
                 _                                      => "Chromed — browser-style top-rounded tabs, Surface elevated on selected.",
             };
             var alignDesc = embeddedPageControl.TabAlignment switch
@@ -2045,7 +2072,9 @@ internal partial class MainWindow
                 WindowPageTabLayoutMode.Bottom => "Bottom",
                 _ => "Top",
             };
-            embeddedModeStatus.Text = $"Mode: {modeDesc}\nAlignment: {alignDesc} · Layout: {layoutDesc}";
+            embeddedModeStatus.Text = embeddedPageControl.CustomTabStyle.HasValue
+                ? $"Mode: Custom — builder-defined colors, spacing, shape and indicator.\nBase preset: {mode} · Alignment: {alignDesc} · Layout: {layoutDesc}"
+                : $"Mode: {modeDesc}\nAlignment: {alignDesc} · Layout: {layoutDesc}";
 
             SetButtonActive(roundedCompactModeButton, mode == WindowPageTabDesignMode.RoundedCompact);
             SetButtonActive(rectangleModeButton,      mode == WindowPageTabDesignMode.Rectangle);
@@ -2056,6 +2085,72 @@ internal partial class MainWindow
             SetButtonActive(minimalModeButton,        mode == WindowPageTabDesignMode.Minimal);
             SetButtonActive(fluentModeButton,         mode == WindowPageTabDesignMode.Fluent);
             SetButtonActive(macOSModeButton,          mode == WindowPageTabDesignMode.MacOS);
+            SetButtonActive(customStyleButton,        embeddedPageControl.CustomTabStyle.HasValue);
+            SetButtonActive(clearStyleButton,         embeddedPageControl.CustomTabStyle.HasValue);
+        }
+
+        void ApplyCustomTabStyle(WindowPageControl pageControl)
+        {
+            var isDark = ColorScheme.IsDarkMode;
+            var accent = ColorScheme.Primary;
+            var selectedSurface = isDark
+                ? ColorScheme.SurfaceContainerHigh.WithAlpha(238)
+                : SKColors.White.WithAlpha(246);
+            var hoverSurface = accent.WithAlpha(isDark ? (byte)24 : (byte)18);
+
+            pageControl.ConfigureTabStyle(style => style
+                .Header(header => header
+                    .Background(ColorScheme.SurfaceContainer.WithAlpha(isDark ? (byte)130 : (byte)172))
+                    .Border(ColorScheme.Outline.WithAlpha(isDark ? (byte)44 : (byte)46)))
+                .Metrics(metrics => metrics
+                    .Padding(horizontal: 18, vertical: 8)
+                    .SurfaceInset(new Thickness(4, 4, 4, 4))
+                    .Gap(5)
+                    .Width(min: 112, max: 252)
+                    .Height(min: 38, max: 72))
+                .Normal(tab => tab
+                    .Background(SKColors.Transparent)
+                    .Foreground(ColorScheme.ForeColor.WithAlpha(isDark ? (byte)176 : (byte)160))
+                    .Border(SKColors.Transparent, thickness: 0)
+                    .Radius(8))
+                .Hover(tab => tab
+                    .Background(hoverSurface)
+                    .Foreground(ColorScheme.ForeColor.WithAlpha(isDark ? (byte)226 : (byte)210))
+                    .Border(accent.WithAlpha(isDark ? (byte)42 : (byte)34), thickness: 1)
+                    .Radius(8))
+                .Selected(tab => tab
+                    .Background(selectedSurface)
+                    .Foreground(ColorScheme.ForeColor)
+                    .Border(accent.WithAlpha(isDark ? (byte)82 : (byte)70), thickness: 1)
+                    .Radius(9))
+                .Indicator(indicator => indicator
+                    .Color(accent)
+                    .Thickness(2f)),
+                clearExisting: true);
+        }
+
+        void ApplyEmbeddedCustomTabStyle()
+        {
+            embeddedPageControl.TabDesignMode = WindowPageTabDesignMode.Fluent;
+            windowPageControl.TabDesignMode   = WindowPageTabDesignMode.Fluent;
+
+            ApplyCustomTabStyle(embeddedPageControl);
+            ApplyCustomTabStyle(windowPageControl);
+            ApplyEmbeddedTabDesignMode(embeddedPageControl.TabDesignMode);
+        }
+
+        void ClearEmbeddedCustomTabStyle()
+        {
+            embeddedPageControl.ClearCustomTabStyle();
+            windowPageControl.ClearCustomTabStyle();
+            ApplyEmbeddedTabDesignMode(embeddedPageControl.TabDesignMode);
+        }
+
+        void ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode mode)
+        {
+            embeddedPageControl.ClearCustomTabStyle();
+            windowPageControl.ClearCustomTabStyle();
+            ApplyEmbeddedTabDesignMode(mode);
         }
 
         // ── Apply alignment ───────────────────────────────────────────────────
@@ -2145,15 +2240,17 @@ internal partial class MainWindow
             SetButtonActive(activeButton, true);
         }
 
-        roundedCompactModeButton.Click += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.RoundedCompact);
-        rectangleModeButton.Click      += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Rectangle);
-        roundedModeButton.Click        += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Rounded);
-        chromedModeButton.Click        += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Chromed);
-        pillModeButton.Click           += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Pill);
-        outlinedModeButton.Click       += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Outlined);
-        minimalModeButton.Click        += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Minimal);
-        fluentModeButton.Click         += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.Fluent);
-        macOSModeButton.Click          += (_, _) => ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode.MacOS);
+        roundedCompactModeButton.Click += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.RoundedCompact);
+        rectangleModeButton.Click      += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.Rectangle);
+        roundedModeButton.Click        += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.Rounded);
+        chromedModeButton.Click        += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.Chromed);
+        pillModeButton.Click           += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.Pill);
+        outlinedModeButton.Click       += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.Outlined);
+        minimalModeButton.Click        += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.Minimal);
+        fluentModeButton.Click         += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.Fluent);
+        macOSModeButton.Click          += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.MacOS);
+        customStyleButton.Click        += (_, _) => ApplyEmbeddedCustomTabStyle();
+        clearStyleButton.Click         += (_, _) => ClearEmbeddedCustomTabStyle();
 
         startAlignButton.Click  += (_, _) => ApplyEmbeddedTabAlignment(WindowPageTabAlignment.Start);
         centerAlignButton.Click += (_, _) => ApplyEmbeddedTabAlignment(WindowPageTabAlignment.Center);
@@ -2193,6 +2290,9 @@ internal partial class MainWindow
         embeddedModeButtons.Controls.Add(roundedModeButton);
         embeddedModeButtons.Controls.Add(rectangleModeButton);
         embeddedModeButtons.Controls.Add(roundedCompactModeButton);
+
+        customStyleButtons.Controls.Add(clearStyleButton);
+        customStyleButtons.Controls.Add(customStyleButton);
 
         embeddedAlignmentButtons.Controls.Add(endAlignButton);
         embeddedAlignmentButtons.Controls.Add(centerAlignButton);
@@ -2244,6 +2344,8 @@ internal partial class MainWindow
         embeddedToolbar.Controls.Add(layoutLabel);
         embeddedToolbar.Controls.Add(embeddedAlignmentButtons);
         embeddedToolbar.Controls.Add(alignmentLabel);
+        embeddedToolbar.Controls.Add(customStyleButtons);
+        embeddedToolbar.Controls.Add(customStyleLabel);
         embeddedToolbar.Controls.Add(embeddedModeButtons);
         embeddedToolbar.Controls.Add(designModeLabel);
 

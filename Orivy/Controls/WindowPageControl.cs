@@ -11,7 +11,7 @@ using System.Threading;
 
 namespace Orivy.Controls;
 
-public class WindowPageControl : ElementBase
+public partial class WindowPageControl : ElementBase
 {
     private const long DefaultMaxTransitionSnapshotBytes = 32L * 1024 * 1024;
     private const float DefaultTabGap = 0f;
@@ -35,6 +35,7 @@ public class WindowPageControl : ElementBase
     private const float TabStripResizerAnimationSpeed = 0.14f;
     private const float NewTabButtonSize = 22f;
     private const float TabSelectionAnimationSpeed = 0.14f;
+    private const float TabHoverAnimationStep = 0.18f;
     private const float TabDragThreshold = 6f;
     private const float WindowChromeTabHorizontalPadding = 8f;
     private const float WindowChromeTabIconSize = 16f;
@@ -103,6 +104,7 @@ public class WindowPageControl : ElementBase
     private WindowPageTabLayoutMode _tabLayoutMode = WindowPageTabLayoutMode.Top;
     private WindowPageTabMode _tabMode = WindowPageTabMode.WindowChrome;
     private SKColor _tabStripBackground = SKColors.Transparent;
+    private WindowTabStyle? _customTabStyle;
     private bool _allowTabDrag = true;
     private List<ElementBase>? _pageOrder;
     private int _dragTabSourceIndex = -1;
@@ -111,6 +113,12 @@ public class WindowPageControl : ElementBase
     private float _dragTabCurrentX;
     private int _dragTabInsertIndex = -1;
     private float[] _tabDodgeAnimOffsets = Array.Empty<float>();
+    private float[] _tabHoverProgress = Array.Empty<float>();
+    private float[] _tabHoverTargets = Array.Empty<float>();
+    private float[] _windowChromeTabHoverProgress = Array.Empty<float>();
+    private float[] _windowChromeTabHoverTargets = Array.Empty<float>();
+    private readonly object _tabHoverSync = new();
+    private readonly System.Timers.Timer _tabHoverTimer;
     private int _transitionFinalizationPending;
     private int _transitionFromIndex = -1;
     private int _transitionToIndex = -1;
@@ -209,6 +217,13 @@ public class WindowPageControl : ElementBase
         };
         _tabSelectionAnimation.OnAnimationProgress += HandleTabSelectionProgress;
         _tabSelectionAnimation.OnAnimationFinished += HandleTabSelectionFinished;
+
+        _tabHoverTimer = new System.Timers.Timer(16)
+        {
+            AutoReset = true,
+            Enabled = false
+        };
+        _tabHoverTimer.Elapsed += HandleTabHoverTimerElapsed;
 
         _tabStripResizerAnimation = new AnimationManager
         {
@@ -455,6 +470,33 @@ public class WindowPageControl : ElementBase
         }
     }
 
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public WindowTabStyle? CustomTabStyle
+    {
+        get => _customTabStyle;
+        set
+        {
+            _customTabStyle = value;
+            InvalidateTabChrome();
+        }
+    }
+
+    public WindowPageControl ConfigureTabStyle(Action<WindowTabStyleBuilder> configure, bool clearExisting = false)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+
+        var builder = new WindowTabStyleBuilder(clearExisting ? default : _customTabStyle ?? default);
+        configure(builder);
+        CustomTabStyle = builder.Build();
+        return this;
+    }
+
+    public void ClearCustomTabStyle()
+    {
+        CustomTabStyle = null;
+    }
+
     [Category("Appearance")]
     [Description("Background color of the embedded tab strip area. Overrides the design-mode default when not Transparent.")]
     public SKColor TabStripBackground
@@ -560,7 +602,7 @@ public class WindowPageControl : ElementBase
     public bool IsTransitioning => _transitionAnimation.IsAnimating() && HasTransitionSnapshots();
 
     [Browsable(false)]
-    internal float ResolvedTabGap => _tabGap;
+    internal float ResolvedTabGap => Math.Max(0f, _customTabStyle?.Metrics.Gap ?? _tabGap);
 
     private bool ShouldDrawTabStrip => TabMode == WindowPageTabMode.Embedded && Count > 0;
     private bool ShouldDrawTabStripResizer => _showTabStripResizer && SupportsTabStripResizer;
@@ -911,7 +953,11 @@ public class WindowPageControl : ElementBase
             !resizerStateChanged)
             return;
 
-        _hoveredTabIndex = hoveredTabIndex;
+        if (_hoveredTabIndex != hoveredTabIndex)
+        {
+            _hoveredTabIndex = hoveredTabIndex;
+            SetTabHoverTarget(_tabRects.Count, hoveredTabIndex);
+        }
         _hoveredTabCloseIndex = hoveredCloseTabIndex;
         _hoveredNewTabButton = hoveredNewTabButton;
         Invalidate();
@@ -956,6 +1002,7 @@ public class WindowPageControl : ElementBase
         if (_hoveredTabIndex >= 0 || _hoveredTabCloseIndex >= 0 || _hoveredNewTabButton || _hoveredTabStripResizer)
         {
             _hoveredTabIndex = -1;
+            SetTabHoverTarget(_tabRects.Count, -1);
             _hoveredTabCloseIndex = -1;
             _hoveredNewTabButton = false;
             if (_hoveredTabStripResizer)
@@ -1045,6 +1092,9 @@ public class WindowPageControl : ElementBase
             _tabSelectionAnimation.OnAnimationProgress -= HandleTabSelectionProgress;
             _tabSelectionAnimation.OnAnimationFinished -= HandleTabSelectionFinished;
             _tabSelectionAnimation.Dispose();
+            _tabHoverTimer.Elapsed -= HandleTabHoverTimerElapsed;
+            _tabHoverTimer.Stop();
+            _tabHoverTimer.Dispose();
             _tabStripResizerAnimation.OnAnimationProgress -= HandleTabStripResizerProgress;
             _tabStripResizerAnimation.Dispose();
             _transitionAnimation.OnAnimationProgress -= HandleTransitionProgress;
@@ -1076,6 +1126,11 @@ public class WindowPageControl : ElementBase
     private void HandleTabSelectionProgress(object _)
     {
         Invalidate();
+    }
+
+    private void HandleTabHoverTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
+    {
+        UpdateTabHoverAnimationFrame();
     }
 
     private void HandleTabStripResizerProgress(object _)
@@ -1889,7 +1944,7 @@ public class WindowPageControl : ElementBase
         var tabGap = ResolvedTabGap * ScaleFactor;
         var iconSize = TabIconSize * ScaleFactor;
         var iconSpacing = TabIconSpacing * ScaleFactor;
-        var horizontalPadding = TabHorizontalPadding * ScaleFactor;
+        var horizontalPadding = GetTabHorizontalContentPadding();
         var closeButtonSpacing = TabCloseButtonSpacing * ScaleFactor;
         var isDark = ColorScheme.IsDarkMode;
 
@@ -2017,6 +2072,18 @@ public class WindowPageControl : ElementBase
                 inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)168 : (byte)152) : ForeColor.WithAlpha(110);
                 break;
         }
+
+        ApplyCustomTabPalette(
+            ref headerBackground,
+            ref headerBorderColor,
+            ref inactiveBackground,
+            ref hoverBackground,
+            ref selectedBackground,
+            ref inactiveBorderColor,
+            ref selectedBorderColor,
+            ref activeTextColor,
+            ref inactiveTextColor);
+
         var shouldAnimateSelection = _tabSelectionAnimation.IsAnimating() &&
                                      _previousSelectedIndex >= 0 &&
                                      _previousSelectedIndex < _tabRects.Count &&
@@ -2108,6 +2175,8 @@ public class WindowPageControl : ElementBase
             _tabDodgeAnimOffsets = Array.Empty<float>();
         }
 
+        EnsureTabHoverState(_tabRects.Count);
+
         for (var tabIndex = 0; tabIndex < _tabRects.Count; tabIndex++)
         {
             if (_isDraggingTab && tabIndex == _dragTabSourceIndex)
@@ -2119,16 +2188,17 @@ public class WindowPageControl : ElementBase
 
             var isSelected = tabIndex == _selectedIndex && !shouldAnimateSelection;
             var isHovered = tabIndex == _hoveredTabIndex;
+            var hoverProgress = GetTabHoverProgress(tabIndex, isSelected);
             DrawTabBackground(canvas, rect, isSelected, isHovered,
                 inactiveBackground, selectedBackground, hoverBackground,
-                inactiveBorderColor, selectedBorderColor, indicatorHeight);
+                inactiveBorderColor, selectedBorderColor, indicatorHeight, hoverProgress);
         }
 
         if (animatedSelectionRect.Width > 0f && shouldAnimateSelection)
         {
             DrawTabBackground(canvas, animatedSelectionRect, true, false,
                 inactiveBackground, selectedBackground, hoverBackground,
-                inactiveBorderColor, selectedBorderColor, indicatorHeight);
+                inactiveBorderColor, selectedBorderColor, indicatorHeight, 0f);
         }
 
         for (var tabIndex = 0; tabIndex < _tabRects.Count; tabIndex++)
@@ -2142,6 +2212,7 @@ public class WindowPageControl : ElementBase
 
             var rect = _tabRects[tabIndex];
             var isSelected = tabIndex == _selectedIndex;
+            var hoverProgress = GetTabHoverProgress(tabIndex, isSelected);
             var iconRect = SKRect.Empty;
             var closeButtonRect = tabIndex < _tabCloseButtonRects.Count ? _tabCloseButtonRects[tabIndex] : SKRect.Empty;
             if (_isDraggingTab && tabIndex < _tabDodgeAnimOffsets.Length)
@@ -2158,8 +2229,8 @@ public class WindowPageControl : ElementBase
             var hasTabIcon = ShouldDrawTabIcons && page.Image != null;
             var tabTrailingReserve = closeButtonRect.Width > 0f ? closeButtonRect.Width + closeButtonSpacing : 0f;
             var innerVertPad = UsesVerticalTabLayout
-                ? TabVerticalInset * ScaleFactor * 2f
-                : TabVerticalInset * ScaleFactor;
+                ? GetTabVerticalContentPadding() * 2f
+                : GetTabVerticalContentPadding();
             SKRect textRect;
             (iconRect, textRect) = ComputeTabContentRects(rect, page.Text, hasTabIcon,
                 horizontalPadding, innerVertPad, iconSize, iconSpacing, tabTrailingReserve);
@@ -2167,7 +2238,8 @@ public class WindowPageControl : ElementBase
             if (hasTabIcon)
                 canvas.DrawImage(page.Image, iconRect);
 
-            _tabTextPaint.Color = isSelected ? activeTextColor : inactiveTextColor;
+            _tabTextPaint.Color = ResolveCustomTabTextColor(isSelected, hoverProgress,
+                activeTextColor, inactiveTextColor, inactiveBackground, hoverBackground, selectedBackground);
             TextRenderer.DrawText(canvas, page.Text ?? string.Empty, textRect, _tabTextPaint, _tabFont, TextAlign, true, false);
         }
 
@@ -2188,7 +2260,7 @@ public class WindowPageControl : ElementBase
 
             DrawTabBackground(canvas, ghostRect, true, false,
                 inactiveBackground, selectedBackground, hoverBackground,
-                inactiveBorderColor, selectedBorderColor, indicatorHeight);
+                inactiveBorderColor, selectedBorderColor, indicatorHeight, 0f);
 
             var ghostPage = GetPageAt(_dragTabSourceIndex);
             if (ghostPage != null)
@@ -2196,7 +2268,7 @@ public class WindowPageControl : ElementBase
                 var hasGhostIcon = ShouldDrawTabIcons && ghostPage.Image != null;
                 (var ghostIconRect, var ghostTextRect) = ComputeTabContentRects(
                     ghostRect, ghostPage.Text, hasGhostIcon,
-                    horizontalPadding, TabVerticalInset * ScaleFactor, iconSize, iconSpacing, 0f);
+                    horizontalPadding, GetTabVerticalContentPadding(), iconSize, iconSpacing, 0f);
 
                 if (hasGhostIcon)
                     canvas.DrawImage(ghostPage.Image, ghostIconRect);
@@ -2286,16 +2358,26 @@ public class WindowPageControl : ElementBase
         var effectiveHoverColor = titleColor != SKColor.Empty && !titleColor.IsDark()
             ? foreColor.WithAlpha(60)
             : hoverColor;
+        EnsureWindowChromeTabHoverState(_windowChromeTabRects.Count);
         var animOffset = _isDraggingTab && _selectedIndex < _tabDodgeAnimOffsets.Length ? _tabDodgeAnimOffsets[_selectedIndex] : 0f;
         var selectedRect = OffsetTabRectAlongPrimaryAxis(GetWindowChromeSelectedVisualRect(), animOffset);
 
-        if (_hoveredWindowChromeTabIndex >= 0 && _hoveredWindowChromeTabIndex < _windowChromeTabRects.Count && _hoveredWindowChromeTabIndex != _selectedIndex) {
-            var hoveredAnimOffset = _isDraggingTab && _hoveredWindowChromeTabIndex < _tabDodgeAnimOffsets.Length ? _tabDodgeAnimOffsets[_hoveredWindowChromeTabIndex] : 0f;
-            DrawWindowChromeTabSurface(canvas, OffsetTabRectAlongPrimaryAxis(_windowChromeTabRects[_hoveredWindowChromeTabIndex], hoveredAnimOffset), false, true, effectiveHoverColor, foreColor, titleColor);
+        for (var hoverIndex = 0; hoverIndex < _windowChromeTabRects.Count; hoverIndex++)
+        {
+            if (hoverIndex == _selectedIndex || (_isDraggingTab && hoverIndex == _dragTabSourceIndex))
+                continue;
+
+            var hoverProgress = GetWindowChromeTabHoverProgress(hoverIndex, false);
+            if (hoverProgress <= 0.001f)
+                continue;
+
+            var hoveredAnimOffset = _isDraggingTab && hoverIndex < _tabDodgeAnimOffsets.Length ? _tabDodgeAnimOffsets[hoverIndex] : 0f;
+            DrawWindowChromeTabSurface(canvas, OffsetTabRectAlongPrimaryAxis(_windowChromeTabRects[hoverIndex], hoveredAnimOffset),
+                false, true, hoverProgress, effectiveHoverColor, foreColor, titleColor);
         }
 
         if (!_isDraggingTab || _selectedIndex != _dragTabSourceIndex)
-            DrawWindowChromeTabSurface(canvas, selectedRect, true, false, effectiveHoverColor, foreColor, titleColor);
+            DrawWindowChromeTabSurface(canvas, selectedRect, true, false, 0f, effectiveHoverColor, foreColor, titleColor);
         PrepareTabFont((DrawTabIcons ? WindowChromeTabFontSizeWithIcon : WindowChromeTabFontSize).Topx(this));
 
         for (var pageIndex = 0; pageIndex < _windowChromeTabRects.Count; pageIndex++)
@@ -2313,8 +2395,9 @@ public class WindowPageControl : ElementBase
             var iconRect = SKRect.Empty;
             var isSelected = pageIndex == _selectedIndex;
             var isHovered = pageIndex == _hoveredWindowChromeTabIndex;
+            var hoverProgress = GetWindowChromeTabHoverProgress(pageIndex, isSelected);
 
-            _tabTextPaint.Color = GetWindowChromeTextColor(isSelected, isHovered, foreColor);
+            _tabTextPaint.Color = GetWindowChromeTextColor(isSelected, isHovered, hoverProgress, foreColor);
 
             var chromePad     = GetWindowChromeTabHorizontalContentPadding();
             var chromeIcon    = WindowChromeTabIconSize * ScaleFactor;
@@ -2346,7 +2429,7 @@ public class WindowPageControl : ElementBase
             using var ghostLayerPaint = new SKPaint { Color = new SKColor(255, 255, 255, 210) };
             var layerSaved = canvas.SaveLayer(ghostLayerPaint);
 
-            DrawWindowChromeTabSurface(canvas, ghostRect, true, false, effectiveHoverColor, foreColor, titleColor);
+            DrawWindowChromeTabSurface(canvas, ghostRect, true, false, 0f, effectiveHoverColor, foreColor, titleColor);
             
             var ghostPage = GetPageAt(_dragTabSourceIndex);
             if (ghostPage != null) {
@@ -2424,7 +2507,11 @@ public class WindowPageControl : ElementBase
             _hoveredWindowChromeNewTabButton == hoveredNewTabButton)
             return false;
 
-        _hoveredWindowChromeTabIndex = hoveredTabIndex;
+        if (_hoveredWindowChromeTabIndex != hoveredTabIndex)
+        {
+            _hoveredWindowChromeTabIndex = hoveredTabIndex;
+            SetWindowChromeTabHoverTarget(_windowChromeTabRects.Count, hoveredTabIndex);
+        }
 
         if (_hoveredWindowChromeCloseButton != hoveredCloseButton)
         {
@@ -2549,6 +2636,7 @@ public class WindowPageControl : ElementBase
             return false;
 
         _hoveredWindowChromeTabIndex = -1;
+        SetWindowChromeTabHoverTarget(_windowChromeTabRects.Count, -1);
 
         if (_hoveredWindowChromeCloseButton)
         {
@@ -2587,7 +2675,11 @@ public class WindowPageControl : ElementBase
         var newTabButtonSize = 24f * ScaleFactor;
         var newTabButtonGap = Math.Max(ResolvedTabGap * ScaleFactor, newTabButtonSize / 2f);
         var availableWidth = Math.Max(0f, context.AvailableWidth - (NewTabButton ? newTabButtonSize + newTabButtonGap : 0f));
-        var maxTabWidth = Math.Max(0f, context.MaxTabWidth);
+        var customMetrics = _customTabStyle.HasValue ? _customTabStyle.Value.Metrics : default;
+        var maxTabWidth = customMetrics.MaxWidth.HasValue
+            ? Math.Max(0f, customMetrics.MaxWidth.Value * ScaleFactor)
+            : Math.Max(0f, context.MaxTabWidth);
+        var minTabWidth = Math.Max(0f, (customMetrics.MinWidth ?? 0f) * ScaleFactor);
 
         for (var pageIndex = 0; pageIndex < Count; pageIndex++)
         {
@@ -2602,7 +2694,7 @@ public class WindowPageControl : ElementBase
                 chromeIconSize,
                 chromeIconSpacing,
                 closeButtonAllowance,
-                0f,
+                minTabWidth,
                 maxTabWidth,
                 DrawTabIcons,
                 TabCloseButton,
@@ -2651,6 +2743,9 @@ public class WindowPageControl : ElementBase
         var verticalPadding = GetWindowChromeTabVerticalContentPadding();
         var iconSize = WindowChromeTabIconSize * ScaleFactor;
         var iconSpacing = WindowChromeTabIconSpacing * ScaleFactor;
+        var customMetrics = _customTabStyle.HasValue ? _customTabStyle.Value.Metrics : default;
+        var minHeight = (customMetrics.MinHeight ?? 0f) * ScaleFactor;
+        var maxHeight = (customMetrics.MaxHeight ?? float.MaxValue) * ScaleFactor;
         var neededHeight = 0f;
 
         for (var pageIndex = 0; pageIndex < Count; pageIndex++)
@@ -2668,34 +2763,11 @@ public class WindowPageControl : ElementBase
                     iconSize,
                     iconSpacing,
                     closeButtonSize,
-                    0f,
-                    float.MaxValue));
+                    minHeight,
+                    maxHeight));
         }
 
         return MathF.Ceiling(neededHeight);
-    }
-
-    private bool UsesStackedCenteredWindowChromeIcon()
-    {
-        return DrawTabIcons && ImageAlign is ContentAlignment.TopCenter or ContentAlignment.BottomCenter;
-    }
-
-    private float GetWindowChromeTabHorizontalContentPadding()
-    {
-        var padding = UsesStackedCenteredWindowChromeIcon()
-            ? 12f
-            : WindowChromeTabHorizontalPadding;
-
-        return padding * ScaleFactor;
-    }
-
-    private float GetWindowChromeTabVerticalContentPadding()
-    {
-        var padding = UsesStackedCenteredWindowChromeIcon()
-            ? 6.5f
-            : WindowChromeTabCloseButtonInset;
-
-        return padding * ScaleFactor;
     }
 
     private void UpdateWindowChromeAuxiliaryRects()
@@ -2784,10 +2856,24 @@ public class WindowPageControl : ElementBase
         }
     }
 
-    private SKColor GetWindowChromeTextColor(bool isSelected, bool isHovered, SKColor foreColor)
+    private SKColor GetWindowChromeTextColor(bool isSelected, bool isHovered, float hoverProgress, SKColor foreColor)
     {
         if (!Enabled)
             return foreColor.WithAlpha(156);
+
+        if (_customTabStyle.HasValue)
+        {
+            var style = _customTabStyle.Value;
+            if (isSelected)
+                return ResolveCustomForeground(style.Selected.ForegroundColor, style.Selected.BackgroundColor, foreColor);
+
+            var normalText = ResolveCustomForeground(style.Normal.ForegroundColor, style.Normal.BackgroundColor, foreColor.WithAlpha(194));
+            if (style.Hover.ForegroundColor == SKColors.Empty)
+                return normalText;
+
+            var hoverText = ResolveCustomForeground(style.Hover.ForegroundColor, style.Hover.BackgroundColor, foreColor.WithAlpha(232));
+            return normalText.InterpolateColor(hoverText, Math.Clamp(hoverProgress, 0f, 1f));
+        }
 
         if (isSelected && TabDesignMode == WindowPageTabDesignMode.Pill)
             return ColorScheme.Primary.Determine();
@@ -2804,7 +2890,7 @@ public class WindowPageControl : ElementBase
         return foreColor.WithAlpha(194);
     }
 
-    private void DrawWindowChromeTabSurface(SKCanvas canvas, SKRect rect, bool isSelected, bool isHovered, SKColor hoverColor, SKColor foreColor, SKColor titleColor)
+    private void DrawWindowChromeTabSurface(SKCanvas canvas, SKRect rect, bool isSelected, bool isHovered, float hoverProgress, SKColor hoverColor, SKColor foreColor, SKColor titleColor)
     {
         if (rect.Width <= 0f || rect.Height <= 0f)
             return;
@@ -2816,14 +2902,23 @@ public class WindowPageControl : ElementBase
         var selectedBg = (isDark ? ColorScheme.SurfaceContainerHigh : ColorScheme.Surface)
             .WithAlpha(titleColor == SKColor.Empty ? (byte)255 : (byte)150);
         var hoverBg = foreColor.WithAlpha(isLightTitle ? (byte)14 : (byte)18);
-        var backgroundColor = isSelected ? selectedBg : hoverBg;
+        var backgroundColor = isSelected
+            ? selectedBg
+            : SKColors.Transparent.InterpolateColor(hoverBg, hoverProgress);
         var borderColor = isSelected
             ? ColorScheme.Outline.WithAlpha(isDark ? (byte)90 : (byte)68)
-            : ColorScheme.Outline.WithAlpha(isDark ? (byte)36 : (byte)28);
+            : SKColors.Transparent.InterpolateColor(ColorScheme.Outline.WithAlpha(isDark ? (byte)36 : (byte)28), hoverProgress);
 
         _tabBackgroundPaint.Color = backgroundColor;
         _tabBorderPaint.Color = borderColor;
         _tabBorderPaint.StrokeWidth = MathF.Max(1f, MathF.Round(sf));
+
+        if (TryDrawCustomTabBackground(canvas, rect, isSelected, isHovered, hoverProgress,
+            SKColors.Transparent, hoverBg, selectedBg,
+            SKColors.Transparent, ColorScheme.Outline.WithAlpha(isDark ? (byte)36 : (byte)28),
+            ColorScheme.Outline.WithAlpha(isDark ? (byte)90 : (byte)68),
+            MathF.Max(2f, MathF.Round(3f * sf))))
+            return;
 
         switch (TabDesignMode)
         {
@@ -3243,15 +3338,26 @@ public class WindowPageControl : ElementBase
 
     private void DrawTabBackground(SKCanvas canvas, SKRect rect, bool isSelected, bool isHovered,
         SKColor inactiveBackground, SKColor selectedBackground, SKColor hoverBackground,
-        SKColor inactiveBorderColor, SKColor selectedBorderColor, float indicatorHeight)
+        SKColor inactiveBorderColor, SKColor selectedBorderColor, float indicatorHeight, float hoverProgress)
     {
         var sf = ScaleFactor;
-        var backgroundColor = isSelected ? selectedBackground : isHovered ? hoverBackground : inactiveBackground;
-        var borderColor = isSelected ? selectedBorderColor : inactiveBorderColor;
+        isHovered = isHovered || hoverProgress > 0.001f;
+        var backgroundColor = isSelected
+            ? selectedBackground
+            : inactiveBackground.InterpolateColor(hoverBackground, hoverProgress);
+        var borderColor = isSelected
+            ? selectedBorderColor
+            : inactiveBorderColor;
 
         _tabBackgroundPaint.Color = backgroundColor;
         _tabBorderPaint.Color = borderColor;
         _tabBorderPaint.StrokeWidth = MathF.Max(1f, MathF.Round(sf));
+
+        if (TryDrawCustomTabBackground(canvas, rect, isSelected, isHovered, hoverProgress,
+            inactiveBackground, hoverBackground, selectedBackground,
+            inactiveBorderColor, inactiveBorderColor, selectedBorderColor,
+            indicatorHeight))
+            return;
 
         switch (TabDesignMode)
         {
@@ -3626,7 +3732,7 @@ public class WindowPageControl : ElementBase
         PrepareTabFont();
         var iconSize    = TabIconSize    * ScaleFactor;
         var iconSpacing = TabIconSpacing * ScaleFactor;
-        var vertInset   = TabVerticalInset * ScaleFactor;
+        var vertInset   = GetTabVerticalContentPadding();
 
         // blockH = iconSize + iconSpacing + textH via MeasureContentBlockSize (text=null → just font metrics)
         var (_, blockH) = WindowPageTabGeometry.MeasureContentBlockSize(
@@ -3648,8 +3754,8 @@ public class WindowPageControl : ElementBase
     {
         PrepareTabFont();
 
-        var axisPadding = Math.Max(4f * ScaleFactor, TabVerticalInset * ScaleFactor);
-        var horizontalPadding = TabHorizontalPadding * ScaleFactor;
+        var axisPadding = Math.Max(4f * ScaleFactor, GetTabVerticalContentPadding());
+        var horizontalPadding = GetTabHorizontalContentPadding();
         var minWidth = Math.Max(VerticalTabMinWidth * ScaleFactor, minimumThickness);
         var maxWidth = Math.Max(VerticalTabMaxWidth * ScaleFactor, minWidth);
         var iconSize    = TabIconSize    * ScaleFactor;
@@ -3773,10 +3879,11 @@ public class WindowPageControl : ElementBase
         PrepareTabFont();
 
         var gap = ResolvedTabGap * ScaleFactor;
-        var horizontalPadding = TabHorizontalPadding * ScaleFactor;
-        var verticalInset = TabVerticalInset * ScaleFactor;
-        var minWidth = TabMinWidth * ScaleFactor;
-        var maxWidth = TabMaxWidth * ScaleFactor;
+        var horizontalPadding = GetTabHorizontalContentPadding();
+        var verticalInset = GetTabVerticalContentPadding();
+        var customMetrics = _customTabStyle.HasValue ? _customTabStyle.Value.Metrics : default;
+        var minWidth = (customMetrics.MinWidth ?? TabMinWidth) * ScaleFactor;
+        var maxWidth = Math.Max(minWidth, (customMetrics.MaxWidth ?? TabMaxWidth) * ScaleFactor);
         var iconSize    = TabIconSize    * ScaleFactor;
         var iconSpacing = TabIconSpacing  * ScaleFactor;
         var closeButtonSize = TabCloseButtonSize * ScaleFactor;
@@ -3791,8 +3898,8 @@ public class WindowPageControl : ElementBase
             var tabWidth = Math.Max(0f, headerRect.Width - (axisPadding * 2f));
             var contentHeight = Math.Max(0f, headerRect.Height - (axisPadding * 2f) - newTabReserve);
             var verticalPadding = verticalInset * 2f;
-            var minHeight = VerticalTabMinHeight * ScaleFactor;
-            var maxHeight = VerticalTabMaxHeight * ScaleFactor;
+            var minHeight = (customMetrics.MinHeight ?? VerticalTabMinHeight) * ScaleFactor;
+            var maxHeight = Math.Max(minHeight, (customMetrics.MaxHeight ?? VerticalTabMaxHeight) * ScaleFactor);
 
             for (var pageIndex = 0; pageIndex < pageCount; pageIndex++)
             {
@@ -3914,7 +4021,8 @@ public class WindowPageControl : ElementBase
             null, ShouldDrawTabIcons, _tabFont, iconSize, iconSpacing, ImageAlign);
 
         var contentH = Math.Max(blockH, closeButtonW);
-        return Math.Max(VerticalTabMinHeight * ScaleFactor, MathF.Ceiling(contentH + TabVerticalInset * ScaleFactor * 4f));
+        var customMinHeight = _customTabStyle.HasValue ? _customTabStyle.Value.Metrics.MinHeight : null;
+        return Math.Max((customMinHeight ?? VerticalTabMinHeight) * ScaleFactor, MathF.Ceiling(contentH + GetTabVerticalContentPadding() * 4f));
     }
 
     private float MeasureDesiredTabHeight(ElementBase page, bool includeIcon, float verticalPadding,

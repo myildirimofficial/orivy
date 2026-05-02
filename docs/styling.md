@@ -123,7 +123,85 @@ Controls with richer appearance often follow this pattern:
 
 The default `Button` also demonstrates this flow by defining a full visual-style profile in its constructor, including hover, pressed, focused, and disabled states.
 
-## 5. Native Window Theme Integration
+## 5. Window Tab Styling
+
+`WindowPageControl` supports preset tab appearances through `TabDesignMode`, and it can also accept a user-defined tab style through `CustomTabStyle` or `ConfigureTabStyle(...)`.
+
+The tab style API is intentionally data-first. Tabs are still lightweight, virtual header items painted by `WindowPageControl`; they are not separate `ElementBase` children. This keeps titlebar tabs, embedded tabs, drag ordering, hit testing, and close button behavior on the existing fast path.
+
+The style is split into focused groups:
+
+- `WindowTabVisual`: background, foreground, border, radius, and blur for normal, hover, and selected states
+- `WindowTabMetrics`: padding, surface inset, gap, and min/max tab dimensions
+- `WindowTabHeaderStyle`: tab strip background and border
+- `WindowTabIndicatorStyle`: selected indicator color and thickness
+
+Example with the fluent builder:
+
+```csharp
+pageControl.ConfigureTabStyle(style => style
+    .Header(header => header
+        .Background(ColorScheme.SurfaceContainer)
+        .Border(ColorScheme.Outline.WithAlpha(54)))
+    .Metrics(metrics => metrics
+        .Padding(horizontal: 16, vertical: 7)
+        .SurfaceInset(4)
+        .Gap(4)
+        .Height(min: 36, max: 72))
+    .Normal(tab => tab
+        .Foreground(ColorScheme.ForeColor.WithAlpha(170)))
+    .Hover(tab => tab
+        .Background(ColorScheme.Primary.WithAlpha(18))
+        .Radius(8))
+    .Selected(tab => tab
+        .Background(ColorScheme.Primary)
+        .Foreground(SKColors.Empty)
+        .Border(ColorScheme.Primary.WithAlpha(180), thickness: 1)
+        .Radius(10)
+        .Blur(4))
+    .Indicator(indicator => indicator
+        .Color(SKColors.White.WithAlpha(220))
+        .Thickness(3)));
+```
+
+`SKColors.Empty` means "not specified". For foreground colors, an empty selected foreground is resolved from the selected background automatically.
+
+The same style can be assigned directly:
+
+```csharp
+pageControl.CustomTabStyle = new WindowTabStyle
+{
+    Selected = new WindowTabVisual
+    {
+        BackgroundColor = ColorScheme.Primary,
+        ForegroundColor = SKColors.Empty,
+        BorderRadius = 999,
+        BorderThickness = 0
+    },
+    Metrics = new WindowTabMetrics
+    {
+        Padding = new Thickness(18, 8, 18, 8),
+        SurfaceInset = new Thickness(4),
+        Gap = 6
+    }
+};
+```
+
+Call `ClearCustomTabStyle()` to return to the selected `TabDesignMode` preset.
+
+The example app exposes this through the Tab Control page:
+
+- `Custom` applies a builder-defined tab style to both embedded and titlebar tabs.
+- `Clear` removes `CustomTabStyle` and returns rendering to the active preset.
+
+Notes:
+
+- Metrics can be used without custom drawing; if only padding or gap is supplied, the selected preset renderer stays active.
+- Custom visual values switch the tab surface to the generic custom renderer.
+- `CustomTabStyle` applies to both embedded tabs and titlebar/window-chrome tabs.
+- `WindowTabMetrics.Padding` is content padding. `SurfaceInset` is the visual surface inset. Keep these separate to avoid layout changes when only the painted shape should move.
+
+## 6. Native Window Theme Integration
 
 `WindowBase` exposes `WindowThemeType` to align the native window with Orivy's theme. Supported values are:
 
@@ -146,7 +224,7 @@ var window = new Window
 ColorScheme.SetThemeInstant(dark: true);
 ```
 
-## 6. Elevation and Flat Design
+## 7. Elevation and Flat Design
 
 `Orivy/Helpers/ElevationHelper.cs` provides higher-level styling helpers for depth and polish.
 
@@ -158,20 +236,33 @@ Key behaviors:
 
 Use these helpers when a custom control needs manual paint logic but still wants to match the shared theme vocabulary.
 
-## 7. Best Practices
+## 8. Best Practices
 
 - Prefer `ColorScheme` properties over hard-coded colors for default surfaces and text.
 - Use `ConfigureVisualStyles(...)` for state changes instead of manually mutating colors in every mouse event.
 - Reuse a single `ApplyTheme()` method when a control listens to `ThemeChanged`.
 - Keep visual style rules small and composable; put the common shape in `Base(...)` and state deltas in individual rules.
+- For `WindowPageControl` tabs, prefer `CustomTabStyle` over adding another `WindowPageTabDesignMode` when the style is app-specific.
 - Use `ReevaluateVisualStyles()` after state or theme changes that affect predicate-based rules.
 - Reserve motion and ambient decorative effects for `ConfigureMotionEffects(...)`; keep them separate from the core styling contract.
 
-## 8. Source Reference
+## 9. Source Reference
 
 - `Orivy/ColorScheme.cs`
 - `Orivy/Controls/ElementBase.VisualStyles.cs`
+- `Orivy/Controls/WindowPageControl.cs`
+- `Orivy/Controls/WindowPageControl.TabStyles.cs`
 - `Orivy/Styling/ElementVisualStyles.cs`
+- `Orivy/Styling/WindowTabStyle.cs`
+- `Orivy/Styling/WindowTabVisual.cs`
+- `Orivy/Styling/WindowTabMetrics.cs`
+- `Orivy/Styling/WindowTabHeaderStyle.cs`
+- `Orivy/Styling/WindowTabIndicatorStyle.cs`
+- `Orivy/Styling/WindowTabStyleBuilder.cs`
+- `Orivy/Styling/WindowTabVisualBuilder.cs`
+- `Orivy/Styling/WindowTabMetricsBuilder.cs`
+- `Orivy/Styling/WindowTabHeaderStyleBuilder.cs`
+- `Orivy/Styling/WindowTabIndicatorStyleBuilder.cs`
 - `Orivy/Helpers/ElevationHelper.cs`
 - `Orivy/Controls/Button.cs`
 - `Orivy/Controls/ComboBox.cs`
