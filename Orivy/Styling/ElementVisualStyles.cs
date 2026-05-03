@@ -14,7 +14,8 @@ public enum ElementVisualStates
     Pressed = 1 << 1,
     Focused = 1 << 2,
     Disabled = 1 << 3,
-    Hidden = 1 << 4
+    Hidden = 1 << 4,
+    Invalid = 1 << 5
 }
 
 public readonly record struct ElementVisualStateContext(ElementBase Element, ElementVisualStates States)
@@ -24,6 +25,8 @@ public readonly record struct ElementVisualStateContext(ElementBase Element, Ele
     public bool IsFocused => States.HasFlag(ElementVisualStates.Focused);
     public bool IsEnabled => !States.HasFlag(ElementVisualStates.Disabled);
     public bool IsVisible => !States.HasFlag(ElementVisualStates.Hidden);
+    public bool IsValid => !States.HasFlag(ElementVisualStates.Invalid);
+    public bool HasValidationError => States.HasFlag(ElementVisualStates.Invalid);
 }
 
 public enum ElementVisualTransitionMode
@@ -734,6 +737,11 @@ public sealed class ElementVisualStyleBuilder
     public ElementVisualStyleBuilder OnHidden(Action<ElementVisualStyleRuleBuilder> configure)
     {
         return When(ElementVisualStates.Hidden, configure);
+    }
+
+    public ElementVisualStyleBuilder OnInvalid(Action<ElementVisualStyleRuleBuilder> configure)
+    {
+        return When(ElementVisualStates.Invalid, configure);
     }
 
     public ElementVisualStyleBuilder When(

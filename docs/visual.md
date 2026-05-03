@@ -34,6 +34,7 @@ Available built-in states:
 - Focused
 - Disabled
 - Hidden
+- Invalid
 
 Example:
 
@@ -73,6 +74,8 @@ card.ConfigureVisualStyles(styles =>
             .BorderColor(ColorScheme.Primary));
 });
 ```
+
+`Invalid` is driven by the built-in validation flow. When `IsValid` changes, visual styles are re-resolved automatically, so validation styling does not need a manual `ReevaluateVisualStyles()` call.
 
 ### Predicate Rules
 

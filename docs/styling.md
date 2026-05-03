@@ -67,6 +67,7 @@ Built-in state flags:
 - `Focused`
 - `Disabled`
 - `Hidden`
+- `Invalid`
 
 ## 3. Style Builder Surface
 
@@ -81,6 +82,7 @@ Most useful entry points:
 - `OnFocused(...)`
 - `OnDisabled(...)`
 - `OnHidden(...)`
+- `OnInvalid(...)`
 - `When(ElementVisualStates, ...)`
 - `When((element, state) => ..., ...)`
 
@@ -102,6 +104,9 @@ card.ConfigureVisualStyles(styles =>
             .BorderColor(ColorScheme.Primary))
         .OnPressed(rule => rule
             .Opacity(0.94f))
+        .OnInvalid(rule => rule
+            .BorderColor(ColorScheme.Error)
+            .Foreground(ColorScheme.Error))
         .When(
             (element, state) => Equals(element.Tag, "danger") && state.IsPointerOver,
             rule => rule
@@ -109,6 +114,8 @@ card.ConfigureVisualStyles(styles =>
                 .Foreground(SKColors.White));
 });
 ```
+
+`OnInvalid(...)` follows `ElementBase.IsValid` / `HasValidationError`. The style engine refreshes when validation status changes, so validation-driven styles stay in sync without extra calls.
 
 ## 4. Theme-Aware Control Pattern
 

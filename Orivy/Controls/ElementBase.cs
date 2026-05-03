@@ -1220,7 +1220,25 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
-    [Browsable(false)] public bool Focused { get; internal set; }
+    private bool _focused;
+
+    [Browsable(false)]
+    public bool Focused
+    {
+        get => _focused;
+        internal set => SetFocused(value);
+    }
+
+    private void SetFocused(bool value)
+    {
+        if (_focused == value)
+            return;
+
+        _focused = value;
+        RefreshVisualStylesForStateChange();
+        UpdateMotionEffectsState();
+        Invalidate();
+    }
 
     private string _name = string.Empty;
 
@@ -1405,6 +1423,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             _isValid = value;
             IsValidChanged?.Invoke(this, EventArgs.Empty);
             HasValidationErrorChanged?.Invoke(this, EventArgs.Empty);
+            RefreshVisualStylesForStateChange();
+            UpdateMotionEffectsState();
             Invalidate();
         }
     }
@@ -2528,10 +2548,12 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         if (Parent == null)
             return;
 
-        Focused = true;
-        Parent.FocusedElement = this;
+        if (Parent.FocusedElement != this)
+            Parent.FocusedElement = this;
+        else
+            Focused = true;
+
         Parent.Invalidate();
-        OnGotFocus(EventArgs.Empty);
     }
 
     public bool IsAncestorSiteInDesignMode { get; internal set; }
@@ -3231,15 +3253,14 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     internal virtual void OnGotFocus(EventArgs e)
     {
+        Focused = true;
         GotFocus?.Invoke(this, e);
-        RefreshVisualStylesForStateChange();
     }
 
     internal virtual void OnLostFocus(EventArgs e)
     {
         Focused = false;
         LostFocus?.Invoke(this, e);
-        RefreshVisualStylesForStateChange();
         if (CausesValidation)
             ValidateElement();
     }

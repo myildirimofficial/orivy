@@ -167,6 +167,9 @@ public abstract partial class ElementBase
         if (!Visible)
             states |= ElementVisualStates.Hidden;
 
+        if (HasValidationError)
+            states |= ElementVisualStates.Invalid;
+
         return new ElementVisualStateContext(this, states);
     }
 
