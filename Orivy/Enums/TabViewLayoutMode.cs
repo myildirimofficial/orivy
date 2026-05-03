@@ -2,9 +2,9 @@ namespace Orivy;
 
 /// <summary>
 /// Determines which edge hosts the embedded tab strip.
-/// Window chrome tabs always remain at the top edge.
+/// Title bar tabs always remain at the top edge.
 /// </summary>
-public enum WindowPageTabLayoutMode
+public enum TabViewLayoutMode
 {
     Top,
     Left,

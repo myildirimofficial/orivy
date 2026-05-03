@@ -1,4 +1,4 @@
-ï»¿using Orivy;
+using Orivy;
 using Orivy.Animation;
 using Orivy.Binding;
 using Orivy.Controls;
@@ -1025,13 +1025,13 @@ internal partial class MainWindow
         this.gridListToggleGridLinesButton.Click += GridListToggleGridLinesButton_Click;
         this.gridListToggleRowResizeButton.Click += GridListToggleRowResizeButton_Click;
 
-        windowPageControl = new()
+        tabView = new()
         {
-            Name = "windowPageControl",
+            Name = "tabView",
             Dock = Orivy.DockStyle.Fill,
-            TabMode = WindowPageTabMode.WindowChrome,
+            TabMode = TabViewMode.TitleBar,
             DrawTabIcons = true,
-            TransitionEffect = WindowPageTransitionEffect.ScaleFade,
+            TransitionEffect = TabViewTransitionEffect.ScaleFade,
             TransitionAnimationType = AnimationType.QuarticEaseOut,
             TransitionDurationMs = 350,
             LockInputDuringTransition = true,
@@ -1049,7 +1049,7 @@ internal partial class MainWindow
         this.panel5.Image = scrollTabIcon;
         this.panel6.Image = gridTabIcon;
 
-        // build example menu strip demonstrating topâ€‘level menus and submenus
+        // build example menu strip demonstrating top-level menus and submenus
         this.menuStrip = new MenuStrip
         {
             Name = "menuStrip",
@@ -1076,7 +1076,7 @@ internal partial class MainWindow
         var windowMenu = this.menuStrip.AddMenuItem("Window");
         InitializeWindowMenu(windowMenu);
 
-        // --- ExtendMenu: drop-down that appears when the extend button (â‹¯) in
+        // --- ExtendMenu: drop-down that appears when the extend button (?) in
         // the title bar is clicked. ExtendBox must be true to show the button.
         this.extendMenu = new ContextMenuStrip();
         
@@ -1100,10 +1100,10 @@ internal partial class MainWindow
         this.ShowMenuInsteadOfIcon = true;
         this.FormMenu = this.extendMenu;
 
-        windowPageControl.Controls.Add(panel3);
-        windowPageControl.Controls.Add(panel4);
-        windowPageControl.Controls.Add(panel5);
-        windowPageControl.Controls.Add(panel6);
+        tabView.Controls.Add(panel3);
+        tabView.Controls.Add(panel4);
+        tabView.Controls.Add(panel5);
+        tabView.Controls.Add(panel6);
 
         InitializeBindingDemoPage();
         InitializeGridListDemo();
@@ -1131,11 +1131,11 @@ internal partial class MainWindow
         this.WindowThemeType = WindowThemeType.Tabbed;
         RefreshWindowThemeMenuChecks();
         this.ContextMenuStrip = this.extendMenu;
-        this.WindowPageControl = windowPageControl;
+        this.TabView = tabView;
         this.FormStartPosition = Orivy.FormStartPosition.CenterScreen;
         this.RenderBackend = Orivy.Rendering.RenderBackend.Software;
         this.ShowPerfOverlay = true;
-        this.Controls.Add(this.windowPageControl);
+        this.Controls.Add(tabView);
         this.Controls.Add(this.menuStrip);
         this.menuStrip.BringToFront();
         this.ResumeLayout(false);
@@ -1640,9 +1640,9 @@ internal partial class MainWindow
         panel7.Controls.Add(notifRow1);
         panel7.Controls.Add(notifHeader);
 
-        windowPageControl.Controls.Add(panel7);
-        windowPageControl.PerformLayout();
-        windowPageControl.Invalidate();
+        tabView.Controls.Add(panel7);
+        tabView.PerformLayout();
+        tabView.Invalidate();
 
         notifBtnInfo.Click         += NotifBtnInfo_Click;
         notifBtnSuccess.Click      += NotifBtnSuccess_Click;
@@ -1685,31 +1685,31 @@ internal partial class MainWindow
             AutoScroll = true
         };
 
-        // â”€â”€ Main embedded tab control â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        var embeddedPageControl = new WindowPageControl
+        // ¦¦ Main embedded tab control ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        var embeddedTabView = new TabView
         {
-            Name                      = "embeddedPageControl",
+            Name                      = "embeddedTabView",
             Dock                      = DockStyle.Fill,
             Padding                   = new Thickness(0),
             Radius                    = new Radius(14),
             Border                    = new Thickness(1),
-            TabMode                   = WindowPageTabMode.Embedded,
-            TabDesignMode             = WindowPageTabDesignMode.RoundedCompact,
-            TabAlignment              = WindowPageTabAlignment.Start,
+            TabMode                   = TabViewMode.Embedded,
+            TabDesignMode             = TabViewDesignMode.RoundedCompact,
+            TabAlignment              = TabViewAlignment.Start,
             TabCloseButton            = true,
             NewTabButton              = true,
             DrawTabIcons              = true,
             TabStripHeight            = 44,
-            TransitionEffect          = WindowPageTransitionEffect.Fade,
+            TransitionEffect          = TabViewTransitionEffect.Fade,
             TransitionAnimationType   = AnimationType.Linear,
             TransitionDurationMs      = 300,
             LockInputDuringTransition = true,
             TextAlign                   = ContentAlignment.MiddleCenter,
             MinimumSize = new SKSize(0, 300),
         };
-        _embeddedPageControl = embeddedPageControl;
+        _embeddedTabView = embeddedTabView;
 
-        // â”€â”€ Toolbar shell â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ¦¦ Toolbar shell ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
         var embeddedToolbar = new Container
         {
             Name       = "embeddedTabToolbar",
@@ -1723,7 +1723,7 @@ internal partial class MainWindow
             BackColor  = ColorScheme.SurfaceContainerHigh,
         };
 
-        // â”€â”€ Status bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ¦¦ Status bar ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
         var embeddedModeStatus = new Element
         {
             Name      = "embeddedModeStatus",
@@ -1737,7 +1737,7 @@ internal partial class MainWindow
             TextAlign = ContentAlignment.MiddleLeft,
         };
 
-        // â”€â”€ Row 1 label â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ¦¦ Row 1 label ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
         var designModeLabel = new Element
         {
             Text      = "Design Mode",
@@ -1751,7 +1751,7 @@ internal partial class MainWindow
             Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
         };
 
-        // â”€â”€ Row 1: design mode buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ¦¦ Row 1: design mode buttons ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
         var embeddedModeButtons = new Container
         {
             Name      = "embeddedModeButtons",
@@ -1785,7 +1785,7 @@ internal partial class MainWindow
             Border    = new Thickness(0),
         };
 
-        // â”€â”€ Row 2 label â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ¦¦ Row 2 label ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
         var alignmentLabel = new Element
         {
             Text      = "Tab Alignment",
@@ -1799,7 +1799,7 @@ internal partial class MainWindow
             Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
         };
 
-        // â”€â”€ Row 2: alignment buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ¦¦ Row 2: alignment buttons ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
         var embeddedAlignmentButtons = new Container
         {
             Name      = "embeddedAlignmentButtons",
@@ -1833,7 +1833,7 @@ internal partial class MainWindow
             Border    = new Thickness(0),
         };
 
-        // â”€â”€ Row 4 label â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ¦¦ Row 4 label ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
         var textAlignmentLabel = new Element
         {
             Text      = "Text Alignment",
@@ -1847,7 +1847,7 @@ internal partial class MainWindow
             Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
         };
 
-        // â”€â”€ Row 4: text alignment buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ¦¦ Row 4: text alignment buttons ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
         var embeddedTextAlignButtons = new Container
         {
             Name      = "embeddedTextAlignButtons",
@@ -1887,7 +1887,7 @@ internal partial class MainWindow
             Border    = new Thickness(0),
         };
 
-        // â”€â”€ Row 5 label â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ¦¦ Row 5 label ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
         var iconAlignmentLabel = new Element
         {
             Text      = "Icon Alignment",
@@ -1901,7 +1901,7 @@ internal partial class MainWindow
             Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
         };
 
-        // â”€â”€ Row 5: icon alignment buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ¦¦ Row 5: icon alignment buttons ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
         var embeddedIconAlignButtons = new Container
         {
             Name      = "embeddedIconAlignButtons",
@@ -1941,7 +1941,7 @@ internal partial class MainWindow
             Border    = new Thickness(0),
         };
 
-        // â”€â”€ Design mode buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ¦¦ Design mode buttons ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
         Button MakeToolButton(string name, string text) => new Button
         {
             Name                = name,
@@ -1978,9 +1978,9 @@ internal partial class MainWindow
         var customStyleButton        = MakeToolButton("customStyleButton",        "Custom");
         var clearStyleButton         = MakeToolButton("clearStyleButton",         "Clear");
 
-        var startAlignButton  = MakeToolButton("startAlignButton",  "Â· Start");
-        var centerAlignButton = MakeToolButton("centerAlignButton", "Â· Center");
-        var endAlignButton    = MakeToolButton("endAlignButton",    "Â· End");
+        var startAlignButton  = MakeToolButton("startAlignButton",  "· Start");
+        var centerAlignButton = MakeToolButton("centerAlignButton", "· Center");
+        var endAlignButton    = MakeToolButton("endAlignButton",    "· End");
 
         var topLayoutButton    = MakeToolButton("topLayoutButton",    "Top");
         var leftLayoutButton   = MakeToolButton("leftLayoutButton",   "Left");
@@ -2032,7 +2032,7 @@ internal partial class MainWindow
             iconAlignBottomRightButton,
         };
 
-        // â”€â”€ Helper: visual active/inactive state for tool buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ¦¦ Helper: visual active/inactive state for tool buttons ¦¦¦¦¦¦¦¦¦¦¦¦¦
         void SetButtonActive(Button btn, bool active)
         {
             btn.BackColor   = active ? ColorScheme.Primary : ColorScheme.Surface;
@@ -2041,55 +2041,55 @@ internal partial class MainWindow
             btn.Invalidate();
         }
 
-        // â”€â”€ Apply design mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        void ApplyEmbeddedTabDesignMode(WindowPageTabDesignMode mode)
+        // ¦¦ Apply design mode ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        void ApplyEmbeddedTabDesignMode(TabViewDesignMode mode)
         {
-            embeddedPageControl.TabDesignMode = mode;
-            windowPageControl.TabDesignMode   = mode;
+            embeddedTabView.TabDesignMode = mode;
+            tabView.TabDesignMode   = mode;
 
             var modeDesc = mode switch
             {
-                WindowPageTabDesignMode.RoundedCompact => "RoundedCompact â€” muted full-width container, elevated card on selected tab.",
-                WindowPageTabDesignMode.Rectangle      => "Rectangle â€” no container, subtle ghost hover, full-width primary indicator.",
-                WindowPageTabDesignMode.Rounded        => "Rounded â€” muted segmented container, Surface card on selected.",
-                WindowPageTabDesignMode.Pill           => "Pill â€” filled Primary pill on selected, no container background.",
-                WindowPageTabDesignMode.Outlined       => "Outlined â€” classic 3-sided border tab, open bottom merges with content.",
-                WindowPageTabDesignMode.Minimal        => "Minimal â€” no chrome, Primary left-accent bar and tint on selected.",
-                WindowPageTabDesignMode.Fluent         => "Fluent â€” soft acrylic tint, reveal highlight, rounded selected surface.",
-                WindowPageTabDesignMode.MacOS          => "MacOS â€” compact inset capsule, subtle outline, sidebar-friendly spacing.",
-                _                                      => "Chromed â€” browser-style top-rounded tabs, Surface elevated on selected.",
+                TabViewDesignMode.RoundedCompact => "RoundedCompact — muted full-width container, elevated card on selected tab.",
+                TabViewDesignMode.Rectangle      => "Rectangle — no container, subtle ghost hover, full-width primary indicator.",
+                TabViewDesignMode.Rounded        => "Rounded — muted segmented container, Surface card on selected.",
+                TabViewDesignMode.Pill           => "Pill — filled Primary pill on selected, no container background.",
+                TabViewDesignMode.Outlined       => "Outlined — classic 3-sided border tab, open bottom merges with content.",
+                TabViewDesignMode.Minimal        => "Minimal — minimal surface, Primary left-accent bar and tint on selected.",
+                TabViewDesignMode.Fluent         => "Fluent — soft acrylic tint, reveal highlight, rounded selected surface.",
+                TabViewDesignMode.MacOS          => "MacOS — compact inset capsule, subtle outline, sidebar-friendly spacing.",
+                _                                      => "Chromed — browser-style top-rounded tabs, Surface elevated on selected.",
             };
-            var alignDesc = embeddedPageControl.TabAlignment switch
+            var alignDesc = embeddedTabView.TabAlignment switch
             {
-                WindowPageTabAlignment.Center => "Center",
-                WindowPageTabAlignment.End    => "End",
+                TabViewAlignment.Center => "Center",
+                TabViewAlignment.End    => "End",
                 _                             => "Start",
             };
-            var layoutDesc = embeddedPageControl.TabLayoutMode switch
+            var layoutDesc = embeddedTabView.TabLayoutMode switch
             {
-                WindowPageTabLayoutMode.Left => "Left",
-                WindowPageTabLayoutMode.Right => "Right",
-                WindowPageTabLayoutMode.Bottom => "Bottom",
+                TabViewLayoutMode.Left => "Left",
+                TabViewLayoutMode.Right => "Right",
+                TabViewLayoutMode.Bottom => "Bottom",
                 _ => "Top",
             };
-            embeddedModeStatus.Text = embeddedPageControl.CustomTabStyle.HasValue
-                ? $"Mode: Custom â€” builder-defined colors, spacing, shape and indicator.\nBase preset: {mode} Â· Alignment: {alignDesc} Â· Layout: {layoutDesc}"
-                : $"Mode: {modeDesc}\nAlignment: {alignDesc} Â· Layout: {layoutDesc}";
+            embeddedModeStatus.Text = embeddedTabView.CustomTabStyle.HasValue
+                ? $"Mode: Custom — builder-defined colors, spacing, shape and indicator.\nBase preset: {mode} · Alignment: {alignDesc} · Layout: {layoutDesc}"
+                : $"Mode: {modeDesc}\nAlignment: {alignDesc} · Layout: {layoutDesc}";
 
-            SetButtonActive(roundedCompactModeButton, mode == WindowPageTabDesignMode.RoundedCompact);
-            SetButtonActive(rectangleModeButton,      mode == WindowPageTabDesignMode.Rectangle);
-            SetButtonActive(roundedModeButton,        mode == WindowPageTabDesignMode.Rounded);
-            SetButtonActive(chromedModeButton,        mode == WindowPageTabDesignMode.Chromed);
-            SetButtonActive(pillModeButton,           mode == WindowPageTabDesignMode.Pill);
-            SetButtonActive(outlinedModeButton,       mode == WindowPageTabDesignMode.Outlined);
-            SetButtonActive(minimalModeButton,        mode == WindowPageTabDesignMode.Minimal);
-            SetButtonActive(fluentModeButton,         mode == WindowPageTabDesignMode.Fluent);
-            SetButtonActive(macOSModeButton,          mode == WindowPageTabDesignMode.MacOS);
-            SetButtonActive(customStyleButton,        embeddedPageControl.CustomTabStyle.HasValue);
-            SetButtonActive(clearStyleButton,         embeddedPageControl.CustomTabStyle.HasValue);
+            SetButtonActive(roundedCompactModeButton, mode == TabViewDesignMode.RoundedCompact);
+            SetButtonActive(rectangleModeButton,      mode == TabViewDesignMode.Rectangle);
+            SetButtonActive(roundedModeButton,        mode == TabViewDesignMode.Rounded);
+            SetButtonActive(chromedModeButton,        mode == TabViewDesignMode.Chromed);
+            SetButtonActive(pillModeButton,           mode == TabViewDesignMode.Pill);
+            SetButtonActive(outlinedModeButton,       mode == TabViewDesignMode.Outlined);
+            SetButtonActive(minimalModeButton,        mode == TabViewDesignMode.Minimal);
+            SetButtonActive(fluentModeButton,         mode == TabViewDesignMode.Fluent);
+            SetButtonActive(macOSModeButton,          mode == TabViewDesignMode.MacOS);
+            SetButtonActive(customStyleButton,        embeddedTabView.CustomTabStyle.HasValue);
+            SetButtonActive(clearStyleButton,         embeddedTabView.CustomTabStyle.HasValue);
         }
 
-        void ApplyCustomTabStyle(WindowPageControl pageControl)
+        void ApplyCustomTabStyle(TabView tabViewControl)
         {
             var isDark = ColorScheme.IsDarkMode;
             var accent = ColorScheme.Primary;
@@ -2098,7 +2098,7 @@ internal partial class MainWindow
                 : SKColors.White.WithAlpha(246);
             var hoverSurface = accent.WithAlpha(isDark ? (byte)24 : (byte)18);
 
-            pageControl.ConfigureTabStyle(style => style
+            tabViewControl.ConfigureTabStyle(style => style
                 .Header(header => header
                     .Background(ColorScheme.SurfaceContainer.WithAlpha(isDark ? (byte)130 : (byte)172))
                     .Border(ColorScheme.Outline.WithAlpha(isDark ? (byte)44 : (byte)46)))
@@ -2131,68 +2131,68 @@ internal partial class MainWindow
 
         void ApplyEmbeddedCustomTabStyle()
         {
-            embeddedPageControl.TabDesignMode = WindowPageTabDesignMode.Fluent;
-            windowPageControl.TabDesignMode   = WindowPageTabDesignMode.Fluent;
+            embeddedTabView.TabDesignMode = TabViewDesignMode.Fluent;
+            tabView.TabDesignMode   = TabViewDesignMode.Fluent;
 
-            ApplyCustomTabStyle(embeddedPageControl);
-            ApplyCustomTabStyle(windowPageControl);
-            ApplyEmbeddedTabDesignMode(embeddedPageControl.TabDesignMode);
+            ApplyCustomTabStyle(embeddedTabView);
+            ApplyCustomTabStyle(tabView);
+            ApplyEmbeddedTabDesignMode(embeddedTabView.TabDesignMode);
         }
 
         void ClearEmbeddedCustomTabStyle()
         {
-            embeddedPageControl.ClearCustomTabStyle();
-            windowPageControl.ClearCustomTabStyle();
-            ApplyEmbeddedTabDesignMode(embeddedPageControl.TabDesignMode);
+            embeddedTabView.ClearCustomTabStyle();
+            tabView.ClearCustomTabStyle();
+            ApplyEmbeddedTabDesignMode(embeddedTabView.TabDesignMode);
         }
 
-        void ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode mode)
+        void ApplyEmbeddedPresetDesignMode(TabViewDesignMode mode)
         {
-            embeddedPageControl.ClearCustomTabStyle();
-            windowPageControl.ClearCustomTabStyle();
+            embeddedTabView.ClearCustomTabStyle();
+            tabView.ClearCustomTabStyle();
             ApplyEmbeddedTabDesignMode(mode);
         }
 
-        // â”€â”€ Apply alignment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        void ApplyEmbeddedTabAlignment(WindowPageTabAlignment alignment)
+        // ¦¦ Apply alignment ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        void ApplyEmbeddedTabAlignment(TabViewAlignment alignment)
         {
-            embeddedPageControl.TabAlignment = alignment;
-            windowPageControl.TabAlignment = alignment;
-            ApplyEmbeddedTabDesignMode(embeddedPageControl.TabDesignMode);
+            embeddedTabView.TabAlignment = alignment;
+            tabView.TabAlignment = alignment;
+            ApplyEmbeddedTabDesignMode(embeddedTabView.TabDesignMode);
 
-            SetButtonActive(startAlignButton,  alignment == WindowPageTabAlignment.Start);
-            SetButtonActive(centerAlignButton, alignment == WindowPageTabAlignment.Center);
-            SetButtonActive(endAlignButton,    alignment == WindowPageTabAlignment.End);
+            SetButtonActive(startAlignButton,  alignment == TabViewAlignment.Start);
+            SetButtonActive(centerAlignButton, alignment == TabViewAlignment.Center);
+            SetButtonActive(endAlignButton,    alignment == TabViewAlignment.End);
         }
 
-        void ApplyEmbeddedTabLayout(WindowPageTabLayoutMode layoutMode)
+        void ApplyEmbeddedTabLayout(TabViewLayoutMode layoutMode)
         {
-            embeddedPageControl.TabLayoutMode = layoutMode;
+            embeddedTabView.TabLayoutMode = layoutMode;
 
-            if (layoutMode == WindowPageTabLayoutMode.Top)
+            if (layoutMode == TabViewLayoutMode.Top)
             {
-                windowPageControl.TabMode = WindowPageTabMode.WindowChrome;
-                windowPageControl.TabLayoutMode = WindowPageTabLayoutMode.Top;
+                tabView.TabMode = TabViewMode.TitleBar;
+                tabView.TabLayoutMode = TabViewLayoutMode.Top;
             }
             else
             {
-                windowPageControl.TabMode = WindowPageTabMode.Embedded;
-                windowPageControl.TabLayoutMode = layoutMode;
+                tabView.TabMode = TabViewMode.Embedded;
+                tabView.TabLayoutMode = layoutMode;
             }
 
-            ApplyEmbeddedTabDesignMode(embeddedPageControl.TabDesignMode);
+            ApplyEmbeddedTabDesignMode(embeddedTabView.TabDesignMode);
 
-            SetButtonActive(topLayoutButton,    layoutMode == WindowPageTabLayoutMode.Top);
-            SetButtonActive(leftLayoutButton,   layoutMode == WindowPageTabLayoutMode.Left);
-            SetButtonActive(rightLayoutButton,  layoutMode == WindowPageTabLayoutMode.Right);
-            SetButtonActive(bottomLayoutButton, layoutMode == WindowPageTabLayoutMode.Bottom);
+            SetButtonActive(topLayoutButton,    layoutMode == TabViewLayoutMode.Top);
+            SetButtonActive(leftLayoutButton,   layoutMode == TabViewLayoutMode.Left);
+            SetButtonActive(rightLayoutButton,  layoutMode == TabViewLayoutMode.Right);
+            SetButtonActive(bottomLayoutButton, layoutMode == TabViewLayoutMode.Bottom);
         }
 
-        // â”€â”€ Apply text alignment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ¦¦ Apply text alignment ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
         void ApplyEmbeddedTextAlign(ContentAlignment align)
         {
-            embeddedPageControl.TextAlign = align;
-            windowPageControl.TextAlign = align;
+            embeddedTabView.TextAlign = align;
+            tabView.TextAlign = align;
 
             for (var buttonIndex = 0; buttonIndex < textAlignButtons.Length; buttonIndex++)
                 SetButtonActive(textAlignButtons[buttonIndex], false);
@@ -2214,11 +2214,11 @@ internal partial class MainWindow
             SetButtonActive(activeButton, true);
         }
 
-        // â”€â”€ Apply icon alignment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ¦¦ Apply icon alignment ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
         void ApplyEmbeddedIconAlign(ContentAlignment align)
         {
-            embeddedPageControl.ImageAlign = align;
-            windowPageControl.ImageAlign   = align;
+            embeddedTabView.ImageAlign = align;
+            tabView.ImageAlign   = align;
 
             for (var buttonIndex = 0; buttonIndex < iconAlignButtons.Length; buttonIndex++)
                 SetButtonActive(iconAlignButtons[buttonIndex], false);
@@ -2240,26 +2240,26 @@ internal partial class MainWindow
             SetButtonActive(activeButton, true);
         }
 
-        roundedCompactModeButton.Click += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.RoundedCompact);
-        rectangleModeButton.Click      += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.Rectangle);
-        roundedModeButton.Click        += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.Rounded);
-        chromedModeButton.Click        += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.Chromed);
-        pillModeButton.Click           += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.Pill);
-        outlinedModeButton.Click       += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.Outlined);
-        minimalModeButton.Click        += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.Minimal);
-        fluentModeButton.Click         += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.Fluent);
-        macOSModeButton.Click          += (_, _) => ApplyEmbeddedPresetDesignMode(WindowPageTabDesignMode.MacOS);
+        roundedCompactModeButton.Click += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.RoundedCompact);
+        rectangleModeButton.Click      += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.Rectangle);
+        roundedModeButton.Click        += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.Rounded);
+        chromedModeButton.Click        += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.Chromed);
+        pillModeButton.Click           += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.Pill);
+        outlinedModeButton.Click       += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.Outlined);
+        minimalModeButton.Click        += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.Minimal);
+        fluentModeButton.Click         += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.Fluent);
+        macOSModeButton.Click          += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.MacOS);
         customStyleButton.Click        += (_, _) => ApplyEmbeddedCustomTabStyle();
         clearStyleButton.Click         += (_, _) => ClearEmbeddedCustomTabStyle();
 
-        startAlignButton.Click  += (_, _) => ApplyEmbeddedTabAlignment(WindowPageTabAlignment.Start);
-        centerAlignButton.Click += (_, _) => ApplyEmbeddedTabAlignment(WindowPageTabAlignment.Center);
-        endAlignButton.Click    += (_, _) => ApplyEmbeddedTabAlignment(WindowPageTabAlignment.End);
+        startAlignButton.Click  += (_, _) => ApplyEmbeddedTabAlignment(TabViewAlignment.Start);
+        centerAlignButton.Click += (_, _) => ApplyEmbeddedTabAlignment(TabViewAlignment.Center);
+        endAlignButton.Click    += (_, _) => ApplyEmbeddedTabAlignment(TabViewAlignment.End);
 
-        topLayoutButton.Click    += (_, _) => ApplyEmbeddedTabLayout(WindowPageTabLayoutMode.Top);
-        leftLayoutButton.Click   += (_, _) => ApplyEmbeddedTabLayout(WindowPageTabLayoutMode.Left);
-        rightLayoutButton.Click  += (_, _) => ApplyEmbeddedTabLayout(WindowPageTabLayoutMode.Right);
-        bottomLayoutButton.Click += (_, _) => ApplyEmbeddedTabLayout(WindowPageTabLayoutMode.Bottom);
+        topLayoutButton.Click    += (_, _) => ApplyEmbeddedTabLayout(TabViewLayoutMode.Top);
+        leftLayoutButton.Click   += (_, _) => ApplyEmbeddedTabLayout(TabViewLayoutMode.Left);
+        rightLayoutButton.Click  += (_, _) => ApplyEmbeddedTabLayout(TabViewLayoutMode.Right);
+        bottomLayoutButton.Click += (_, _) => ApplyEmbeddedTabLayout(TabViewLayoutMode.Bottom);
 
         textAlignTopLeftButton.Click      += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.TopLeft);
         textAlignTopCenterButton.Click    += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.TopCenter);
@@ -2349,7 +2349,7 @@ internal partial class MainWindow
         embeddedToolbar.Controls.Add(embeddedModeButtons);
         embeddedToolbar.Controls.Add(designModeLabel);
 
-        // â”€â”€ Tab page factory â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ¦¦ Tab page factory ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
         var overviewTabIcon    = CreateGridListIcon(new SKColor(0x22, 0xC5, 0x5E), GridListIconKind.Healthy);
         var workflowTabIcon    = CreateGridListIcon(new SKColor(0xF5, 0x9E, 0x0B), GridListIconKind.Pulse);
         var compositionTabIcon = CreateGridListIcon(new SKColor(0xA8, 0x55, 0xF7), GridListIconKind.Locked);
@@ -2443,50 +2443,50 @@ internal partial class MainWindow
             return page;
         }
 
-        embeddedPageControl.Controls.Add(CreateEmbeddedTabPage(
+        embeddedTabView.Controls.Add(CreateEmbeddedTabPage(
             "embeddedTabOverview", "Overview", overviewTabIcon,
             new SKColor(0x22, 0xC5, 0x5E),
-            "Tab Strip â€” Embedded Mode\nThe control owns hit-testing, layout and rendering. No dependency on window chrome.",
+            "Tab Strip — Embedded Mode\nThe control owns hit-testing, layout and rendering. No dependency on the outer title bar.",
             "Tab alignment (Start / Center / End) shifts the whole strip. Close and new-tab buttons adjust automatically. All four design modes share the same hit-test and animation pipeline.",
             ("Design Modes", "4"), ("Alignments", "3"), ("Transitions", "11")));
 
-        embeddedPageControl.Controls.Add(CreateEmbeddedTabPage(
+        embeddedTabView.Controls.Add(CreateEmbeddedTabPage(
             "embeddedTabWorkflow", "Workflow", workflowTabIcon,
             new SKColor(0xF5, 0x9E, 0x0B),
             "Animated Page Transitions\nEvery tab switch goes through the snapshot-based transition engine.",
             "ScaleFade, Push, Cover, Reveal, Iris and six more effects work identically in Embedded mode. Switch a design mode and the tab strip redraws on the next frame with zero layout recalculation.",
-            ("Effects", "11"), ("Easing Curves", "10"), ("Duration Range", "100 â€“ 1 000 ms")));
+            ("Effects", "11"), ("Easing Curves", "10"), ("Duration Range", "100 – 1 000 ms")));
 
-        embeddedPageControl.Controls.Add(CreateEmbeddedTabPage(
+        embeddedTabView.Controls.Add(CreateEmbeddedTabPage(
             "embeddedTabComposition", "Composition", compositionTabIcon,
             new SKColor(0xA8, 0x55, 0xF7),
             "Nested Page Controls\nAn embedded strip can live inside any Container, panel or inspector rail.",
-            "The outer window here uses WindowChrome tabs. This inner control uses Embedded mode â€” both run inside the same render loop with no coordination overhead.",
-            ("Nesting Depth", "Unlimited"), ("DPI Aware", "Yes"), ("ScaleFactor", "1 Ã— â€“ 4 Ã—")));
+            "The outer window here uses TitleBar tabs. This inner control uses Embedded mode — both run inside the same render loop with no coordination overhead.",
+            ("Nesting Depth", "Unlimited"), ("DPI Aware", "Yes"), ("ScaleFactor", "1 × – 4 ×")));
 
-        embeddedPageControl.Controls.Add(CreateEmbeddedTabPage(
+        embeddedTabView.Controls.Add(CreateEmbeddedTabPage(
             "embeddedTabSettings", "Settings", settingsTabIcon,
             new SKColor(0xEF, 0x44, 0x44),
-            "Runtime Configuration\nDesign mode and alignment update live â€” no rebuild, no layout pass.",
+            "Runtime Configuration\nDesign mode and alignment update live — no rebuild, no layout pass.",
             "RoundedCompact renders a card-lift effect. Rectangle draws a full-width primary indicator. Rounded builds a segmented control. Chromed uses a top-rounded browser-tab silhouette.",
             ("Live Swap", "Yes"), ("Repaint", "1 Frame"), ("CPU Alloc", "~0 B/frame")));
 
-        // â”€â”€ Seed initial state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        ApplyEmbeddedTabDesignMode(embeddedPageControl.TabDesignMode);
-        ApplyEmbeddedTabAlignment(embeddedPageControl.TabAlignment);
-        ApplyEmbeddedTabLayout(embeddedPageControl.TabLayoutMode);
-        ApplyEmbeddedTextAlign(embeddedPageControl.TextAlign);
-        ApplyEmbeddedIconAlign(embeddedPageControl.ImageAlign);
+        // ¦¦ Seed initial state ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        ApplyEmbeddedTabDesignMode(embeddedTabView.TabDesignMode);
+        ApplyEmbeddedTabAlignment(embeddedTabView.TabAlignment);
+        ApplyEmbeddedTabLayout(embeddedTabView.TabLayoutMode);
+        ApplyEmbeddedTextAlign(embeddedTabView.TextAlign);
+        ApplyEmbeddedIconAlign(embeddedTabView.ImageAlign);
 
-        embeddedPageControl.NewTabButtonClick += (_, _) =>
+        embeddedTabView.NewTabButtonClick += (_, _) =>
             NotificationToast.Show(
                 "New Tab",
                 "A new tab was requested from the embedded tab strip.",
                 NotificationKind.Info);
 
-        embeddedPageControl.TabCloseButtonClick += (_, tabIndex) =>
+        embeddedTabView.TabCloseButtonClick += (_, tabIndex) =>
         {
-            var page         = embeddedPageControl.GetPageAt(tabIndex);
+            var page         = embeddedTabView.GetPageAt(tabIndex);
             var tabTitle     = page?.Text ?? $"Tab {tabIndex + 1}";
             NotificationToast.Show(
                 "Tab Closed",
@@ -2494,12 +2494,12 @@ internal partial class MainWindow
                 NotificationKind.Warning);
         };
 
-        embeddedTabsPage.Controls.Add(embeddedPageControl);
+        embeddedTabsPage.Controls.Add(embeddedTabView);
         embeddedTabsPage.Controls.Add(embeddedToolbar);
 
-        windowPageControl.Controls.Add(embeddedTabsPage);
-        windowPageControl.PerformLayout();
-        windowPageControl.Invalidate();
+        tabView.Controls.Add(embeddedTabsPage);
+        tabView.PerformLayout();
+        tabView.Invalidate();
     }
 
     private Button notifBtnInfo;
@@ -2913,10 +2913,10 @@ internal partial class MainWindow
         _bindingPanel.Controls.Add(snippet);
         _bindingPanel.Controls.Add(header);
 
-        windowPageControl.Controls.Add(_bindingPanel);
+        tabView.Controls.Add(_bindingPanel);
         _bindingPanel.BringToFront();
-        windowPageControl.PerformLayout();
-        windowPageControl.Invalidate();
+        tabView.PerformLayout();
+        tabView.Invalidate();
     }
 
     private static Element CreateBindingCard(string name, string text, float height, Thickness margin, SKColor background)
@@ -2962,7 +2962,7 @@ internal partial class MainWindow
 
     private MenuStrip menuStrip;
     private ContextMenuStrip extendMenu;
-    private WindowPageControl windowPageControl;
+    private TabView tabView;
     private ComboBox bindingValidationTeamCombo;
     private ComboBox bindingValidationPresetCombo;
     private Element bindingValidationRegionError;

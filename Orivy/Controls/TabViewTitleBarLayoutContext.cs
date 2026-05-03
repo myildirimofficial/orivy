@@ -1,6 +1,6 @@
 namespace Orivy.Controls;
 
-internal readonly record struct WindowPageChromeLayoutContext(
+internal readonly record struct TabViewTitleBarLayoutContext(
     float StartX,
     float AvailableWidth,
     float Top,

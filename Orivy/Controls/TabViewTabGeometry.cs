@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 namespace Orivy.Controls;
 
-internal static class WindowPageTabGeometry
+internal static class TabViewTabGeometry
 {
     /// <summary>
     /// Returns the content block dimensions (WITHOUT padding) for a tab.

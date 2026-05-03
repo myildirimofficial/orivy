@@ -4,7 +4,7 @@ namespace Orivy;
 /// Controls how tabs are distributed along the embedded tab strip's primary axis.
 /// Applies to embedded tab mode only.
 /// </summary>
-public enum WindowPageTabAlignment
+public enum TabViewAlignment
 {
     /// <summary>Tabs are packed to the leading edge.</summary>
     Start,

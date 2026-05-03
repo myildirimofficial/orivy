@@ -1,6 +1,6 @@
 namespace Orivy;
 
-public enum WindowPageTabDesignMode
+public enum TabViewDesignMode
 {
     Rectangle,
     Rounded,

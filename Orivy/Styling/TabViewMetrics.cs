@@ -1,6 +1,6 @@
 namespace Orivy;
 
-public struct WindowTabMetrics
+public struct TabViewMetrics
 {
     public Thickness? Padding { get; set; }
     public Thickness? SurfaceInset { get; set; }

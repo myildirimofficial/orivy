@@ -2,55 +2,55 @@ using System;
 
 namespace Orivy;
 
-public sealed class WindowTabMetricsBuilder
+public sealed class TabViewMetricsBuilder
 {
-    private WindowTabMetrics _metrics;
+    private TabViewMetrics _metrics;
 
-    internal WindowTabMetricsBuilder(WindowTabMetrics metrics)
+    internal TabViewMetricsBuilder(TabViewMetrics metrics)
     {
         _metrics = metrics;
     }
 
-    internal WindowTabMetrics Build() => _metrics;
+    internal TabViewMetrics Build() => _metrics;
 
-    public WindowTabMetricsBuilder Padding(int horizontal, int vertical)
+    public TabViewMetricsBuilder Padding(int horizontal, int vertical)
     {
         _metrics.Padding = new Thickness(horizontal, vertical, horizontal, vertical);
         return this;
     }
 
-    public WindowTabMetricsBuilder Padding(Thickness padding)
+    public TabViewMetricsBuilder Padding(Thickness padding)
     {
         _metrics.Padding = padding;
         return this;
     }
 
-    public WindowTabMetricsBuilder SurfaceInset(int all)
+    public TabViewMetricsBuilder SurfaceInset(int all)
     {
         _metrics.SurfaceInset = new Thickness(all);
         return this;
     }
 
-    public WindowTabMetricsBuilder SurfaceInset(Thickness inset)
+    public TabViewMetricsBuilder SurfaceInset(Thickness inset)
     {
         _metrics.SurfaceInset = inset;
         return this;
     }
 
-    public WindowTabMetricsBuilder Gap(float gap)
+    public TabViewMetricsBuilder Gap(float gap)
     {
         _metrics.Gap = Math.Max(0f, gap);
         return this;
     }
 
-    public WindowTabMetricsBuilder Width(float min, float max)
+    public TabViewMetricsBuilder Width(float min, float max)
     {
         _metrics.MinWidth = Math.Max(0f, min);
         _metrics.MaxWidth = Math.Max(_metrics.MinWidth.Value, max);
         return this;
     }
 
-    public WindowTabMetricsBuilder Height(float min, float max)
+    public TabViewMetricsBuilder Height(float min, float max)
     {
         _metrics.MinHeight = Math.Max(0f, min);
         _metrics.MaxHeight = Math.Max(_metrics.MinHeight.Value, max);

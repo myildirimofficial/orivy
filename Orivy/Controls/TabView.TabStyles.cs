@@ -4,7 +4,7 @@ using System;
 
 namespace Orivy.Controls;
 
-public partial class WindowPageControl
+public partial class TabView
 {
     private void ApplyCustomTabPalette(
         ref SKColor headerBackground,
@@ -127,7 +127,7 @@ public partial class WindowPageControl
         return true;
     }
 
-    private static bool HasCustomTabSurface(in WindowTabStyle style)
+    private static bool HasCustomTabSurface(in TabViewStyle style)
     {
         return HasCustomVisual(style.Normal) ||
                HasCustomVisual(style.Hover) ||
@@ -137,7 +137,7 @@ public partial class WindowPageControl
                style.Indicator.Thickness.HasValue;
     }
 
-    private static bool HasCustomVisual(in WindowTabVisual visual)
+    private static bool HasCustomVisual(in TabViewVisual visual)
     {
         return visual.BackgroundColor != SKColors.Empty ||
                visual.BorderColor != SKColors.Empty ||
@@ -194,10 +194,10 @@ public partial class WindowPageControl
             EnsureHoverStateArrays(ref _tabHoverProgress, ref _tabHoverTargets, tabCount);
     }
 
-    private void EnsureWindowChromeTabHoverState(int tabCount)
+    private void EnsureTitleBarTabHoverState(int tabCount)
     {
         lock (_tabHoverSync)
-            EnsureHoverStateArrays(ref _windowChromeTabHoverProgress, ref _windowChromeTabHoverTargets, tabCount);
+            EnsureHoverStateArrays(ref _titleBarTabHoverProgress, ref _titleBarTabHoverTargets, tabCount);
     }
 
     private void SetTabHoverTarget(int tabCount, int hoveredIndex)
@@ -205,9 +205,9 @@ public partial class WindowPageControl
         SetHoverTargets(ref _tabHoverProgress, ref _tabHoverTargets, tabCount, hoveredIndex);
     }
 
-    private void SetWindowChromeTabHoverTarget(int tabCount, int hoveredIndex)
+    private void SetTitleBarTabHoverTarget(int tabCount, int hoveredIndex)
     {
-        SetHoverTargets(ref _windowChromeTabHoverProgress, ref _windowChromeTabHoverTargets, tabCount, hoveredIndex);
+        SetHoverTargets(ref _titleBarTabHoverProgress, ref _titleBarTabHoverTargets, tabCount, hoveredIndex);
     }
 
     private void InvalidateTabHoverFrame()
@@ -253,7 +253,7 @@ public partial class WindowPageControl
         lock (_tabHoverSync)
         {
             stillAnimating |= StepHoverArray(_tabHoverProgress, _tabHoverTargets);
-            stillAnimating |= StepHoverArray(_windowChromeTabHoverProgress, _windowChromeTabHoverTargets);
+            stillAnimating |= StepHoverArray(_titleBarTabHoverProgress, _titleBarTabHoverTargets);
         }
 
         InvalidateTabHoverFrame();
@@ -296,44 +296,44 @@ public partial class WindowPageControl
         }
     }
 
-    private float GetWindowChromeTabHoverProgress(int tabIndex, bool isSelected)
+    private float GetTitleBarTabHoverProgress(int tabIndex, bool isSelected)
     {
         if (isSelected || tabIndex < 0)
             return 0f;
 
         lock (_tabHoverSync)
         {
-            return tabIndex < _windowChromeTabHoverProgress.Length
-                ? Math.Clamp(_windowChromeTabHoverProgress[tabIndex], 0f, 1f)
+            return tabIndex < _titleBarTabHoverProgress.Length
+                ? Math.Clamp(_titleBarTabHoverProgress[tabIndex], 0f, 1f)
                 : 0f;
         }
     }
 
-    private bool UsesStackedCenteredWindowChromeIcon()
+    private bool UsesStackedCenteredTitleBarIcon()
     {
         return DrawTabIcons && ImageAlign is ContentAlignment.TopCenter or ContentAlignment.BottomCenter;
     }
 
-    private float GetWindowChromeTabHorizontalContentPadding()
+    private float GetTitleBarTabHorizontalContentPadding()
     {
         if (_customTabStyle.HasValue && _customTabStyle.Value.Metrics.Padding is { } customPadding)
             return Math.Max(customPadding.Left, customPadding.Right) * ScaleFactor;
 
-        var padding = UsesStackedCenteredWindowChromeIcon()
+        var padding = UsesStackedCenteredTitleBarIcon()
             ? 12f
-            : WindowChromeTabHorizontalPadding;
+            : TitleBarTabHorizontalPadding;
 
         return padding * ScaleFactor;
     }
 
-    private float GetWindowChromeTabVerticalContentPadding()
+    private float GetTitleBarTabVerticalContentPadding()
     {
         if (_customTabStyle.HasValue && _customTabStyle.Value.Metrics.Padding is { } customPadding)
             return Math.Max(customPadding.Top, customPadding.Bottom) * ScaleFactor;
 
-        var padding = UsesStackedCenteredWindowChromeIcon()
+        var padding = UsesStackedCenteredTitleBarIcon()
             ? 6.5f
-            : WindowChromeTabCloseButtonInset;
+            : TitleBarTabCloseButtonInset;
 
         return padding * ScaleFactor;
     }

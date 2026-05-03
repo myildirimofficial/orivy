@@ -8,7 +8,7 @@ Orivy styling is split across three layers:
 
 1. `ColorScheme` defines the shared palette, theme state, and color derivation rules.
 2. `ElementBase.ConfigureVisualStyles(...)` applies state-driven appearance rules to individual controls.
-3. `WindowBase.WindowThemeType` bridges Orivy theme colors into native window chrome on supported Windows hosts.
+3. `WindowBase.WindowThemeType` bridges Orivy theme colors into native window effects on supported Windows hosts.
 
 Together these layers give controls a common visual language while still letting each control opt into richer hover, pressed, focused, and disabled states.
 
@@ -125,21 +125,21 @@ The default `Button` also demonstrates this flow by defining a full visual-style
 
 ## 5. Window Tab Styling
 
-`WindowPageControl` supports preset tab appearances through `TabDesignMode`, and it can also accept a user-defined tab style through `CustomTabStyle` or `ConfigureTabStyle(...)`.
+`TabView` supports preset tab appearances through `TabDesignMode`, and it can also accept a user-defined tab style through `CustomTabStyle` or `ConfigureTabStyle(...)`.
 
-The tab style API is intentionally data-first. Tabs are still lightweight, virtual header items painted by `WindowPageControl`; they are not separate `ElementBase` children. This keeps titlebar tabs, embedded tabs, drag ordering, hit testing, and close button behavior on the existing fast path.
+The tab style API is intentionally data-first. Tabs are still lightweight, virtual header items painted by `TabView`; they are not separate `ElementBase` children. This keeps titlebar tabs, embedded tabs, drag ordering, hit testing, and close button behavior on the existing fast path.
 
 The style is split into focused groups:
 
-- `WindowTabVisual`: background, foreground, border, radius, and blur for normal, hover, and selected states
-- `WindowTabMetrics`: padding, surface inset, gap, and min/max tab dimensions
-- `WindowTabHeaderStyle`: tab strip background and border
-- `WindowTabIndicatorStyle`: selected indicator color and thickness
+- `TabViewVisual`: background, foreground, border, radius, and blur for normal, hover, and selected states
+- `TabViewMetrics`: padding, surface inset, gap, and min/max tab dimensions
+- `TabViewHeaderStyle`: tab strip background and border
+- `TabViewIndicatorStyle`: selected indicator color and thickness
 
 Example with the fluent builder:
 
 ```csharp
-pageControl.ConfigureTabStyle(style => style
+tabViewControl.ConfigureTabStyle(style => style
     .Header(header => header
         .Background(ColorScheme.SurfaceContainer)
         .Border(ColorScheme.Outline.WithAlpha(54)))
@@ -169,16 +169,16 @@ pageControl.ConfigureTabStyle(style => style
 The same style can be assigned directly:
 
 ```csharp
-pageControl.CustomTabStyle = new WindowTabStyle
+tabViewControl.CustomTabStyle = new TabViewStyle
 {
-    Selected = new WindowTabVisual
+    Selected = new TabViewVisual
     {
         BackgroundColor = ColorScheme.Primary,
         ForegroundColor = SKColors.Empty,
         BorderRadius = 999,
         BorderThickness = 0
     },
-    Metrics = new WindowTabMetrics
+    Metrics = new TabViewMetrics
     {
         Padding = new Thickness(18, 8, 18, 8),
         SurfaceInset = new Thickness(4),
@@ -198,8 +198,8 @@ Notes:
 
 - Metrics can be used without custom drawing; if only padding or gap is supplied, the selected preset renderer stays active.
 - Custom visual values switch the tab surface to the generic custom renderer.
-- `CustomTabStyle` applies to both embedded tabs and titlebar/window-chrome tabs.
-- `WindowTabMetrics.Padding` is content padding. `SurfaceInset` is the visual surface inset. Keep these separate to avoid layout changes when only the painted shape should move.
+- `CustomTabStyle` applies to both embedded tabs and titlebar tabs.
+- `TabViewMetrics.Padding` is content padding. `SurfaceInset` is the visual surface inset. Keep these separate to avoid layout changes when only the painted shape should move.
 
 ## 6. Native Window Theme Integration
 
@@ -242,7 +242,7 @@ Use these helpers when a custom control needs manual paint logic but still wants
 - Use `ConfigureVisualStyles(...)` for state changes instead of manually mutating colors in every mouse event.
 - Reuse a single `ApplyTheme()` method when a control listens to `ThemeChanged`.
 - Keep visual style rules small and composable; put the common shape in `Base(...)` and state deltas in individual rules.
-- For `WindowPageControl` tabs, prefer `CustomTabStyle` over adding another `WindowPageTabDesignMode` when the style is app-specific.
+- For `TabView` tabs, prefer `CustomTabStyle` over adding another `TabViewDesignMode` when the style is app-specific.
 - Use `ReevaluateVisualStyles()` after state or theme changes that affect predicate-based rules.
 - Reserve motion and ambient decorative effects for `ConfigureMotionEffects(...)`; keep them separate from the core styling contract.
 
@@ -250,19 +250,19 @@ Use these helpers when a custom control needs manual paint logic but still wants
 
 - `Orivy/ColorScheme.cs`
 - `Orivy/Controls/ElementBase.VisualStyles.cs`
-- `Orivy/Controls/WindowPageControl.cs`
-- `Orivy/Controls/WindowPageControl.TabStyles.cs`
+- `Orivy/Controls/TabView.cs`
+- `Orivy/Controls/TabView.TabStyles.cs`
 - `Orivy/Styling/ElementVisualStyles.cs`
-- `Orivy/Styling/WindowTabStyle.cs`
-- `Orivy/Styling/WindowTabVisual.cs`
-- `Orivy/Styling/WindowTabMetrics.cs`
-- `Orivy/Styling/WindowTabHeaderStyle.cs`
-- `Orivy/Styling/WindowTabIndicatorStyle.cs`
-- `Orivy/Styling/WindowTabStyleBuilder.cs`
-- `Orivy/Styling/WindowTabVisualBuilder.cs`
-- `Orivy/Styling/WindowTabMetricsBuilder.cs`
-- `Orivy/Styling/WindowTabHeaderStyleBuilder.cs`
-- `Orivy/Styling/WindowTabIndicatorStyleBuilder.cs`
+- `Orivy/Styling/TabViewStyle.cs`
+- `Orivy/Styling/TabViewVisual.cs`
+- `Orivy/Styling/TabViewMetrics.cs`
+- `Orivy/Styling/TabViewHeaderStyle.cs`
+- `Orivy/Styling/TabViewIndicatorStyle.cs`
+- `Orivy/Styling/TabViewStyleBuilder.cs`
+- `Orivy/Styling/TabViewVisualBuilder.cs`
+- `Orivy/Styling/TabViewMetricsBuilder.cs`
+- `Orivy/Styling/TabViewHeaderStyleBuilder.cs`
+- `Orivy/Styling/TabViewIndicatorStyleBuilder.cs`
 - `Orivy/Helpers/ElevationHelper.cs`
 - `Orivy/Controls/Button.cs`
 - `Orivy/Controls/ComboBox.cs`

@@ -1,6 +1,6 @@
 namespace Orivy;
 
-public enum WindowPageTransitionEffect
+public enum TabViewTransitionEffect
 {
     None,
     Fade,

@@ -2,7 +2,7 @@ using SkiaSharp;
 
 namespace Orivy;
 
-public struct WindowTabVisual
+public struct TabViewVisual
 {
     public SKColor BackgroundColor { get; set; }
     public SKColor ForegroundColor { get; set; }

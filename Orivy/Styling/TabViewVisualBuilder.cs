@@ -3,30 +3,30 @@ using System;
 
 namespace Orivy;
 
-public sealed class WindowTabVisualBuilder
+public sealed class TabViewVisualBuilder
 {
-    private WindowTabVisual _visual;
+    private TabViewVisual _visual;
 
-    internal WindowTabVisualBuilder(WindowTabVisual visual)
+    internal TabViewVisualBuilder(TabViewVisual visual)
     {
         _visual = visual;
     }
 
-    internal WindowTabVisual Build() => _visual;
+    internal TabViewVisual Build() => _visual;
 
-    public WindowTabVisualBuilder Background(SKColor color)
+    public TabViewVisualBuilder Background(SKColor color)
     {
         _visual.BackgroundColor = color;
         return this;
     }
 
-    public WindowTabVisualBuilder Foreground(SKColor color)
+    public TabViewVisualBuilder Foreground(SKColor color)
     {
         _visual.ForegroundColor = color;
         return this;
     }
 
-    public WindowTabVisualBuilder Border(SKColor color, float? thickness = null)
+    public TabViewVisualBuilder Border(SKColor color, float? thickness = null)
     {
         _visual.BorderColor = color;
         if (thickness.HasValue)
@@ -34,13 +34,13 @@ public sealed class WindowTabVisualBuilder
         return this;
     }
 
-    public WindowTabVisualBuilder Radius(float radius)
+    public TabViewVisualBuilder Radius(float radius)
     {
         _visual.BorderRadius = Math.Max(0f, radius);
         return this;
     }
 
-    public WindowTabVisualBuilder Blur(float blur)
+    public TabViewVisualBuilder Blur(float blur)
     {
         _visual.Blur = Math.Max(0f, blur);
         return this;

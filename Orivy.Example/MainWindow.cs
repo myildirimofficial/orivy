@@ -1,4 +1,4 @@
-ï»¿using Orivy;
+using Orivy;
 using Orivy.Animation;
 using Orivy.Binding;
 using Orivy.Controls;
@@ -29,7 +29,7 @@ namespace Orivy.Example
             Slide
         }
 
-        private readonly Dictionary<WindowPageTransitionEffect, List<MenuItem>> _transitionMenuItems = new();
+        private readonly Dictionary<TabViewTransitionEffect, List<MenuItem>> _transitionMenuItems = new();
         private readonly Dictionary<AnimationType, List<MenuItem>> _transitionEasingMenuItems = new();
         private readonly Dictionary<int, List<MenuItem>> _transitionSpeedMenuItems = new();
         private readonly Dictionary<ImageLayout, List<MenuItem>> _backgroundLayoutMenuItems = new();
@@ -69,7 +69,7 @@ namespace Orivy.Example
         private MenuItem? _backgroundSlideshowMenuItem;
         private MenuItem? _backgroundRepeatMenuItem;
         private MenuItem? _windowBackgroundEnabledMenuItem;
-        private WindowPageControl? _embeddedPageControl;
+        private TabView? _embeddedTabView;
 
         internal MainWindow()
         {
@@ -84,7 +84,7 @@ namespace Orivy.Example
 
         private void InitializeTransitionMenu(MenuItem rootItem)
         {
-            var effects = (WindowPageTransitionEffect[])Enum.GetValues(typeof(WindowPageTransitionEffect));
+            var effects = (TabViewTransitionEffect[])Enum.GetValues(typeof(TabViewTransitionEffect));
             foreach (var effect in effects)
             {
                 var menuItem = rootItem.AddMenuItem(effect.ToString(), (_, _) => SetTransitionEffect(effect));
@@ -95,7 +95,7 @@ namespace Orivy.Example
 
             var animationType = (AnimationType[])Enum.GetValues(typeof(AnimationType));
 
-            // â”€â”€ Easing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ¦¦ Easing ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
             var easingMenu = rootItem.AddMenuItem("Easing");
             
             foreach (var type in animationType)
@@ -106,7 +106,7 @@ namespace Orivy.Example
 
             rootItem.AddSeparator();
 
-            // â”€â”€ Speed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ¦¦ Speed ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
             var speedMenu = rootItem.AddMenuItem("Speed");
             RegisterSpeedItem(speedMenu.AddMenuItem("Fast  (100 ms)", (_, _) => SetTransitionDuration(100)), 100);
             RegisterSpeedItem(speedMenu.AddMenuItem("Normal  (250 ms)", (_, _) => SetTransitionDuration(250)), 250);
@@ -119,7 +119,7 @@ namespace Orivy.Example
             RefreshTransitionSpeedMenuChecks();
         }
 
-        private void RegisterEffectItem(MenuItem item, WindowPageTransitionEffect effect)
+        private void RegisterEffectItem(MenuItem item, TabViewTransitionEffect effect)
         {
             item.CheckOnClick = false;
             if (!_transitionMenuItems.TryGetValue(effect, out var list)) { list = new List<MenuItem>(); _transitionMenuItems[effect] = list; }
@@ -140,22 +140,22 @@ namespace Orivy.Example
             list.Add(item);
         }
 
-        internal void SetTransitionEffect(WindowPageTransitionEffect effect)
+        internal void SetTransitionEffect(TabViewTransitionEffect effect)
         {
-            windowPageControl.TransitionEffect = effect;
+            tabView.TransitionEffect = effect;
             RefreshTransitionMenuChecks();
         }
 
         internal void SetTransitionAnimationType(AnimationType type)
         {
-            windowPageControl.TransitionAnimationType = type;
+            tabView.TransitionAnimationType = type;
             RefreshTransitionEasingMenuChecks();
         }
 
         internal void SetTransitionDuration(int ms)
         {
             _transitionDurationPreset = ms;
-            windowPageControl.TransitionDurationMs = ms;
+            tabView.TransitionDurationMs = ms;
             RefreshTransitionSpeedMenuChecks();
         }
 
@@ -163,7 +163,7 @@ namespace Orivy.Example
         {
             foreach (var item in _transitionMenuItems)
             {
-                var isSelected = item.Key == windowPageControl.TransitionEffect;
+                var isSelected = item.Key == tabView.TransitionEffect;
                 for (var i = 0; i < item.Value.Count; i++)
                     item.Value[i].Checked = isSelected;
             }
@@ -171,7 +171,7 @@ namespace Orivy.Example
 
         private void RefreshTransitionEasingMenuChecks()
         {
-            var current = windowPageControl.TransitionAnimationType;
+            var current = tabView.TransitionAnimationType;
             foreach (var pair in _transitionEasingMenuItems)
             {
                 var isSelected = pair.Key == current;
@@ -311,21 +311,21 @@ namespace Orivy.Example
 
         private void SetEmbeddedTabStripResizerVisible(bool visible)
         {
-            if (windowPageControl != null)
-                windowPageControl.ShowTabStripResizer = visible;
+            if (TabView != null)
+                tabView.ShowTabStripResizer = visible;
 
-            if (_embeddedPageControl != null)
-                _embeddedPageControl.ShowTabStripResizer = visible;
+            if (_embeddedTabView != null)
+                _embeddedTabView.ShowTabStripResizer = visible;
 
             RefreshEmbeddedTabStripResizerChecks();
         }
 
         private bool IsEmbeddedTabStripResizerVisible()
         {
-            if (_embeddedPageControl != null)
-                return _embeddedPageControl.ShowTabStripResizer;
+            if (_embeddedTabView != null)
+                return _embeddedTabView.ShowTabStripResizer;
 
-            return windowPageControl != null && windowPageControl.ShowTabStripResizer;
+            return tabView != null && tabView.ShowTabStripResizer;
         }
 
         private void RefreshEmbeddedTabStripResizerChecks()
@@ -803,7 +803,7 @@ namespace Orivy.Example
 
         private void InitializeBackgroundImageShowcase()
         {
-            if (windowPageControl == null)
+            if (TabView == null)
                 return;
 
             _backgroundPanel = new Container
@@ -948,7 +948,7 @@ namespace Orivy.Example
             _backgroundHero.BackgroundImageChanged += BackgroundHero_BackgroundImageChanged;
             _backgroundHero.BackgroundImageCaptionChanged += BackgroundHero_BackgroundImageCaptionChanged;
 
-            windowPageControl.Controls.Add(_backgroundPanel);
+            tabView.Controls.Add(_backgroundPanel);
             SyncWindowBackgroundWithShowcase();
             UpdateBackgroundShowcaseStatus();
         }
@@ -1254,7 +1254,7 @@ namespace Orivy.Example
             _backgroundHeroCaption.Text = caption.ToString();
             ApplyBackgroundCaptionVisuals(activeFrame);
             _backgroundStatusCard.Text =
-                $"Background Slideshow\nScene {index + 1}/{_backgroundSlides.Count}  â€¢  Layout: {_backgroundHero.BackgroundImageLayout}  â€¢  Effect: {_backgroundHero.BackgroundImageTransitionEffect}  â€¢  Duration: {_backgroundTransitionDurationPreset} ms\nCaption: {activeFrame.CaptionDesignMode}  â€¢  Align: {activeFrame.CaptionLayout}  â€¢  Slideshow: {(_backgroundHero.BackgroundImageSlideshowEnabled ? "Active" : "Passive")}  â€¢  Repeat: {(_backgroundHero.BackgroundImageSlideshowRepeat ? "Active" : "Passive")}  â€¢  Interval: {_backgroundIntervalPreset} ms  â€¢  Window Background: {(_windowBackgroundEnabled ? "Active" : "Passive")} ({_windowBackgroundMode})\nWindow Blur: {_windowBackgroundBlurAmountPreset} px  â€¢  Mode: {BackgroundImageBlurMode}  â€¢  Backdrop Deck: Tint / Glass / Acrylic / Mica\nUse the Backgrounds menu to switch layout, effect, duration, caption design and slideshow mode in real time. Use the Window Background menu to mirror the active scene across the window and test blur modes on the root window surface.";
+                $"Background Slideshow\nScene {index + 1}/{_backgroundSlides.Count}  •  Layout: {_backgroundHero.BackgroundImageLayout}  •  Effect: {_backgroundHero.BackgroundImageTransitionEffect}  •  Duration: {_backgroundTransitionDurationPreset} ms\nCaption: {activeFrame.CaptionDesignMode}  •  Align: {activeFrame.CaptionLayout}  •  Slideshow: {(_backgroundHero.BackgroundImageSlideshowEnabled ? "Active" : "Passive")}  •  Repeat: {(_backgroundHero.BackgroundImageSlideshowRepeat ? "Active" : "Passive")}  •  Interval: {_backgroundIntervalPreset} ms  •  Window Background: {(_windowBackgroundEnabled ? "Active" : "Passive")} ({_windowBackgroundMode})\nWindow Blur: {_windowBackgroundBlurAmountPreset} px  •  Mode: {BackgroundImageBlurMode}  •  Backdrop Deck: Tint / Glass / Acrylic / Mica\nUse the Backgrounds menu to switch layout, effect, duration, caption design and slideshow mode in real time. Use the Window Background menu to mirror the active scene across the window and test blur modes on the root window surface.";
 
             if (_backgroundPlayPauseButton != null)
                 _backgroundPlayPauseButton.Text = _backgroundHero.BackgroundImageSlideshowEnabled ? "Pause Slideshow" : "Start Slideshow";
@@ -1340,7 +1340,7 @@ namespace Orivy.Example
         private void NotifBtnLongMessage_Click(object sender, EventArgs e)
             => NotificationToast.Show(
                 "Audit Trail Delayed",
-                "The retention sweep has been postponed because the archive lane is warming up.\nEstimated completion: 3â€“5 minutes.\nNo data will be lost during this window.",
+                "The retention sweep has been postponed because the archive lane is warming up.\nEstimated completion: 3–5 minutes.\nNo data will be lost during this window.",
                 NotificationKind.Warning,
                 6000);
 
@@ -1373,7 +1373,7 @@ namespace Orivy.Example
                 NotificationKind.Info,
                 0,
                 new NotificationAction("Install Now", () =>
-                    NotificationToast.Show("Installing", "Updating to v2.4.1 in the backgroundâ€¦", NotificationKind.Info, 3000)),
+                    NotificationToast.Show("Installing", "Updating to v2.4.1 in the background…", NotificationKind.Info, 3000)),
                 new NotificationAction("Later"));
 
         private async void NotifBtnManualProgress_Click(object sender, EventArgs e)
