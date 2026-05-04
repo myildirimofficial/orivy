@@ -155,15 +155,13 @@ Characteristics:
 - Uses the new visual style builder internally.
 - Supports hover, pressed, focused, and disabled states.
 - Keeps keyboard activation through Enter and Space.
-- Exposes optional `AccentMotionEnabled` for subtle motion overlays.
 
 Example:
 
 ```csharp
 var saveButton = new Button
 {
-    Text = "Save",
-    AccentMotionEnabled = true
+    Text = "Save"
 };
 
 saveButton.Click += (_, _) => SaveDocument();

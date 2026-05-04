@@ -117,6 +117,20 @@ card.ConfigureVisualStyles(styles =>
 
 `OnInvalid(...)` follows `ElementBase.IsValid` / `HasValidationError`. The style engine refreshes when validation status changes, so validation-driven styles stay in sync without extra calls.
 
+One element can also drive another element's visual styles. The source element is the owner of `VisualStyles`; the elements passed to `With(...)` are the targets that animate when the source state changes:
+
+```csharp
+primaryButton.VisualStyles
+    .With(detailsPanel)
+    .DefaultTransition(TimeSpan.FromMilliseconds(160), AnimationType.CubicEaseOut)
+    .OnHover(rule => rule
+        .Width(320)
+        .Background(ColorScheme.SurfaceContainerHigh)
+        .BorderColor(ColorScheme.Primary));
+```
+
+`With(...)` supports the same state helpers as normal visual styles: `OnHover`, `OnPressed`, `OnFocused`, `OnDisabled`, `OnHidden`, `OnInvalid`, and `When(...)`. The target can animate any value currently supported by visual styles, including size, background, foreground, border, radius, shadow, opacity, translate, and scale.
+
 ## 4. Theme-Aware Control Pattern
 
 Controls with richer appearance often follow this pattern:
@@ -129,6 +143,8 @@ Controls with richer appearance often follow this pattern:
 `ComboBox` and `ColorPicker` are good examples of this pattern. They rebuild their theme-derived colors when the global palette changes, then refresh their effective visual styles without requiring the entire control to be recreated.
 
 The default `Button` also demonstrates this flow by defining a full visual-style profile in its constructor, including hover, pressed, focused, and disabled states.
+
+For styles configured directly with `ConfigureVisualStyles(...)`, `ElementBase` remembers the builder configuration and replays it on `ColorScheme.ThemeChanged`. This keeps `ColorScheme`-derived colors current across normal, hover, pressed, focused, disabled, hidden, and invalid states. If a control rebuilds styles manually with `clearExisting: true`, the remembered configuration is replaced instead of accumulated.
 
 ## 5. Window Tab Styling
 

@@ -2,13 +2,11 @@ using Orivy.Animation;
 using Orivy.Helpers;
 using SkiaSharp;
 using System;
-using System.ComponentModel;
 
 namespace Orivy.Controls;
 
 public class Button : ElementBase
 {
-    private bool _accentMotionEnabled;
     private bool _keyboardPressArmed;
 
     public Button()
@@ -53,21 +51,6 @@ public class Button : ElementBase
                     .Opacity(0.8f)
                     .Shadow(BoxShadow.None));
         });
-    }
-
-    [Category("Behavior")]
-    [DefaultValue(false)]
-    public bool AccentMotionEnabled
-    {
-        get => _accentMotionEnabled;
-        set
-        {
-            if (_accentMotionEnabled == value)
-                return;
-
-            _accentMotionEnabled = value;
-            UpdateAccentMotion();
-        }
     }
 
     public override SKSize GetPreferredSize(SKSize proposedSize)
@@ -142,39 +125,5 @@ public class Button : ElementBase
     {
         _keyboardPressArmed = false;
         base.OnLostFocus(e);
-    }
-
-    internal virtual void UpdateAccentMotion()
-    {
-        if (!_accentMotionEnabled)
-        {
-            ClearMotionEffects();
-            return;
-        }
-
-        ConfigureMotionEffects(scene =>
-        {
-            scene
-                .Circle(circle => circle
-                    .Anchor(0.82f, 0.34f)
-                    .Size(16f, 16f)
-                    .Orbit(6f, 5f)
-                    .Duration(2.8d)
-                    .Opacity(0.05f, 0.12f)
-                    .Scale(0.92f, 1.08f)
-                    .SpeedOnHover(1.8f)
-                    .SpeedOnPressed(2.4f)
-                    .Color(SKColors.White.WithAlpha(80)))
-                .Rectangle(rect => rect
-                    .Anchor(0.2f, 0.7f)
-                    .Size(26f, 6f)
-                    .CornerRadius(3f)
-                    .Bezier(new SKPoint(-6f, 0f), new SKPoint(4f, -3f), new SKPoint(12f, 4f), new SKPoint(-3f, 1f))
-                    .Duration(3.1d)
-                    .Opacity(0.03f, 0.08f)
-                    .Scale(0.96f, 1.04f)
-                    .SpeedOnHover(1.5f)
-                    .Color(SKColors.White.WithAlpha(72)));
-        });
     }
 }

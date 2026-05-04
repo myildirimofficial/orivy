@@ -1607,14 +1607,8 @@ namespace Orivy.Example
 
         private void VisualStylePrimaryButton_Click(object sender, EventArgs e)
         {
-            visualStyleGhostButton.AccentMotionEnabled = !visualStyleGhostButton.AccentMotionEnabled;
-            visualStyleGhostButton.Text = visualStyleGhostButton.AccentMotionEnabled
-                ? "Secondary Button - Accent Motion On"
-                : "Secondary Button - Accent Motion Off";
-
-            visualStyleScrollProbe.Text = visualStyleGhostButton.AccentMotionEnabled
-                ? "Scroll Probe\nSecondary button motion is now enabled. If you can still reach this block, AutoScroll and the new Button control are both working together."
-                : "Scroll Probe\nSecondary button motion is now disabled. If you can reach this block, AutoScroll is now measuring content after dock layout. The two Button controls above also prove the new control works inside the example page.";
+            visualStyleGhostButton.Text = "Secondary Button - Ready";
+            visualStyleScrollProbe.Text = "Scroll Probe\nPrimary button clicked. If you can reach this block, AutoScroll and the Button visual style states are both working together.";
         }
 
         private void InitializeGridListDemo()

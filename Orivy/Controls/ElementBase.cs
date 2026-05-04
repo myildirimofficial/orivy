@@ -706,9 +706,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
             if (_size == newSize) return;
             _size = newSize;
-            SetStyleBaseSize(newSize);
+            SetStyleBaseSize(newSize, preserveOverriddenDimensions: _isArranging);
             OnSizeChanged(EventArgs.Empty);
-            RefreshVisualStyles(forceImmediate: true);
+            RefreshVisualStyles(forceImmediate: !_visualStylesEnabled || !_visualStyleAnimation.IsAnimating());
         }
     }
 
@@ -2056,7 +2056,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     protected virtual bool ShouldIncludeHitTestElement(ElementBase element, bool requireEnabled)
     {
-        if (!element.Visible)
+        if (!element.Visible || element.Opacity <= 0.01f || element.Width <= 0 || element.Height <= 0)
             return false;
 
         return !requireEnabled || element.Enabled;
@@ -2916,14 +2916,15 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
             if (window is WindowBase uiWindowAfter)
             {
-                if (uiWindowAfter.FocusedElement == prevWindowFocus)
+                if (uiWindowAfter.FocusedElement == prevWindowFocus && control.CanSelect && control.Selectable)
                     uiWindowAfter.FocusedElement = control;
             }
             else if (window != null)
             {
-                window.FocusManager.SetFocus(control);
+                if (control.CanSelect && control.Selectable)
+                    window.FocusManager.SetFocus(control);
             }
-            else if (FocusedElement != control)
+            else if (FocusedElement != control && control.CanSelect && control.Selectable)
             {
                 FocusedElement = control;
             }
@@ -3002,8 +3003,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         {
             control.OnMouseClick(childEventArgs);
 
-            if (_focusedElement != control)
-                _focusedElement = control;
+            if (FocusedElement != control && control.CanSelect && control.Selectable)
+                FocusedElement = control;
         }
     }
 
@@ -3295,6 +3296,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private void OnColorSchemeChanged(object? sender, EventArgs e)
     {
+        RefreshVisualStylesForThemeChange();
         Invalidate();
     }
 

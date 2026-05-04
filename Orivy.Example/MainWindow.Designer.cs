@@ -35,11 +35,11 @@ internal partial class MainWindow
         {
             Text = "Visual Styles",
             Name = "panel4",
-            Padding = new(24),
+            Padding = new(0),
             Dock = Orivy.DockStyle.Fill,
             Radius = new(0),
             Border = new(0),
-            AutoScroll = true,
+            AutoScroll = false,
             AutoScrollMargin = new(0, 24)
         };
 
@@ -155,27 +155,149 @@ internal partial class MainWindow
         this.visualStylePrimaryButton = new Button
         {
             Name = "visualStylePrimaryButton",
-            Text = "Primary Button - Accent Motion On",
+            Text = "Primary Button",
             Dock = Orivy.DockStyle.Top,
             Height = 46,
             Margin = new(0, 0, 0, 12),
-            AccentMotionEnabled = true
         };
 
         this.visualStyleGhostButton = new Button
         {
             Name = "visualStyleGhostButton",
-            Text = "Secondary Button - Accent Motion Off",
+            Text = "Secondary Button",
             Dock = Orivy.DockStyle.Top,
             Height = 46,
             Margin = new(0, 0, 0, 14),
-            AccentMotionEnabled = false
         };
 
+        this.visualStyleDrivenTarget = new()
+        {
+            Name = "visualStyleDrivenTarget",
+            Text = "Driven Target\nHover, press or focus the Primary Button above. This card is animated by another element's visual state.",
+            Dock = Orivy.DockStyle.Top,
+            Height = 78,
+            Padding = new(16),
+            Margin = new(0, 0, 0, 14),
+            Radius = new(16),
+            Border = new(1),
+            BorderColor = ColorScheme.Outline,
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+
+        var visualStyleContentHost = new Container
+        {
+            Name = "visualStyleContentHost",
+            Dock = Orivy.DockStyle.Fill,
+            Padding = new(18),
+            Radius = new(0),
+            Border = new(0),
+            AutoScroll = true,
+            AutoScrollMargin = new(0, 24)
+        };
+
+        var visualStyleSidebarToolbar = new Container
+        {
+            Name = "visualStyleSidebarToolbar",
+            Dock = Orivy.DockStyle.Top,
+            Height = 46,
+            Padding = new(0),
+            Margin = new(0, 0, 0, 14),
+            Radius = new(0),
+            Border = new(0),
+            BackColor = SKColors.Empty,
+        };
+
+        var visualStyleSidebarDrawer = new Container
+        {
+            Name = "visualStyleSidebarDrawer",
+            Text = "Navigation",
+            Dock = Orivy.DockStyle.Right,
+            Width = 0,
+            Padding = new(14, 18, 14, 14),
+            Margin = new(0),
+            Radius = new(0),
+            Border = new(0),
+            BorderColor = SKColors.Empty,
+            BackColor = SKColors.Empty,
+        };
+
+        var visualStyleSidebarToggle = new Element
+        {
+            Name = "visualStyleSidebarToggle",
+            Text = "\u2630",
+            Dock = Orivy.DockStyle.Left,
+            Width = 44,
+            Height = 40,
+            Padding = new(0),
+            Margin = new(0),
+            Radius = new(10),
+            Border = new(1),
+            BorderColor = ColorScheme.Outline,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Cursor = Cursors.Hand,
+            Tag = "closed"
+        };
+
+        var visualStyleSidebarTitle = new Element
+        {
+            Name = "visualStyleSidebarTitle",
+            Text = "Navigation",
+            Dock = Orivy.DockStyle.Top,
+            Height = 34,
+            Padding = new(4, 0, 4, 0),
+            Margin = new(0, 0, 0, 12),
+            Radius = new(0),
+            Border = new(0),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 15f)
+        };
+
+        var visualStyleSidebarReports = new Element
+        {
+            Name = "visualStyleSidebarReports",
+            Text = "Reports",
+            Dock = Orivy.DockStyle.Top,
+            Height = 42,
+            Padding = new(12, 0, 12, 0),
+            Margin = new(0, 0, 0, 4),
+            Radius = new(8),
+            Border = new(0),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Cursor = Cursors.Hand,
+            Tag = "active"
+        };
+
+        var visualStyleSidebarDesign = new Element
+        {
+            Name = "visualStyleSidebarDesign",
+            Text = "Design",
+            Dock = Orivy.DockStyle.Top,
+            Height = 42,
+            Padding = new(12, 0, 12, 0),
+            Margin = new(0, 0, 0, 4),
+            Radius = new(8),
+            Border = new(0),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Cursor = Cursors.Hand,
+        };
+
+        var visualStyleSidebarDeploy = new Element
+        {
+            Name = "visualStyleSidebarDeploy",
+            Text = "Deploy",
+            Dock = Orivy.DockStyle.Top,
+            Height = 42,
+            Padding = new(12, 0, 12, 0),
+            Margin = new(0, 0, 0, 4),
+            Radius = new(8),
+            Border = new(0),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Cursor = Cursors.Hand,
+        };
         this.visualStyleScrollProbe = new()
         {
             Name = "visualStyleScrollProbe",
-            Text = "Scroll Probe\nIf you can reach this block, AutoScroll is now measuring content after dock layout. The two Button controls above also prove the new control works inside the example page.",
+            Text = "Scroll Probe\nIf you can reach this block, AutoScroll is now measuring content after dock layout. The two Button controls above also prove visual styles work inside the example page.",
             Dock = Orivy.DockStyle.Top,
             Height = 240,
             Padding = new(18),
@@ -370,6 +492,143 @@ internal partial class MainWindow
                     .Opacity(0.95f));
         });
 
+        visualStyleSidebarToggle.ConfigureVisualStyles(styles =>
+        {
+            styles
+                .DefaultTransition(TimeSpan.FromMilliseconds(120), AnimationType.CubicEaseOut)
+                .Base(baseStyle => baseStyle
+                    .Background(ColorScheme.Surface)
+                    .Foreground(ColorScheme.ForeColor)
+                    .Border(1)
+                    .BorderColor(ColorScheme.Outline.WithAlpha(96))
+                    .Radius(10)
+                    .Shadow(BoxShadow.None))
+                .When((element, state) => state.IsPointerOver && !Equals(element.Tag, "open"), rule => rule
+                    .Background(ColorScheme.SurfaceVariant)
+                    .BorderColor(ColorScheme.Primary.WithAlpha(142))
+                    .Scale(1.02f))
+                .OnPressed(rule => rule
+                    .Scale(0.96f)
+                    .Opacity(0.9f))
+                .When((element, _) => Equals(element.Tag, "open"), rule => rule
+                    .Background(ColorScheme.Primary.WithAlpha(34))
+                    .Foreground(ColorScheme.Primary)
+                    .BorderColor(ColorScheme.Primary.WithAlpha(132))
+                    .Scale(1.01f)
+                    .Shadow(new BoxShadow(0f, 6f, 16f, 0, ColorScheme.Primary.WithAlpha(26))));
+        });
+
+        visualStyleSidebarDrawer.ConfigureVisualStyles(styles =>
+        {
+            styles
+                .DefaultTransition(TimeSpan.FromMilliseconds(150), AnimationType.CubicEaseOut)
+                .Base(baseStyle => baseStyle
+                    .Width(0)
+                    .Background(ColorScheme.SurfaceContainerHigh.WithAlpha(0))
+                    .Foreground(ColorScheme.ForeColor)
+                    .Border(0)
+                    .BorderColor(ColorScheme.Outline.WithAlpha(0))
+                    .Radius(0)
+                    .Opacity(0f)
+                    .TranslateX(32)
+                    .Shadow(BoxShadow.None));
+        });
+
+        visualStyleSidebarToggle.VisualStyles
+            .With(visualStyleSidebarDrawer)
+            .DefaultTransition(TimeSpan.FromMilliseconds(150), AnimationType.CubicEaseOut)
+            .WhenSource((source, _) => Equals(source.Tag, "open"), rule => rule
+                .Width(260)
+                .Background(ColorScheme.SurfaceContainerHigh)
+                .Border(new Thickness(1, 0, 0, 0))
+                .BorderColor(ColorScheme.Outline.WithAlpha(86))
+                .Radius(0)
+                .Opacity(1f)
+                .TranslateX(0)
+                .Shadow(new BoxShadow(-14f, 0f, 30f, 0, ColorScheme.ShadowColor.WithAlpha(42))));
+
+        void ConfigureSidebarItem(Element item, SKColor accent)
+        {
+            item.ConfigureVisualStyles(styles => styles
+                .DefaultTransition(TimeSpan.FromMilliseconds(90), AnimationType.CubicEaseOut)
+                .Base(baseStyle => baseStyle
+                    .Background(ColorScheme.SurfaceContainerHigh)
+                    .Foreground(ColorScheme.ForeColor)
+                    .Border(0)
+                    .BorderColor(SKColors.Empty)
+                    .Radius(8)
+                    .TranslateX(0)
+                    .Scale(1f))
+                .When((element, state) => state.IsPointerOver && !state.IsPressed, rule => rule
+                    .Background(ColorScheme.SurfaceVariant))
+                .When((_, state) => state.IsPressed, rule => rule
+                    .Background(ColorScheme.SurfaceVariant.Brightness(-0.03f)))
+                .When((element, _) => Equals(element.Tag, "active"), rule => rule
+                    .Background(accent.WithAlpha(34))
+                    .Foreground(ColorScheme.ForeColor)));
+        }
+
+        ConfigureSidebarItem(
+            visualStyleSidebarReports,
+            ColorScheme.Primary);
+        ConfigureSidebarItem(
+            visualStyleSidebarDesign,
+            new SKColor(168, 85, 247));
+        ConfigureSidebarItem(
+            visualStyleSidebarDeploy,
+            ColorScheme.Success);
+
+        visualStyleSidebarTitle.ConfigureVisualStyles(styles => styles
+            .Base(baseStyle => baseStyle
+                .Background(SKColors.Empty)
+                .Foreground(ColorScheme.ForeColor.WithAlpha(220))
+                .Border(0)
+                .Radius(0)
+                .Opacity(0.96f)));
+
+        visualStyleSidebarToggle.Click += (_, _) =>
+        {
+            var isOpen = Equals(visualStyleSidebarToggle.Tag, "open");
+            visualStyleSidebarToggle.Tag = isOpen ? "closed" : "open";
+            visualStyleSidebarToggle.Text = isOpen ? "\u2630" : "\u00d7";
+            visualStyleSidebarToggle.ReevaluateVisualStyles();
+            visualStyleSidebarDrawer.ReevaluateVisualStyles();
+        };
+
+        this.visualStyleDrivenTarget.ConfigureVisualStyles(styles =>
+        {
+            styles
+                .DefaultTransition(TimeSpan.FromMilliseconds(150), AnimationType.CubicEaseOut)
+                .Base(baseStyle => baseStyle
+                    .Background(ColorScheme.Surface)
+                    .Foreground(ColorScheme.ForeColor)
+                    .Border(1)
+                    .BorderColor(ColorScheme.Outline)
+                    .Radius(16)
+                    .Opacity(0.92f))
+                .OnHover(rule => rule
+                    .BorderColor(ColorScheme.Primary.WithAlpha(130)));
+        });
+
+        this.visualStylePrimaryButton.VisualStyles
+            .With(this.visualStyleDrivenTarget)
+            .DefaultTransition(TimeSpan.FromMilliseconds(150), AnimationType.CubicEaseOut)
+            .OnHover(rule => rule
+                .Height(118)
+                .Background(ColorScheme.SurfaceContainerHigh)
+                .BorderColor(ColorScheme.Primary)
+                .Scale(1.015f)
+                .Opacity(1f)
+                .Shadow(new BoxShadow(0f, 12f, 24f, 0, ColorScheme.Primary.WithAlpha(34))))
+            .OnPressed(rule => rule
+                .Height(104)
+                .Background(ColorScheme.Primary.WithAlpha(46))
+                .BorderColor(ColorScheme.Primary.Brightness(-0.1f))
+                .Scale(0.99f)
+                .Opacity(0.96f))
+            .OnFocused(rule => rule
+                .Border(2)
+                .BorderColor(ColorScheme.Primary.Brightness(0.12f)));
         this.visualStyleScrollProbe.ConfigureVisualStyles(styles =>
         {
             styles
@@ -582,7 +841,6 @@ internal partial class MainWindow
             Dock = Orivy.DockStyle.Top,
             Height = 46,
             Margin = new(0, 0, 0, 12),
-            AccentMotionEnabled = true
         };
 
         var scrollLabActionB = new Button
@@ -592,7 +850,6 @@ internal partial class MainWindow
             Dock = Orivy.DockStyle.Top,
             Height = 46,
             Margin = new(0, 0, 0, 16),
-            AccentMotionEnabled = false
         };
 
         var scrollLabNestedShell = new Element
@@ -678,7 +935,6 @@ internal partial class MainWindow
             Dock = Orivy.DockStyle.Top,
             Height = 44,
             Margin = new(0, 0, 0, 12),
-            AccentMotionEnabled = true
         };
 
         var scrollLabNestedCard3 = new Element
@@ -735,6 +991,11 @@ internal partial class MainWindow
         scrollLabNestedHost.Controls.Add(scrollLabNestedTopGap);
         scrollLabNestedShell.Controls.Add(scrollLabNestedHost);
 
+        visualStyleSidebarDrawer.Controls.Add(visualStyleSidebarDeploy);
+        visualStyleSidebarDrawer.Controls.Add(visualStyleSidebarDesign);
+        visualStyleSidebarDrawer.Controls.Add(visualStyleSidebarReports);
+        visualStyleSidebarDrawer.Controls.Add(visualStyleSidebarTitle);
+        visualStyleSidebarToolbar.Controls.Add(visualStyleSidebarToggle);
         visualStyleDangerCard.Click += VisualStyleDangerToggle_Click;
         visualStylePrimaryButton.Click += VisualStylePrimaryButton_Click;
         visualStyleFooterAction.Click += VisualStyleEnableDisabled_Click;
@@ -742,15 +1003,20 @@ internal partial class MainWindow
         this.panel3.Controls.Add(designerControlShell);
         this.panel3.Controls.Add(designerControlHeader);
 
-        this.panel4.Controls.Add(this.visualStyleScrollProbe);
-        this.panel4.Controls.Add(this.visualStyleFooterAction);
-        this.panel4.Controls.Add(this.visualStyleGhostButton);
-        this.panel4.Controls.Add(this.visualStylePrimaryButton);
-        this.panel4.Controls.Add(this.visualStyleDisabledCard);
-        this.panel4.Controls.Add(this.visualStyleDangerCard);
-        this.panel4.Controls.Add(this.visualStyleInteractiveCard);
-        this.panel4.Controls.Add(this.visualStyleMotionHero);
-        this.panel4.Controls.Add(this.visualStyleHeader);
+        visualStyleContentHost.Controls.Add(this.visualStyleScrollProbe);
+        visualStyleContentHost.Controls.Add(this.visualStyleDrivenTarget);
+        visualStyleContentHost.Controls.Add(this.visualStyleFooterAction);
+        visualStyleContentHost.Controls.Add(this.visualStyleGhostButton);
+        visualStyleContentHost.Controls.Add(this.visualStylePrimaryButton);
+        visualStyleContentHost.Controls.Add(this.visualStyleDisabledCard);
+        visualStyleContentHost.Controls.Add(this.visualStyleDangerCard);
+        visualStyleContentHost.Controls.Add(this.visualStyleInteractiveCard);
+        visualStyleContentHost.Controls.Add(this.visualStyleMotionHero);
+        visualStyleContentHost.Controls.Add(this.visualStyleHeader);
+        visualStyleContentHost.Controls.Add(visualStyleSidebarToolbar);
+        this.panel4.Controls.Add(visualStyleContentHost);
+        this.panel4.Controls.Add(visualStyleSidebarDrawer);
+        visualStyleSidebarDrawer.BringToFront();
 
         this.panel5.Controls.Add(scrollLabLongTail);
         this.panel5.Controls.Add(scrollLabNestedShell);
@@ -796,7 +1062,6 @@ internal partial class MainWindow
             Dock = Orivy.DockStyle.Left,
             Width = 128,
             Margin = new(0, 0, 10, 0),
-            AccentMotionEnabled = true
         };
 
         this.gridListToggleStickyButton = new Button
@@ -806,7 +1071,6 @@ internal partial class MainWindow
             Dock = Orivy.DockStyle.Left,
             Width = 128,
             Margin = new(0, 0, 10, 0),
-            AccentMotionEnabled = false
         };
 
         this.gridListToggleGroupingButton = new Button
@@ -816,7 +1080,6 @@ internal partial class MainWindow
             Dock = Orivy.DockStyle.Left,
             Width = 144,
             Margin = new(0, 0, 10, 0),
-            AccentMotionEnabled = false
         };
 
         this.gridListToggleGridLinesButton = new Button
@@ -826,7 +1089,6 @@ internal partial class MainWindow
             Dock = Orivy.DockStyle.Left,
             Width = 152,
             Margin = new(0, 0, 0, 0),
-            AccentMotionEnabled = false
         };
 
         this.gridListToggleRowResizeButton = new Button
@@ -836,7 +1098,6 @@ internal partial class MainWindow
             Dock = Orivy.DockStyle.Left,
             Width = 164,
             Margin = new(0, 0, 10, 0),
-            AccentMotionEnabled = false
         };
 
         gridListToolbar.Controls.Add(this.gridListToggleGridLinesButton);
@@ -1685,7 +1946,7 @@ internal partial class MainWindow
             AutoScroll = true
         };
 
-        // ¦¦ Main embedded tab control ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Main embedded tab control ?????????????????????????????????????????
         var embeddedTabView = new TabView
         {
             Name                      = "embeddedTabView",
@@ -1709,7 +1970,7 @@ internal partial class MainWindow
         };
         _embeddedTabView = embeddedTabView;
 
-        // ¦¦ Toolbar shell ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Toolbar shell ?????????????????????????????????????????????????????
         var embeddedToolbar = new Container
         {
             Name       = "embeddedTabToolbar",
@@ -1723,7 +1984,7 @@ internal partial class MainWindow
             BackColor  = ColorScheme.SurfaceContainerHigh,
         };
 
-        // ¦¦ Status bar ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Status bar ????????????????????????????????????????????????????????
         var embeddedModeStatus = new Element
         {
             Name      = "embeddedModeStatus",
@@ -1737,7 +1998,7 @@ internal partial class MainWindow
             TextAlign = ContentAlignment.MiddleLeft,
         };
 
-        // ¦¦ Row 1 label ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Row 1 label ???????????????????????????????????????????????????????
         var designModeLabel = new Element
         {
             Text      = "Design Mode",
@@ -1751,7 +2012,7 @@ internal partial class MainWindow
             Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
         };
 
-        // ¦¦ Row 1: design mode buttons ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Row 1: design mode buttons ????????????????????????????????????????
         var embeddedModeButtons = new Container
         {
             Name      = "embeddedModeButtons",
@@ -1785,7 +2046,7 @@ internal partial class MainWindow
             Border    = new Thickness(0),
         };
 
-        // ¦¦ Row 2 label ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Row 2 label ???????????????????????????????????????????????????????
         var alignmentLabel = new Element
         {
             Text      = "Tab Alignment",
@@ -1799,7 +2060,7 @@ internal partial class MainWindow
             Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
         };
 
-        // ¦¦ Row 2: alignment buttons ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Row 2: alignment buttons ??????????????????????????????????????????
         var embeddedAlignmentButtons = new Container
         {
             Name      = "embeddedAlignmentButtons",
@@ -1833,7 +2094,7 @@ internal partial class MainWindow
             Border    = new Thickness(0),
         };
 
-        // ¦¦ Row 4 label ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Row 4 label ???????????????????????????????????????????????????????
         var textAlignmentLabel = new Element
         {
             Text      = "Text Alignment",
@@ -1847,7 +2108,7 @@ internal partial class MainWindow
             Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
         };
 
-        // ¦¦ Row 4: text alignment buttons ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Row 4: text alignment buttons ?????????????????????????????????????
         var embeddedTextAlignButtons = new Container
         {
             Name      = "embeddedTextAlignButtons",
@@ -1887,7 +2148,7 @@ internal partial class MainWindow
             Border    = new Thickness(0),
         };
 
-        // ¦¦ Row 5 label ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Row 5 label ???????????????????????????????????????????????????????
         var iconAlignmentLabel = new Element
         {
             Text      = "Icon Alignment",
@@ -1901,7 +2162,7 @@ internal partial class MainWindow
             Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
         };
 
-        // ¦¦ Row 5: icon alignment buttons ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Row 5: icon alignment buttons ?????????????????????????????????????
         var embeddedIconAlignButtons = new Container
         {
             Name      = "embeddedIconAlignButtons",
@@ -1941,7 +2202,7 @@ internal partial class MainWindow
             Border    = new Thickness(0),
         };
 
-        // ¦¦ Design mode buttons ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Design mode buttons ???????????????????????????????????????????????
         Button MakeToolButton(string name, string text) => new Button
         {
             Name                = name,
@@ -1951,7 +2212,6 @@ internal partial class MainWindow
             Height              = 36,
             Margin              = new Thickness(0, 0, 8, 0),
             Radius              = new Radius(8),
-            AccentMotionEnabled = false,
         };
 
         Button MakeTextAlignButton(string name, string text) => new Button
@@ -1963,7 +2223,6 @@ internal partial class MainWindow
             Height              = 36,
             Margin              = new Thickness(0, 0, 8, 0),
             Radius              = new Radius(8),
-            AccentMotionEnabled = false,
         };
 
         var roundedCompactModeButton = MakeToolButton("roundedCompactModeButton", "RoundedCompact");
@@ -1978,9 +2237,9 @@ internal partial class MainWindow
         var customStyleButton        = MakeToolButton("customStyleButton",        "Custom");
         var clearStyleButton         = MakeToolButton("clearStyleButton",         "Clear");
 
-        var startAlignButton  = MakeToolButton("startAlignButton",  "· Start");
-        var centerAlignButton = MakeToolButton("centerAlignButton", "· Center");
-        var endAlignButton    = MakeToolButton("endAlignButton",    "· End");
+        var startAlignButton  = MakeToolButton("startAlignButton",  "? Start");
+        var centerAlignButton = MakeToolButton("centerAlignButton", "? Center");
+        var endAlignButton    = MakeToolButton("endAlignButton",    "? End");
 
         var topLayoutButton    = MakeToolButton("topLayoutButton",    "Top");
         var leftLayoutButton   = MakeToolButton("leftLayoutButton",   "Left");
@@ -2032,7 +2291,7 @@ internal partial class MainWindow
             iconAlignBottomRightButton,
         };
 
-        // ¦¦ Helper: visual active/inactive state for tool buttons ¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Helper: visual active/inactive state for tool buttons ?????????????
         void SetButtonActive(Button btn, bool active)
         {
             btn.BackColor   = active ? ColorScheme.Primary : ColorScheme.Surface;
@@ -2041,7 +2300,7 @@ internal partial class MainWindow
             btn.Invalidate();
         }
 
-        // ¦¦ Apply design mode ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Apply design mode ?????????????????????????????????????????????????
         void ApplyEmbeddedTabDesignMode(TabViewDesignMode mode)
         {
             embeddedTabView.TabDesignMode = mode;
@@ -2049,15 +2308,15 @@ internal partial class MainWindow
 
             var modeDesc = mode switch
             {
-                TabViewDesignMode.RoundedCompact => "RoundedCompact — muted full-width container, elevated card on selected tab.",
-                TabViewDesignMode.Rectangle      => "Rectangle — no container, subtle ghost hover, full-width primary indicator.",
-                TabViewDesignMode.Rounded        => "Rounded — muted segmented container, Surface card on selected.",
-                TabViewDesignMode.Pill           => "Pill — filled Primary pill on selected, no container background.",
-                TabViewDesignMode.Outlined       => "Outlined — classic 3-sided border tab, open bottom merges with content.",
-                TabViewDesignMode.Minimal        => "Minimal — minimal surface, Primary left-accent bar and tint on selected.",
-                TabViewDesignMode.Fluent         => "Fluent — soft acrylic tint, reveal highlight, rounded selected surface.",
-                TabViewDesignMode.MacOS          => "MacOS — compact inset capsule, subtle outline, sidebar-friendly spacing.",
-                _                                      => "Chromed — browser-style top-rounded tabs, Surface elevated on selected.",
+                TabViewDesignMode.RoundedCompact => "RoundedCompact ? muted full-width container, elevated card on selected tab.",
+                TabViewDesignMode.Rectangle      => "Rectangle ? no container, subtle ghost hover, full-width primary indicator.",
+                TabViewDesignMode.Rounded        => "Rounded ? muted segmented container, Surface card on selected.",
+                TabViewDesignMode.Pill           => "Pill ? filled Primary pill on selected, no container background.",
+                TabViewDesignMode.Outlined       => "Outlined ? classic 3-sided border tab, open bottom merges with content.",
+                TabViewDesignMode.Minimal        => "Minimal ? minimal surface, Primary left-accent bar and tint on selected.",
+                TabViewDesignMode.Fluent         => "Fluent ? soft acrylic tint, reveal highlight, rounded selected surface.",
+                TabViewDesignMode.MacOS          => "MacOS ? compact inset capsule, subtle outline, sidebar-friendly spacing.",
+                _                                      => "Chromed ? browser-style top-rounded tabs, Surface elevated on selected.",
             };
             var alignDesc = embeddedTabView.TabAlignment switch
             {
@@ -2073,8 +2332,8 @@ internal partial class MainWindow
                 _ => "Top",
             };
             embeddedModeStatus.Text = embeddedTabView.CustomTabStyle.HasValue
-                ? $"Mode: Custom — builder-defined colors, spacing, shape and indicator.\nBase preset: {mode} · Alignment: {alignDesc} · Layout: {layoutDesc}"
-                : $"Mode: {modeDesc}\nAlignment: {alignDesc} · Layout: {layoutDesc}";
+                ? $"Mode: Custom ? builder-defined colors, spacing, shape and indicator.\nBase preset: {mode} ? Alignment: {alignDesc} ? Layout: {layoutDesc}"
+                : $"Mode: {modeDesc}\nAlignment: {alignDesc} ? Layout: {layoutDesc}";
 
             SetButtonActive(roundedCompactModeButton, mode == TabViewDesignMode.RoundedCompact);
             SetButtonActive(rectangleModeButton,      mode == TabViewDesignMode.Rectangle);
@@ -2153,7 +2412,7 @@ internal partial class MainWindow
             ApplyEmbeddedTabDesignMode(mode);
         }
 
-        // ¦¦ Apply alignment ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Apply alignment ???????????????????????????????????????????????????
         void ApplyEmbeddedTabAlignment(TabViewAlignment alignment)
         {
             embeddedTabView.TabAlignment = alignment;
@@ -2188,7 +2447,7 @@ internal partial class MainWindow
             SetButtonActive(bottomLayoutButton, layoutMode == TabViewLayoutMode.Bottom);
         }
 
-        // ¦¦ Apply text alignment ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Apply text alignment ??????????????????????????????????????????????
         void ApplyEmbeddedTextAlign(ContentAlignment align)
         {
             embeddedTabView.TextAlign = align;
@@ -2214,7 +2473,7 @@ internal partial class MainWindow
             SetButtonActive(activeButton, true);
         }
 
-        // ¦¦ Apply icon alignment ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Apply icon alignment ??????????????????????????????????????????????
         void ApplyEmbeddedIconAlign(ContentAlignment align)
         {
             embeddedTabView.ImageAlign = align;
@@ -2349,7 +2608,7 @@ internal partial class MainWindow
         embeddedToolbar.Controls.Add(embeddedModeButtons);
         embeddedToolbar.Controls.Add(designModeLabel);
 
-        // ¦¦ Tab page factory ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Tab page factory ??????????????????????????????????????????????????
         var overviewTabIcon    = CreateGridListIcon(new SKColor(0x22, 0xC5, 0x5E), GridListIconKind.Healthy);
         var workflowTabIcon    = CreateGridListIcon(new SKColor(0xF5, 0x9E, 0x0B), GridListIconKind.Pulse);
         var compositionTabIcon = CreateGridListIcon(new SKColor(0xA8, 0x55, 0xF7), GridListIconKind.Locked);
@@ -2446,7 +2705,7 @@ internal partial class MainWindow
         embeddedTabView.Controls.Add(CreateEmbeddedTabPage(
             "embeddedTabOverview", "Overview", overviewTabIcon,
             new SKColor(0x22, 0xC5, 0x5E),
-            "Tab Strip — Embedded Mode\nThe control owns hit-testing, layout and rendering. No dependency on the outer title bar.",
+            "Tab Strip ? Embedded Mode\nThe control owns hit-testing, layout and rendering. No dependency on the outer title bar.",
             "Tab alignment (Start / Center / End) shifts the whole strip. Close and new-tab buttons adjust automatically. All four design modes share the same hit-test and animation pipeline.",
             ("Design Modes", "4"), ("Alignments", "3"), ("Transitions", "11")));
 
@@ -2455,23 +2714,23 @@ internal partial class MainWindow
             new SKColor(0xF5, 0x9E, 0x0B),
             "Animated Page Transitions\nEvery tab switch goes through the snapshot-based transition engine.",
             "ScaleFade, Push, Cover, Reveal, Iris and six more effects work identically in Embedded mode. Switch a design mode and the tab strip redraws on the next frame with zero layout recalculation.",
-            ("Effects", "11"), ("Easing Curves", "10"), ("Duration Range", "100 – 1 000 ms")));
+            ("Effects", "11"), ("Easing Curves", "10"), ("Duration Range", "100 ? 1 000 ms")));
 
         embeddedTabView.Controls.Add(CreateEmbeddedTabPage(
             "embeddedTabComposition", "Composition", compositionTabIcon,
             new SKColor(0xA8, 0x55, 0xF7),
             "Nested Page Controls\nAn embedded strip can live inside any Container, panel or inspector rail.",
-            "The outer window here uses TitleBar tabs. This inner control uses Embedded mode — both run inside the same render loop with no coordination overhead.",
-            ("Nesting Depth", "Unlimited"), ("DPI Aware", "Yes"), ("ScaleFactor", "1 × – 4 ×")));
+            "The outer window here uses TitleBar tabs. This inner control uses Embedded mode ? both run inside the same render loop with no coordination overhead.",
+            ("Nesting Depth", "Unlimited"), ("DPI Aware", "Yes"), ("ScaleFactor", "1 ? ? 4 ?")));
 
         embeddedTabView.Controls.Add(CreateEmbeddedTabPage(
             "embeddedTabSettings", "Settings", settingsTabIcon,
             new SKColor(0xEF, 0x44, 0x44),
-            "Runtime Configuration\nDesign mode and alignment update live — no rebuild, no layout pass.",
+            "Runtime Configuration\nDesign mode and alignment update live ? no rebuild, no layout pass.",
             "RoundedCompact renders a card-lift effect. Rectangle draws a full-width primary indicator. Rounded builds a segmented control. Chromed uses a top-rounded browser-tab silhouette.",
             ("Live Swap", "Yes"), ("Repaint", "1 Frame"), ("CPU Alloc", "~0 B/frame")));
 
-        // ¦¦ Seed initial state ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+        // ?? Seed initial state ????????????????????????????????????????????????
         ApplyEmbeddedTabDesignMode(embeddedTabView.TabDesignMode);
         ApplyEmbeddedTabAlignment(embeddedTabView.TabAlignment);
         ApplyEmbeddedTabLayout(embeddedTabView.TabLayoutMode);
@@ -2950,6 +3209,7 @@ internal partial class MainWindow
     private Element visualStyleFooterAction;
     private Button visualStylePrimaryButton;
     private Button visualStyleGhostButton;
+    private Element visualStyleDrivenTarget;
     private Element visualStyleScrollProbe;
     private Element gridListStatus;
     private GridList gridListPrimary;
