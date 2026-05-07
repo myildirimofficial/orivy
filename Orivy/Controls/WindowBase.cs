@@ -515,8 +515,13 @@ public partial class WindowBase : ElementBase
         // Handle keyboard navigation with focus manager
         if (msg.message == (uint)WindowMessage.WM_KEYDOWN || msg.message == (uint)WindowMessage.WM_SYSKEYDOWN)
         {
+            var commandKeyData = keyData | ModifierKeys;
+
+            if (TryHandleMenuShortcut(Controls, commandKeyData))
+                return true;
+
             // Special keys that should always be processed at window level
-            if (keyData == Keys.Escape)
+            if (commandKeyData == Keys.Escape)
             {
                 if (TryHandleEscapeCommand())
                     return true;
@@ -525,12 +530,29 @@ public partial class WindowBase : ElementBase
             }
 
             // Tab navigation
-            if (keyData == Keys.Tab || keyData == (Keys.Tab | Keys.Shift))
+            if (commandKeyData == Keys.Tab || commandKeyData == (Keys.Tab | Keys.Shift))
             {
-                var keyArgs = new KeyEventArgs(keyData);
+                var keyArgs = new KeyEventArgs(commandKeyData);
                 if (FocusManager.ProcessKeyNavigation(keyArgs))
                     return true;
             }
+        }
+
+        return false;
+    }
+
+    private static bool TryHandleMenuShortcut(ElementCollection elements, Keys keyData)
+    {
+        for (var i = 0; i < elements.Count; i++)
+        {
+            if (elements[i] is not ElementBase element || !element.Visible || !element.Enabled)
+                continue;
+
+            if (element is MenuStrip menuStrip && menuStrip.TryHandleShortcut(keyData))
+                return true;
+
+            if (TryHandleMenuShortcut(element.Controls, keyData))
+                return true;
         }
 
         return false;

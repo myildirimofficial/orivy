@@ -540,6 +540,11 @@ public class MenuStrip : ElementBase
         _submenuCloseTimer?.Stop();
     }
 
+    internal bool TryHandleShortcut(Keys keyData)
+    {
+        return TryHandleShortcut(Items, NormalizeShortcutKeyData(keyData));
+    }
+
     internal bool IsPointerOverSubmenuChain()
     {
         if (IsPointerOver)
@@ -590,6 +595,34 @@ public class MenuStrip : ElementBase
         {
             action();
         }
+    }
+
+    private static bool TryHandleShortcut(IReadOnlyList<MenuItem> items, Keys keyData)
+    {
+        for (var i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+            if (!item.Visible || !item.Enabled)
+                continue;
+
+            if (NormalizeShortcutKeyData(item.ShortcutKeys) == keyData)
+            {
+                item.OnClick();
+                return true;
+            }
+
+            if (item.HasDropDown && TryHandleShortcut(item.DropDownItems, keyData))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static Keys NormalizeShortcutKeyData(Keys keyData)
+    {
+        var modifiers = keyData & ShortcutModifierMask;
+        var keyCode = keyData & ~ShortcutModifierMask;
+        return keyCode | modifiers;
     }
 
     private void OnThemeChanged(object? sender, EventArgs e)
