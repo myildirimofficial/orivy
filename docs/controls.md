@@ -30,6 +30,7 @@ Key lifecycle stages:
 - Construction: create visual-style and motion-effect systems (done in `ElementBase` constructor).
 - Load: `OnLoad` / `EnsureLoadedRecursively` fired when element becomes part of a loaded window.
 - Measure: `GetPreferredSize(SKSize proposedSize)` — return a preferred size given constraints.
+- Auto-size: `AutoSize` uses `GetPreferredSize(...)`; the base implementation measures text with padding and border, while richer controls can override it for custom sizing.
 - Arrange: `SetBounds(SKRect bounds, BoundsSpecified specified)` — framework will call this during arrange; implementors should call `CommonProperties.SetSpecifiedBounds` when appropriate.
 - Paint: `OnPaint(SKCanvas canvas)` — render content; `Paint` event is raised by the base implementation.
 - Input: `OnMouseMove/OnMouseDown/OnMouseUp/OnMouseClick`, keyboard events `OnKeyDown/OnKeyUp/OnKeyPress`.
@@ -89,7 +90,9 @@ See `Orivy/Controls/ElementBase.cs` for exact dispatch code (`OnMouseDown`, `OnM
 - `Button` (`Orivy/Controls/Button.cs`)
   - Implements `GetPreferredSize` by measuring text with `TextRenderer.MeasureText` and adding padding/border.
   - Supports keyboard activation (Enter/Space) via `OnKeyDown`/`OnKeyUp` overrides and `PerformClick()`.
-  - Configures default visual styles in the constructor and optionally enables accent motion effects.
+  - Supports toggle behavior through `CheckOnClick`, `Checked`, and `CheckedChanged`.
+  - Configures default visual styles in the constructor, including the `OnChecked(...)` state.
+  - `ButtonGroup<TValue>` is a `Container` that watches its child buttons, reads each button value from `Tag`, aligns buttons with `ContentAlignment`, supports horizontal/vertical `Orientation`, and keeps a single checked item for segmented/radio-like toolbars. Set `Gap = 0` for joined Bootstrap/Tailwind-style button groups.
 
 - `GridList` (`Orivy/Controls/GridList.cs` + `GridList.Models.cs`)
   - Data-driven list with virtualization-friendly patterns. Consult `GridList` source for model binding and cell measurement points.
@@ -142,7 +145,13 @@ public class ToggleSwitch : ElementBase
 	public bool Checked
 	{
 		get => _checked;
-		set { if (_checked == value) return; _checked = value; Invalidate(); }
+		set
+		{
+			if (_checked == value) return;
+			_checked = value;
+			RefreshVisualStylesForStateChange();
+			Invalidate();
+		}
 	}
 
 	public ToggleSwitch()
@@ -153,6 +162,8 @@ public class ToggleSwitch : ElementBase
 			.Base(b => b.Background(ColorScheme.SurfaceVariant).Radius(14))
 			.OnChecked(c => c.Background(ColorScheme.Primary)));
 	}
+
+	protected override bool GetVisualCheckedState() => Checked;
 
 	public override SKSize GetPreferredSize(SKSize proposedSize) => Size;
 

@@ -129,7 +129,7 @@ primaryButton.VisualStyles
         .BorderColor(ColorScheme.Primary));
 ```
 
-`With(...)` supports the same state helpers as normal visual styles: `OnHover`, `OnPressed`, `OnFocused`, `OnDisabled`, `OnHidden`, `OnInvalid`, and `When(...)`. The target can animate any value currently supported by visual styles, including size, background, foreground, border, radius, shadow, opacity, translate, and scale.
+`With(...)` supports the same state helpers as normal visual styles: `OnHover`, `OnPressed`, `OnChecked`, `OnFocused`, `OnDisabled`, `OnHidden`, `OnInvalid`, and `When(...)`. The target can animate any value currently supported by visual styles, including size, background, foreground, border, radius, shadow, opacity, translate, and scale.
 
 ## 4. Theme-Aware Control Pattern
 
@@ -142,11 +142,57 @@ Controls with richer appearance often follow this pattern:
 
 `ComboBox` and `ColorPicker` are good examples of this pattern. They rebuild their theme-derived colors when the global palette changes, then refresh their effective visual styles without requiring the entire control to be recreated.
 
-The default `Button` also demonstrates this flow by defining a full visual-style profile in its constructor, including hover, pressed, focused, and disabled states.
+The default `Button` also demonstrates this flow by defining a full visual-style profile in its constructor, including hover, pressed, checked, focused, and disabled states.
 
-For styles configured directly with `ConfigureVisualStyles(...)`, `ElementBase` remembers the builder configuration and replays it on `ColorScheme.ThemeChanged`. This keeps `ColorScheme`-derived colors current across normal, hover, pressed, focused, disabled, hidden, and invalid states. If a control rebuilds styles manually with `clearExisting: true`, the remembered configuration is replaced instead of accumulated.
+For styles configured directly with `ConfigureVisualStyles(...)`, `ElementBase` remembers the builder configuration and replays it on `ColorScheme.ThemeChanged`. This keeps `ColorScheme`-derived colors current across normal, hover, pressed, checked, focused, disabled, hidden, and invalid states. If a control rebuilds styles manually with `clearExisting: true`, the remembered configuration is replaced instead of accumulated.
 
-## 5. Window Tab Styling
+## 5. Toggle Buttons and Button Groups
+
+`Button` can act as a toggle by enabling `CheckOnClick`. Its `Checked` value participates in visual styles through `OnChecked(...)`.
+
+```csharp
+var fluentButton = new Button
+{
+    Text = "Fluent",
+    CheckOnClick = true
+};
+
+fluentButton.ConfigureVisualStyles(styles => styles
+    .Base(rule => rule
+        .Background(ColorScheme.Surface)
+        .Foreground(ColorScheme.ForeColor))
+    .OnChecked(rule => rule
+        .Background(ColorScheme.Primary)
+        .Foreground(SKColors.White)));
+```
+
+For segmented/radio-like toolbars, use `ButtonGroup<TValue>` as the container. Add buttons to its `Controls` collection, put each typed value in `Tag`, and listen to one group-level event. The group sets `CheckOnClick`, keeps one button checked, and exposes the selected value.
+
+```csharp
+var designModes = new ButtonGroup<TabViewDesignMode>
+{
+    Dock = DockStyle.Top,
+    Height = 36,
+    Orientation = Orientation.Horizontal,
+    Alignment = ContentAlignment.MiddleLeft,
+    Gap = 0
+};
+
+designModes.Controls.Add(new Button { Text = "Rounded", Tag = TabViewDesignMode.Rounded });
+designModes.Controls.Add(new Button { Text = "Fluent", Tag = TabViewDesignMode.Fluent });
+designModes.Controls.Add(new Button { Text = "MacOS", Tag = TabViewDesignMode.MacOS });
+
+designModes.SelectedValueChanged += (_, e) =>
+{
+    tabView.TabDesignMode = e.SelectedValue;
+};
+
+designModes.SetSelectedValue(TabViewDesignMode.Rounded);
+```
+
+Use `Gap = 0` for a Bootstrap/Tailwind-style segmented group. The group will join adjacent borders and keep only the outer corners rounded. Use `Orientation.Vertical` for stacked groups; the same radius logic is applied from top to bottom.
+
+## 6. Window Tab Styling
 
 `TabView` supports preset tab appearances through `TabDesignMode`, and it can also accept a user-defined tab style through `CustomTabStyle` or `ConfigureTabStyle(...)`.
 
@@ -224,7 +270,7 @@ Notes:
 - `CustomTabStyle` applies to both embedded tabs and titlebar tabs.
 - `TabViewMetrics.Padding` is content padding. `SurfaceInset` is the visual surface inset. Keep these separate to avoid layout changes when only the painted shape should move.
 
-## 6. Native Window Theme Integration
+## 7. Native Window Theme Integration
 
 `WindowBase` exposes `WindowThemeType` to align the native window with Orivy's theme. Supported values are:
 
@@ -247,7 +293,7 @@ var window = new Window
 ColorScheme.SetThemeInstant(dark: true);
 ```
 
-## 7. Elevation and Flat Design
+## 8. Elevation and Flat Design
 
 `Orivy/Helpers/ElevationHelper.cs` provides higher-level styling helpers for depth and polish.
 
@@ -259,7 +305,7 @@ Key behaviors:
 
 Use these helpers when a custom control needs manual paint logic but still wants to match the shared theme vocabulary.
 
-## 8. Best Practices
+## 9. Best Practices
 
 - Prefer `ColorScheme` properties over hard-coded colors for default surfaces and text.
 - Use `ConfigureVisualStyles(...)` for state changes instead of manually mutating colors in every mouse event.
@@ -269,7 +315,7 @@ Use these helpers when a custom control needs manual paint logic but still wants
 - Use `ReevaluateVisualStyles()` after state or theme changes that affect predicate-based rules.
 - Reserve motion and ambient decorative effects for `ConfigureMotionEffects(...)`; keep them separate from the core styling contract.
 
-## 9. Source Reference
+## 10. Source Reference
 
 - `Orivy/ColorScheme.cs`
 - `Orivy/Controls/ElementBase.VisualStyles.cs`

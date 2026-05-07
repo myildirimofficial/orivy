@@ -109,7 +109,7 @@ internal partial class MainWindow
         tabView.Controls.Add(bindingPage);
         var notificationsPage = new NotificationsDemoPage();
         tabView.Controls.Add(notificationsPage);
-        _embeddedTabsPage = new EmbeddedTabsDemoPage();
+        _embeddedTabsPage = new EmbeddedTabsDemoPage(tabView);
         tabView.Controls.Add(_embeddedTabsPage);
 
 

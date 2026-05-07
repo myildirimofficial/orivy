@@ -19,6 +19,7 @@ internal sealed partial class EmbeddedTabsDemoPage : Container
 {
     private readonly List<SKImage> _embeddedImages = new();
     private TabView _embeddedTabView = null!;
+    private readonly TabView _linkedTabView;
 
     internal bool ShowTabStripResizer
     {
@@ -32,6 +33,12 @@ internal sealed partial class EmbeddedTabsDemoPage : Container
 
     public EmbeddedTabsDemoPage()
     {
+        InitializeComponent();
+    }
+
+    internal EmbeddedTabsDemoPage(TabView linkedTabView)
+    {
+        _linkedTabView = linkedTabView;
         InitializeComponent();
     }
 

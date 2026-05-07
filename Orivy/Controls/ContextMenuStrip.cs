@@ -124,6 +124,7 @@ public class ContextMenuStrip : MenuStrip
             _vScrollBar.DisplayValueChanged += (_, _) =>
             {
                 _scrollOffset = _vScrollBar.DisplayValue;
+                ClearHoverState();
                 Invalidate();
             };
         }
@@ -1244,12 +1245,11 @@ public class ContextMenuStrip : MenuStrip
     {
         base.OnMouseWheel(e);
 
-        // After scroll offset changes, recalculate hover target so hover state stays anchored to cursor.
         if (!Enabled || !Visible)
             return;
 
-        // Keep the same event parameters to evaluate which item is now under the cursor.
-        OnMouseMove(new MouseEventArgs(e.Button, e.Clicks, e.X, e.Y, e.Delta, e.IsHorizontalWheel));
+        ClearHoverState();
+        Invalidate();
     }
 
     internal override void OnMouseMove(MouseEventArgs e)
@@ -1258,13 +1258,7 @@ public class ContextMenuStrip : MenuStrip
 
         if (TryRouteScrollableMouseMove(e))
         {
-            if (_hoveredItem != null)
-                EnsureItemHoverAnim(_hoveredItem).StartNewAnimation(AnimationDirection.Out);
-
-            _hoveredItem = null;
-            _ctxSlideFrom = SKRect.Empty;
-            _ctxSlideTo = SKRect.Empty;
-            _ctxSlideAnim.SetProgress(0);
+            ClearHoverState(closeSubmenu: false);
             Invalidate();
             return;
         }
@@ -1324,6 +1318,20 @@ public class ContextMenuStrip : MenuStrip
         }
 
         Invalidate();
+    }
+
+    private void ClearHoverState(bool closeSubmenu = true)
+    {
+        if (_hoveredItem != null)
+            EnsureItemHoverAnim(_hoveredItem).StartNewAnimation(AnimationDirection.Out);
+
+        _hoveredItem = null;
+        _ctxSlideFrom = SKRect.Empty;
+        _ctxSlideTo = SKRect.Empty;
+        _ctxSlideAnim.SetProgress(0);
+
+        if (closeSubmenu && !UseAccordionSubmenus)
+            CloseSubmenu();
     }
 
     internal override void OnMouseDown(MouseEventArgs e)

@@ -15,6 +15,12 @@ namespace Orivy.Example;
 
 internal sealed partial class EmbeddedTabsDemoPage
 {
+    private enum EmbeddedTabCustomStyleAction
+    {
+        Custom,
+        Clear
+    }
+
     private void InitializeComponent()
     {
         Text = "Tab Control";
@@ -99,14 +105,17 @@ internal sealed partial class EmbeddedTabsDemoPage
         };
 
         // Row 1: design mode buttons
-        var embeddedModeButtons = new Container
+        var embeddedModeButtons = new ButtonGroup<TabViewDesignMode>
         {
             Name      = "embeddedModeButtons",
             Dock      = DockStyle.Top,
             Height    = 36,
             Margin    = new Thickness(0, 0, 0, 12),
+            Alignment = ContentAlignment.MiddleCenter,
             BackColor = SKColors.Transparent,
             Border    = new Thickness(0),
+            Orientation = Orientation.Vertical,
+            Gap = 0
         };
 
         var customStyleLabel = new Element
@@ -122,12 +131,14 @@ internal sealed partial class EmbeddedTabsDemoPage
             Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
         };
 
-        var customStyleButtons = new Container
+        var customStyleButtons = new ButtonGroup<EmbeddedTabCustomStyleAction>
         {
             Name      = "customStyleButtons",
             Dock      = DockStyle.Top,
             Height    = 36,
             Margin    = new Thickness(0, 0, 0, 12),
+            Alignment = ContentAlignment.MiddleLeft,
+            AllowEmptySelection = true,
             BackColor = SKColors.Transparent,
             Border    = new Thickness(0),
         };
@@ -147,12 +158,13 @@ internal sealed partial class EmbeddedTabsDemoPage
         };
 
         // Row 2: alignment buttons
-        var embeddedAlignmentButtons = new Container
+        var embeddedAlignmentButtons = new ButtonGroup<TabViewAlignment>
         {
             Name      = "embeddedAlignmentButtons",
             Dock      = DockStyle.Top,
             Height    = 36,
             Margin    = new Thickness(0, 0, 0, 10),
+            Alignment = ContentAlignment.MiddleLeft,
             BackColor = SKColors.Transparent,
             Border    = new Thickness(0),
         };
@@ -170,12 +182,13 @@ internal sealed partial class EmbeddedTabsDemoPage
             Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
         };
 
-        var embeddedLayoutButtons = new Container
+        var embeddedLayoutButtons = new ButtonGroup<TabViewLayoutMode>
         {
             Name      = "embeddedLayoutButtons",
             Dock      = DockStyle.Top,
             Height    = 36,
             Margin    = new Thickness(0, 0, 0, 10),
+            Alignment = ContentAlignment.MiddleLeft,
             BackColor = SKColors.Transparent,
             Border    = new Thickness(0),
         };
@@ -195,12 +208,13 @@ internal sealed partial class EmbeddedTabsDemoPage
         };
 
         // Row 4: text alignment buttons
-        var embeddedTextAlignButtons = new Container
+        var embeddedTextAlignButtons = new ButtonGroup<ContentAlignment>
         {
             Name      = "embeddedTextAlignButtons",
             Dock      = DockStyle.Top,
             Height    = 124,
             Margin    = new Thickness(0, 0, 0, 10),
+            Alignment = ContentAlignment.MiddleLeft,
             BackColor = SKColors.Transparent,
             Border    = new Thickness(0),
         };
@@ -249,12 +263,13 @@ internal sealed partial class EmbeddedTabsDemoPage
         };
 
         // Row 5: icon alignment buttons
-        var embeddedIconAlignButtons = new Container
+        var embeddedIconAlignButtons = new ButtonGroup<ContentAlignment>
         {
             Name      = "embeddedIconAlignButtons",
             Dock      = DockStyle.Top,
             Height    = 124,
             Margin    = new Thickness(0, 0, 0, 10),
+            Alignment = ContentAlignment.MiddleLeft,
             BackColor = SKColors.Transparent,
             Border    = new Thickness(0),
         };
@@ -288,109 +303,130 @@ internal sealed partial class EmbeddedTabsDemoPage
             Border    = new Thickness(0),
         };
 
-        // Design mode buttons
-        Button MakeToolButton(string name, string text) => new Button
+        Button MakeToolButton(string name, string text, object value)
         {
-            Name                = name,
-            Text                = text,
-            Dock                = DockStyle.Left,
-            Width               = 88,
-            Height              = 36,
-            Margin              = new Thickness(0, 0, 8, 0),
-            Radius              = new Radius(8),
-        };
+            var button = new Button
+            {
+                Name                = name,
+                Text                = text,
+                Tag                 = value,
+                Dock                = DockStyle.Left,
+                Width               = 88,
+                Height              = 36,
+                Margin              = new Thickness(0, 0, 8, 0),
+                Radius              = new Radius(8),
+            };
 
-        Button MakeTextAlignButton(string name, string text) => new Button
+            ConfigureToolButton(button);
+            return button;
+        }
+
+        Button MakeTextAlignButton(string name, string text, object value)
         {
-            Name                = name,
-            Text                = text,
-            Dock                = DockStyle.Left,
-            Width               = 108,
-            Height              = 36,
-            Margin              = new Thickness(0, 0, 8, 0),
-            Radius              = new Radius(8),
-        };
+            var button = new Button
+            {
+                Name                = name,
+                Text                = text,
+                Tag                 = value,
+                Dock                = DockStyle.Left,
+                Width               = 108,
+                Height              = 36,
+                Margin              = new Thickness(0, 0, 8, 0),
+                Radius              = new Radius(8),
+            };
 
-        var roundedCompactModeButton = MakeToolButton("roundedCompactModeButton", "RoundedCompact");
-        var rectangleModeButton      = MakeToolButton("rectangleModeButton",      "Rectangle");
-        var roundedModeButton        = MakeToolButton("roundedModeButton",        "Rounded");
-        var chromedModeButton        = MakeToolButton("chromedModeButton",        "Chromed");
-        var pillModeButton           = MakeToolButton("pillModeButton",           "Pill");
-        var outlinedModeButton       = MakeToolButton("outlinedModeButton",       "Outlined");
-        var minimalModeButton        = MakeToolButton("minimalModeButton",        "Minimal");
-        var fluentModeButton         = MakeToolButton("fluentModeButton",         "Fluent");
-        var macOSModeButton          = MakeToolButton("macOSModeButton",          "MacOS");
-        var customStyleButton        = MakeToolButton("customStyleButton",        "Custom");
-        var clearStyleButton         = MakeToolButton("clearStyleButton",         "Clear");
+            ConfigureToolButton(button);
+            return button;
+        }
 
-        var startAlignButton  = MakeToolButton("startAlignButton",  "Start");
-        var centerAlignButton = MakeToolButton("centerAlignButton", "Center");
-        var endAlignButton    = MakeToolButton("endAlignButton",    "End");
-
-        var topLayoutButton    = MakeToolButton("topLayoutButton",    "Top");
-        var leftLayoutButton   = MakeToolButton("leftLayoutButton",   "Left");
-        var rightLayoutButton  = MakeToolButton("rightLayoutButton",  "Right");
-        var bottomLayoutButton = MakeToolButton("bottomLayoutButton", "Bottom");
-
-        var textAlignTopLeftButton      = MakeTextAlignButton("textAlignTopLeftButton",      "Top Left");
-        var textAlignTopCenterButton    = MakeTextAlignButton("textAlignTopCenterButton",    "Top Center");
-        var textAlignTopRightButton     = MakeTextAlignButton("textAlignTopRightButton",     "Top Right");
-        var textAlignMiddleLeftButton   = MakeTextAlignButton("textAlignMiddleLeftButton",   "Middle Left");
-        var textAlignMiddleCenterButton = MakeTextAlignButton("textAlignMiddleCenterButton", "Middle Center");
-        var textAlignMiddleRightButton  = MakeTextAlignButton("textAlignMiddleRightButton",  "Middle Right");
-        var textAlignBottomLeftButton   = MakeTextAlignButton("textAlignBottomLeftButton",   "Bottom Left");
-        var textAlignBottomCenterButton = MakeTextAlignButton("textAlignBottomCenterButton", "Bottom Center");
-        var textAlignBottomRightButton  = MakeTextAlignButton("textAlignBottomRightButton",  "Bottom Right");
-        var textAlignButtons = new[]
+        static void ConfigureToolButton(Button button)
         {
+            button.ConfigureVisualStyles(styles => styles
+                .DefaultTransition(TimeSpan.FromMilliseconds(110), AnimationType.CubicEaseOut)
+                .Base(rule => rule
+                    .Background(ColorScheme.Surface)
+                    .Foreground(ColorScheme.ForeColor)
+                    .Border(1)
+                    .BorderColor(ColorScheme.Outline.WithAlpha(100))
+                    .Radius(8)
+                    .Shadow(BoxShadow.None))
+                .OnHover(rule => rule
+                    .Background(ColorScheme.SurfaceContainerHigh)
+                    .BorderColor(ColorScheme.Primary.WithAlpha(80)))
+                .OnChecked(rule => rule
+                    .Background(ColorScheme.Primary)
+                    .Foreground(SKColors.White)
+                    .BorderColor(ColorScheme.Primary)
+                    .Shadow(new BoxShadow(0f, 4f, 10f, 0, ColorScheme.Primary.WithAlpha(24))))
+                .OnPressed(rule => rule
+                    .Background(ColorScheme.Primary.Brightness(-0.08f))
+                    .Foreground(SKColors.White)
+                    .BorderColor(ColorScheme.Primary.Brightness(-0.12f))
+                    .Opacity(0.96f))
+                .OnFocused(rule => rule
+                    .BorderColor(ColorScheme.Primary.Brightness(0.16f))),
+                clearExisting: true);
+        }
 
-            textAlignTopLeftButton,
-            textAlignTopCenterButton,
-            textAlignTopRightButton,
-            textAlignMiddleLeftButton,
-            textAlignMiddleCenterButton,
-            textAlignMiddleRightButton,
-            textAlignBottomLeftButton,
-            textAlignBottomCenterButton,
-            textAlignBottomRightButton,
-        };
+        var roundedCompactModeButton = MakeToolButton("roundedCompactModeButton", "RoundedCompact", TabViewDesignMode.RoundedCompact);
+        var rectangleModeButton      = MakeToolButton("rectangleModeButton",      "Rectangle",      TabViewDesignMode.Rectangle);
+        var roundedModeButton        = MakeToolButton("roundedModeButton",        "Rounded",        TabViewDesignMode.Rounded);
+        var chromedModeButton        = MakeToolButton("chromedModeButton",        "Chromed",        TabViewDesignMode.Chromed);
+        var pillModeButton           = MakeToolButton("pillModeButton",           "Pill",           TabViewDesignMode.Pill);
+        var outlinedModeButton       = MakeToolButton("outlinedModeButton",       "Outlined",       TabViewDesignMode.Outlined);
+        var minimalModeButton        = MakeToolButton("minimalModeButton",        "Minimal",        TabViewDesignMode.Minimal);
+        var fluentModeButton         = MakeToolButton("fluentModeButton",         "Fluent",         TabViewDesignMode.Fluent);
+        var macOSModeButton          = MakeToolButton("macOSModeButton",          "MacOS",          TabViewDesignMode.MacOS);
+        var customStyleButton        = MakeToolButton("customStyleButton",        "Custom",         EmbeddedTabCustomStyleAction.Custom);
+        var clearStyleButton         = MakeToolButton("clearStyleButton",         "Clear",          EmbeddedTabCustomStyleAction.Clear);
 
-        var iconAlignTopLeftButton      = MakeTextAlignButton("iconAlignTopLeftButton",      "Top Left");
-        var iconAlignTopCenterButton    = MakeTextAlignButton("iconAlignTopCenterButton",    "Top Center");
-        var iconAlignTopRightButton     = MakeTextAlignButton("iconAlignTopRightButton",     "Top Right");
-        var iconAlignMiddleLeftButton   = MakeTextAlignButton("iconAlignMiddleLeftButton",   "Middle Left");
-        var iconAlignMiddleCenterButton = MakeTextAlignButton("iconAlignMiddleCenterButton", "Middle Center");
-        var iconAlignMiddleRightButton  = MakeTextAlignButton("iconAlignMiddleRightButton",  "Middle Right");
-        var iconAlignBottomLeftButton   = MakeTextAlignButton("iconAlignBottomLeftButton",   "Bottom Left");
-        var iconAlignBottomCenterButton = MakeTextAlignButton("iconAlignBottomCenterButton", "Bottom Center");
-        var iconAlignBottomRightButton  = MakeTextAlignButton("iconAlignBottomRightButton",  "Bottom Right");
-        var iconAlignButtons = new[]
+        var startAlignButton  = MakeToolButton("startAlignButton",  "Start",  TabViewAlignment.Start);
+        var centerAlignButton = MakeToolButton("centerAlignButton", "Center", TabViewAlignment.Center);
+        var endAlignButton    = MakeToolButton("endAlignButton",    "End",    TabViewAlignment.End);
+
+        var topLayoutButton    = MakeToolButton("topLayoutButton",    "Top",    TabViewLayoutMode.Top);
+        var leftLayoutButton   = MakeToolButton("leftLayoutButton",   "Left",   TabViewLayoutMode.Left);
+        var rightLayoutButton  = MakeToolButton("rightLayoutButton",  "Right",  TabViewLayoutMode.Right);
+        var bottomLayoutButton = MakeToolButton("bottomLayoutButton", "Bottom", TabViewLayoutMode.Bottom);
+
+        var textAlignTopLeftButton      = MakeTextAlignButton("textAlignTopLeftButton",      "Top Left",      ContentAlignment.TopLeft);
+        var textAlignTopCenterButton    = MakeTextAlignButton("textAlignTopCenterButton",    "Top Center",    ContentAlignment.TopCenter);
+        var textAlignTopRightButton     = MakeTextAlignButton("textAlignTopRightButton",     "Top Right",     ContentAlignment.TopRight);
+        var textAlignMiddleLeftButton   = MakeTextAlignButton("textAlignMiddleLeftButton",   "Middle Left",   ContentAlignment.MiddleLeft);
+        var textAlignMiddleCenterButton = MakeTextAlignButton("textAlignMiddleCenterButton", "Middle Center", ContentAlignment.MiddleCenter);
+        var textAlignMiddleRightButton  = MakeTextAlignButton("textAlignMiddleRightButton",  "Middle Right",  ContentAlignment.MiddleRight);
+        var textAlignBottomLeftButton   = MakeTextAlignButton("textAlignBottomLeftButton",   "Bottom Left",   ContentAlignment.BottomLeft);
+        var textAlignBottomCenterButton = MakeTextAlignButton("textAlignBottomCenterButton", "Bottom Center", ContentAlignment.BottomCenter);
+        var textAlignBottomRightButton  = MakeTextAlignButton("textAlignBottomRightButton",  "Bottom Right",  ContentAlignment.BottomRight);
+        var iconAlignTopLeftButton      = MakeTextAlignButton("iconAlignTopLeftButton",      "Top Left",      ContentAlignment.TopLeft);
+        var iconAlignTopCenterButton    = MakeTextAlignButton("iconAlignTopCenterButton",    "Top Center",    ContentAlignment.TopCenter);
+        var iconAlignTopRightButton     = MakeTextAlignButton("iconAlignTopRightButton",     "Top Right",     ContentAlignment.TopRight);
+        var iconAlignMiddleLeftButton   = MakeTextAlignButton("iconAlignMiddleLeftButton",   "Middle Left",   ContentAlignment.MiddleLeft);
+        var iconAlignMiddleCenterButton = MakeTextAlignButton("iconAlignMiddleCenterButton", "Middle Center", ContentAlignment.MiddleCenter);
+        var iconAlignMiddleRightButton  = MakeTextAlignButton("iconAlignMiddleRightButton",  "Middle Right",  ContentAlignment.MiddleRight);
+        var iconAlignBottomLeftButton   = MakeTextAlignButton("iconAlignBottomLeftButton",   "Bottom Left",   ContentAlignment.BottomLeft);
+        var iconAlignBottomCenterButton = MakeTextAlignButton("iconAlignBottomCenterButton", "Bottom Center", ContentAlignment.BottomCenter);
+        var iconAlignBottomRightButton  = MakeTextAlignButton("iconAlignBottomRightButton",  "Bottom Right",  ContentAlignment.BottomRight);
+
+        void ApplyToLinkedTabView(Action<TabView> apply)
         {
-            iconAlignTopLeftButton,
-            iconAlignTopCenterButton,
-            iconAlignTopRightButton,
-            iconAlignMiddleLeftButton,
-            iconAlignMiddleCenterButton,
-            iconAlignMiddleRightButton,
-            iconAlignBottomLeftButton,
-            iconAlignBottomCenterButton,
-            iconAlignBottomRightButton,
-        };
+            if (_linkedTabView != null && !ReferenceEquals(_linkedTabView, embeddedTabView))
+                apply(_linkedTabView);
+        }
 
-        // Helper: visual active/inactive state for tool buttons
-        void SetButtonActive(Button btn, bool active)
+        void SyncCustomStyleButtons()
         {
-            btn.BackColor   = active ? ColorScheme.Primary : ColorScheme.Surface;
-            btn.ForeColor   = active ? SKColors.White : ColorScheme.ForeColor;
-            btn.BorderColor = active ? ColorScheme.Primary : ColorScheme.Outline.WithAlpha(100);
-            btn.Invalidate();
+            if (embeddedTabView.CustomTabStyle.HasValue)
+                customStyleButtons.SetSelectedValue(EmbeddedTabCustomStyleAction.Custom, raiseChanged: false);
+            else
+                customStyleButtons.ClearSelection(raiseChanged: false);
         }
 
         // Apply design mode
         void ApplyEmbeddedTabDesignMode(TabViewDesignMode mode)
         {
             embeddedTabView.TabDesignMode = mode;
-            _embeddedTabView.TabDesignMode   = mode;
+            ApplyToLinkedTabView(tabViewControl => tabViewControl.TabDesignMode = mode);
 
             var modeDesc = mode switch
             {
@@ -421,17 +457,8 @@ internal sealed partial class EmbeddedTabsDemoPage
                 ? $"Mode: Custom - builder-defined colors, spacing, shape and indicator.\nBase preset: {mode} - Alignment: {alignDesc} - Layout: {layoutDesc}"
                 : $"Mode: {modeDesc}\nAlignment: {alignDesc} - Layout: {layoutDesc}";
 
-            SetButtonActive(roundedCompactModeButton, mode == TabViewDesignMode.RoundedCompact);
-            SetButtonActive(rectangleModeButton,      mode == TabViewDesignMode.Rectangle);
-            SetButtonActive(roundedModeButton,        mode == TabViewDesignMode.Rounded);
-            SetButtonActive(chromedModeButton,        mode == TabViewDesignMode.Chromed);
-            SetButtonActive(pillModeButton,           mode == TabViewDesignMode.Pill);
-            SetButtonActive(outlinedModeButton,       mode == TabViewDesignMode.Outlined);
-            SetButtonActive(minimalModeButton,        mode == TabViewDesignMode.Minimal);
-            SetButtonActive(fluentModeButton,         mode == TabViewDesignMode.Fluent);
-            SetButtonActive(macOSModeButton,          mode == TabViewDesignMode.MacOS);
-            SetButtonActive(customStyleButton,        embeddedTabView.CustomTabStyle.HasValue);
-            SetButtonActive(clearStyleButton,         embeddedTabView.CustomTabStyle.HasValue);
+            embeddedModeButtons.SetSelectedValue(mode, raiseChanged: false);
+            SyncCustomStyleButtons();
         }
 
         void ApplyCustomTabStyle(TabView tabViewControl)
@@ -477,23 +504,24 @@ internal sealed partial class EmbeddedTabsDemoPage
         void ApplyEmbeddedCustomTabStyle()
         {
             embeddedTabView.TabDesignMode = TabViewDesignMode.Fluent;
-            _embeddedTabView.TabDesignMode   = TabViewDesignMode.Fluent;
+            ApplyToLinkedTabView(tabViewControl => tabViewControl.TabDesignMode = TabViewDesignMode.Fluent);
 
             ApplyCustomTabStyle(embeddedTabView);
+            ApplyToLinkedTabView(ApplyCustomTabStyle);
             ApplyEmbeddedTabDesignMode(embeddedTabView.TabDesignMode);
         }
 
         void ClearEmbeddedCustomTabStyle()
         {
             embeddedTabView.ClearCustomTabStyle();
-            _embeddedTabView.ClearCustomTabStyle();
+            ApplyToLinkedTabView(tabViewControl => tabViewControl.ClearCustomTabStyle());
             ApplyEmbeddedTabDesignMode(embeddedTabView.TabDesignMode);
         }
 
         void ApplyEmbeddedPresetDesignMode(TabViewDesignMode mode)
         {
             embeddedTabView.ClearCustomTabStyle();
-            _embeddedTabView.ClearCustomTabStyle();
+            ApplyToLinkedTabView(tabViewControl => tabViewControl.ClearCustomTabStyle());
             ApplyEmbeddedTabDesignMode(mode);
         }
 
@@ -501,12 +529,10 @@ internal sealed partial class EmbeddedTabsDemoPage
         void ApplyEmbeddedTabAlignment(TabViewAlignment alignment)
         {
             embeddedTabView.TabAlignment = alignment;
-            _embeddedTabView.TabAlignment = alignment;
+            ApplyToLinkedTabView(tabViewControl => tabViewControl.TabAlignment = alignment);
             ApplyEmbeddedTabDesignMode(embeddedTabView.TabDesignMode);
 
-            SetButtonActive(startAlignButton,  alignment == TabViewAlignment.Start);
-            SetButtonActive(centerAlignButton, alignment == TabViewAlignment.Center);
-            SetButtonActive(endAlignButton,    alignment == TabViewAlignment.End);
+            embeddedAlignmentButtons.SetSelectedValue(alignment, raiseChanged: false);
         }
 
         void ApplyEmbeddedTabLayout(TabViewLayoutMode layoutMode)
@@ -515,169 +541,110 @@ internal sealed partial class EmbeddedTabsDemoPage
 
             if (layoutMode == TabViewLayoutMode.Top)
             {
-                _embeddedTabView.TabMode = TabViewMode.TitleBar;
-                _embeddedTabView.TabLayoutMode = TabViewLayoutMode.Top;
+                ApplyToLinkedTabView(tabViewControl =>
+                {
+                    tabViewControl.TabMode = TabViewMode.TitleBar;
+                    tabViewControl.TabLayoutMode = TabViewLayoutMode.Top;
+                });
             }
             else
             {
-                _embeddedTabView.TabMode = TabViewMode.Embedded;
-                _embeddedTabView.TabLayoutMode = layoutMode;
+                ApplyToLinkedTabView(tabViewControl =>
+                {
+                    tabViewControl.TabMode = TabViewMode.Embedded;
+                    tabViewControl.TabLayoutMode = layoutMode;
+                });
             }
 
             ApplyEmbeddedTabDesignMode(embeddedTabView.TabDesignMode);
 
-            SetButtonActive(topLayoutButton,    layoutMode == TabViewLayoutMode.Top);
-            SetButtonActive(leftLayoutButton,   layoutMode == TabViewLayoutMode.Left);
-            SetButtonActive(rightLayoutButton,  layoutMode == TabViewLayoutMode.Right);
-            SetButtonActive(bottomLayoutButton, layoutMode == TabViewLayoutMode.Bottom);
+            embeddedLayoutButtons.SetSelectedValue(layoutMode, raiseChanged: false);
         }
 
         // Apply text alignment
         void ApplyEmbeddedTextAlign(ContentAlignment align)
         {
             embeddedTabView.TextAlign = align;
-            _embeddedTabView.TextAlign = align;
+            ApplyToLinkedTabView(tabViewControl => tabViewControl.TextAlign = align);
 
-            for (var buttonIndex = 0; buttonIndex < textAlignButtons.Length; buttonIndex++)
-                SetButtonActive(textAlignButtons[buttonIndex], false);
-
-            var activeButton = align switch
-            {
-                ContentAlignment.TopLeft => textAlignTopLeftButton,
-                ContentAlignment.TopCenter => textAlignTopCenterButton,
-                ContentAlignment.TopRight => textAlignTopRightButton,
-                ContentAlignment.MiddleLeft => textAlignMiddleLeftButton,
-                ContentAlignment.MiddleCenter => textAlignMiddleCenterButton,
-                ContentAlignment.MiddleRight => textAlignMiddleRightButton,
-                ContentAlignment.BottomLeft => textAlignBottomLeftButton,
-                ContentAlignment.BottomCenter => textAlignBottomCenterButton,
-                ContentAlignment.BottomRight => textAlignBottomRightButton,
-                _ => textAlignMiddleRightButton,
-            };
-
-            SetButtonActive(activeButton, true);
+            embeddedTextAlignButtons.SetSelectedValue(align, raiseChanged: false);
         }
 
         // Apply icon alignment
         void ApplyEmbeddedIconAlign(ContentAlignment align)
         {
             embeddedTabView.ImageAlign = align;
-            _embeddedTabView.ImageAlign   = align;
+            ApplyToLinkedTabView(tabViewControl => tabViewControl.ImageAlign = align);
 
-            for (var buttonIndex = 0; buttonIndex < iconAlignButtons.Length; buttonIndex++)
-                SetButtonActive(iconAlignButtons[buttonIndex], false);
-
-            var activeButton = align switch
-            {
-                ContentAlignment.TopLeft     => iconAlignTopLeftButton,
-                ContentAlignment.TopCenter   => iconAlignTopCenterButton,
-                ContentAlignment.TopRight    => iconAlignTopRightButton,
-                ContentAlignment.MiddleLeft  => iconAlignMiddleLeftButton,
-                ContentAlignment.MiddleCenter => iconAlignMiddleCenterButton,
-                ContentAlignment.MiddleRight  => iconAlignMiddleRightButton,
-                ContentAlignment.BottomLeft   => iconAlignBottomLeftButton,
-                ContentAlignment.BottomCenter => iconAlignBottomCenterButton,
-                ContentAlignment.BottomRight  => iconAlignBottomRightButton,
-                _                             => iconAlignMiddleLeftButton,
-            };
-
-            SetButtonActive(activeButton, true);
+            embeddedIconAlignButtons.SetSelectedValue(align, raiseChanged: false);
         }
 
-        roundedCompactModeButton.Click += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.RoundedCompact);
-        rectangleModeButton.Click      += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.Rectangle);
-        roundedModeButton.Click        += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.Rounded);
-        chromedModeButton.Click        += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.Chromed);
-        pillModeButton.Click           += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.Pill);
-        outlinedModeButton.Click       += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.Outlined);
-        minimalModeButton.Click        += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.Minimal);
-        fluentModeButton.Click         += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.Fluent);
-        macOSModeButton.Click          += (_, _) => ApplyEmbeddedPresetDesignMode(TabViewDesignMode.MacOS);
-        customStyleButton.Click        += (_, _) => ApplyEmbeddedCustomTabStyle();
-        clearStyleButton.Click         += (_, _) => ClearEmbeddedCustomTabStyle();
+        embeddedModeButtons.SelectedValueChanged += (_, e) => ApplyEmbeddedPresetDesignMode(e.SelectedValue);
+        embeddedAlignmentButtons.SelectedValueChanged += (_, e) => ApplyEmbeddedTabAlignment(e.SelectedValue);
+        embeddedLayoutButtons.SelectedValueChanged += (_, e) => ApplyEmbeddedTabLayout(e.SelectedValue);
+        embeddedTextAlignButtons.SelectedValueChanged += (_, e) => ApplyEmbeddedTextAlign(e.SelectedValue);
+        embeddedIconAlignButtons.SelectedValueChanged += (_, e) => ApplyEmbeddedIconAlign(e.SelectedValue);
+        customStyleButtons.SelectedValueChanged += (_, e) =>
+        {
+            if (e.SelectedValue == EmbeddedTabCustomStyleAction.Custom)
+                ApplyEmbeddedCustomTabStyle();
+            else
+                ClearEmbeddedCustomTabStyle();
+        };
 
-        startAlignButton.Click  += (_, _) => ApplyEmbeddedTabAlignment(TabViewAlignment.Start);
-        centerAlignButton.Click += (_, _) => ApplyEmbeddedTabAlignment(TabViewAlignment.Center);
-        endAlignButton.Click    += (_, _) => ApplyEmbeddedTabAlignment(TabViewAlignment.End);
-
-        topLayoutButton.Click    += (_, _) => ApplyEmbeddedTabLayout(TabViewLayoutMode.Top);
-        leftLayoutButton.Click   += (_, _) => ApplyEmbeddedTabLayout(TabViewLayoutMode.Left);
-        rightLayoutButton.Click  += (_, _) => ApplyEmbeddedTabLayout(TabViewLayoutMode.Right);
-        bottomLayoutButton.Click += (_, _) => ApplyEmbeddedTabLayout(TabViewLayoutMode.Bottom);
-
-        textAlignTopLeftButton.Click      += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.TopLeft);
-        textAlignTopCenterButton.Click    += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.TopCenter);
-        textAlignTopRightButton.Click     += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.TopRight);
-        textAlignMiddleLeftButton.Click   += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.MiddleLeft);
-        textAlignMiddleCenterButton.Click += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.MiddleCenter);
-        textAlignMiddleRightButton.Click  += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.MiddleRight);
-        textAlignBottomLeftButton.Click   += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.BottomLeft);
-        textAlignBottomCenterButton.Click += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.BottomCenter);
-        textAlignBottomRightButton.Click  += (_, _) => ApplyEmbeddedTextAlign(ContentAlignment.BottomRight);
-
-        iconAlignTopLeftButton.Click      += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.TopLeft);
-        iconAlignTopCenterButton.Click    += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.TopCenter);
-        iconAlignTopRightButton.Click     += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.TopRight);
-        iconAlignMiddleLeftButton.Click   += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.MiddleLeft);
-        iconAlignMiddleCenterButton.Click += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.MiddleCenter);
-        iconAlignMiddleRightButton.Click  += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.MiddleRight);
-        iconAlignBottomLeftButton.Click   += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.BottomLeft);
-        iconAlignBottomCenterButton.Click += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.BottomCenter);
-        iconAlignBottomRightButton.Click  += (_, _) => ApplyEmbeddedIconAlign(ContentAlignment.BottomRight);
-
-        embeddedModeButtons.Controls.Add(macOSModeButton);
-        embeddedModeButtons.Controls.Add(fluentModeButton);
-        embeddedModeButtons.Controls.Add(minimalModeButton);
-        embeddedModeButtons.Controls.Add(outlinedModeButton);
-        embeddedModeButtons.Controls.Add(pillModeButton);
-        embeddedModeButtons.Controls.Add(chromedModeButton);
-        embeddedModeButtons.Controls.Add(roundedModeButton);
-        embeddedModeButtons.Controls.Add(rectangleModeButton);
         embeddedModeButtons.Controls.Add(roundedCompactModeButton);
+        embeddedModeButtons.Controls.Add(rectangleModeButton);
+        embeddedModeButtons.Controls.Add(roundedModeButton);
+        embeddedModeButtons.Controls.Add(chromedModeButton);
+        embeddedModeButtons.Controls.Add(pillModeButton);
+        embeddedModeButtons.Controls.Add(outlinedModeButton);
+        embeddedModeButtons.Controls.Add(minimalModeButton);
+        embeddedModeButtons.Controls.Add(fluentModeButton);
+        embeddedModeButtons.Controls.Add(macOSModeButton);
 
-        customStyleButtons.Controls.Add(clearStyleButton);
         customStyleButtons.Controls.Add(customStyleButton);
+        customStyleButtons.Controls.Add(clearStyleButton);
 
-        embeddedAlignmentButtons.Controls.Add(endAlignButton);
-        embeddedAlignmentButtons.Controls.Add(centerAlignButton);
         embeddedAlignmentButtons.Controls.Add(startAlignButton);
+        embeddedAlignmentButtons.Controls.Add(centerAlignButton);
+        embeddedAlignmentButtons.Controls.Add(endAlignButton);
 
-        embeddedLayoutButtons.Controls.Add(bottomLayoutButton);
-        embeddedLayoutButtons.Controls.Add(rightLayoutButton);
-        embeddedLayoutButtons.Controls.Add(leftLayoutButton);
         embeddedLayoutButtons.Controls.Add(topLayoutButton);
+        embeddedLayoutButtons.Controls.Add(leftLayoutButton);
+        embeddedLayoutButtons.Controls.Add(rightLayoutButton);
+        embeddedLayoutButtons.Controls.Add(bottomLayoutButton);
 
-        embeddedTextAlignTopButtons.Controls.Add(textAlignTopRightButton);
-        embeddedTextAlignTopButtons.Controls.Add(textAlignTopCenterButton);
         embeddedTextAlignTopButtons.Controls.Add(textAlignTopLeftButton);
+        embeddedTextAlignTopButtons.Controls.Add(textAlignTopCenterButton);
+        embeddedTextAlignTopButtons.Controls.Add(textAlignTopRightButton);
 
-        embeddedTextAlignMiddleButtons.Controls.Add(textAlignMiddleRightButton);
-        embeddedTextAlignMiddleButtons.Controls.Add(textAlignMiddleCenterButton);
         embeddedTextAlignMiddleButtons.Controls.Add(textAlignMiddleLeftButton);
+        embeddedTextAlignMiddleButtons.Controls.Add(textAlignMiddleCenterButton);
+        embeddedTextAlignMiddleButtons.Controls.Add(textAlignMiddleRightButton);
 
-        embeddedTextAlignBottomButtons.Controls.Add(textAlignBottomRightButton);
-        embeddedTextAlignBottomButtons.Controls.Add(textAlignBottomCenterButton);
         embeddedTextAlignBottomButtons.Controls.Add(textAlignBottomLeftButton);
+        embeddedTextAlignBottomButtons.Controls.Add(textAlignBottomCenterButton);
+        embeddedTextAlignBottomButtons.Controls.Add(textAlignBottomRightButton);
 
-        embeddedTextAlignButtons.Controls.Add(embeddedTextAlignBottomButtons);
-        embeddedTextAlignButtons.Controls.Add(embeddedTextAlignMiddleButtons);
         embeddedTextAlignButtons.Controls.Add(embeddedTextAlignTopButtons);
+        embeddedTextAlignButtons.Controls.Add(embeddedTextAlignMiddleButtons);
+        embeddedTextAlignButtons.Controls.Add(embeddedTextAlignBottomButtons);
 
-        embeddedIconAlignTopButtons.Controls.Add(iconAlignTopRightButton);
-        embeddedIconAlignTopButtons.Controls.Add(iconAlignTopCenterButton);
         embeddedIconAlignTopButtons.Controls.Add(iconAlignTopLeftButton);
+        embeddedIconAlignTopButtons.Controls.Add(iconAlignTopCenterButton);
+        embeddedIconAlignTopButtons.Controls.Add(iconAlignTopRightButton);
 
-        embeddedIconAlignMiddleButtons.Controls.Add(iconAlignMiddleRightButton);
-        embeddedIconAlignMiddleButtons.Controls.Add(iconAlignMiddleCenterButton);
         embeddedIconAlignMiddleButtons.Controls.Add(iconAlignMiddleLeftButton);
+        embeddedIconAlignMiddleButtons.Controls.Add(iconAlignMiddleCenterButton);
+        embeddedIconAlignMiddleButtons.Controls.Add(iconAlignMiddleRightButton);
 
-        embeddedIconAlignBottomButtons.Controls.Add(iconAlignBottomRightButton);
-        embeddedIconAlignBottomButtons.Controls.Add(iconAlignBottomCenterButton);
         embeddedIconAlignBottomButtons.Controls.Add(iconAlignBottomLeftButton);
+        embeddedIconAlignBottomButtons.Controls.Add(iconAlignBottomCenterButton);
+        embeddedIconAlignBottomButtons.Controls.Add(iconAlignBottomRightButton);
 
-        embeddedIconAlignButtons.Controls.Add(embeddedIconAlignBottomButtons);
-        embeddedIconAlignButtons.Controls.Add(embeddedIconAlignMiddleButtons);
         embeddedIconAlignButtons.Controls.Add(embeddedIconAlignTopButtons);
+        embeddedIconAlignButtons.Controls.Add(embeddedIconAlignMiddleButtons);
+        embeddedIconAlignButtons.Controls.Add(embeddedIconAlignBottomButtons);
 
         embeddedToolbar.Controls.Add(embeddedModeStatus);
         embeddedToolbar.Controls.Add(embeddedIconAlignButtons);

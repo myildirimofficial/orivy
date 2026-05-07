@@ -1201,6 +1201,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         {
             if (_autoEllipsis == value) return;
             _autoEllipsis = value;
+            InvalidateMeasure();
             Invalidate();
         }
     }
@@ -2664,6 +2665,33 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     public virtual SKSize GetPreferredSize(SKSize proposedSize)
     {
+        if (!string.IsNullOrEmpty(Text))
+        {
+            using var font = CreateRenderFont(Font);
+            var measurementConstraints = proposedSize;
+            if (measurementConstraints.Width <= 0)
+                measurementConstraints.Width = short.MaxValue;
+            if (measurementConstraints.Height <= 0)
+                measurementConstraints.Height = short.MaxValue;
+
+            var textSize = TextRenderer.MeasureText(
+                Text,
+                font,
+                measurementConstraints,
+                new TextRenderOptions
+                {
+                    MaxWidth = measurementConstraints.Width,
+                    Trimming = AutoEllipsis ? TextTrimming.CharacterEllipsis : TextTrimming.None,
+                    UseMnemonic = UseMnemonic,
+                    Wrap = TextWrap.None
+                });
+
+            var desiredWidth = textSize.Width + Padding.Left + Padding.Right + Border.Left + Border.Right;
+            var desiredHeight = textSize.Height + Padding.Top + Padding.Bottom + Border.Top + Border.Bottom;
+
+            return new SKSize((float)Math.Ceiling(desiredWidth), (float)Math.Ceiling(desiredHeight));
+        }
+
         return Size;
     }
 

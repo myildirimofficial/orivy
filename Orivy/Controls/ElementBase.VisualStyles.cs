@@ -204,8 +204,13 @@ public abstract partial class ElementBase
         if (HasValidationError)
             states |= ElementVisualStates.Invalid;
 
+        if (GetVisualCheckedState())
+            states |= ElementVisualStates.Checked;
+
         return new ElementVisualStateContext(this, states);
     }
+
+    protected virtual bool GetVisualCheckedState() => false;
 
     private void HandleVisualStyleAnimationProgress(object _)
     {
@@ -507,7 +512,7 @@ public abstract partial class ElementBase
         NotifyVisualStyleStateDependents();
     }
 
-    private void RefreshVisualStylesForStateChange()
+    protected void RefreshVisualStylesForStateChange()
     {
         if (_visualStylesEnabled)
             RefreshVisualStyles();

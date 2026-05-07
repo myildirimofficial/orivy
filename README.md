@@ -59,7 +59,7 @@ If you are exploring Orivy for the first time, start with `docs/getting-started.
 Orivy's styling model is not limited to color constants. The framework combines:
 
 - `ColorScheme` for theme colors, dark/light mode, accent seeding, and animated theme transitions
-- `ElementBase.ConfigureVisualStyles(...)` for hover, pressed, focused, disabled, and custom predicate-based visual rules
+- `ElementBase.ConfigureVisualStyles(...)` for hover, pressed, checked, focused, disabled, and custom predicate-based visual rules
 - `WindowThemeType` for native host effects such as `Mica`, `Acrylic`, and `Tabbed`
 
 Example:
@@ -79,6 +79,7 @@ button.ConfigureVisualStyles(styles =>
     styles
         .DefaultTransition(TimeSpan.FromMilliseconds(140), AnimationType.CubicEaseOut)
         .OnHover(rule => rule.Background(ColorScheme.Primary.Brightness(0.06f)))
+        .OnChecked(rule => rule.Background(ColorScheme.Primary.Brightness(-0.04f)))
         .OnPressed(rule => rule.Opacity(0.94f));
 });
 ```

@@ -2,15 +2,19 @@ using Orivy.Animation;
 using Orivy.Helpers;
 using SkiaSharp;
 using System;
+using System.ComponentModel;
 
 namespace Orivy.Controls;
 
 public class Button : ElementBase
 {
+    private bool _checked;
     private bool _keyboardPressArmed;
 
     public Button()
     {
+        AutoSize = true;
+        AutoSizeMode = AutoSizeMode.GrowOnly;
         AutoEllipsis = true;
         CanSelect = true;
         Cursor = Cursors.Hand;
@@ -41,6 +45,11 @@ public class Button : ElementBase
                     .BorderColor(ColorScheme.Primary.Brightness(-0.24f))
                     .Opacity(0.94f)
                     .Shadow(new BoxShadow(0f, 3f, 10f, 0, ColorScheme.Primary.WithAlpha(22))))
+                .OnChecked(rule => rule
+                    .Background(ColorScheme.Primary.Brightness(-0.04f))
+                    .Foreground(SKColors.White)
+                    .BorderColor(ColorScheme.Primary.Brightness(-0.2f))
+                    .Shadow(new BoxShadow(0f, 3f, 10f, 0, ColorScheme.Primary.WithAlpha(28))))
                 .OnFocused(rule => rule
                     .Border(2)
                     .BorderColor(ColorScheme.Primary.Brightness(0.18f)))
@@ -53,13 +62,49 @@ public class Button : ElementBase
         });
     }
 
+    [DefaultValue(false)]
+    public bool CheckOnClick { get; set; }
+
+    [DefaultValue(false)]
+    public bool Checked
+    {
+        get => _checked;
+        set
+        {
+            if (_checked == value)
+                return;
+
+            _checked = value;
+            RefreshVisualStylesForStateChange();
+            OnCheckedChanged(EventArgs.Empty);
+            Invalidate();
+        }
+    }
+
+    public event EventHandler? CheckedChanged;
+
+    public override void OnClick(EventArgs e)
+    {
+        if (CheckOnClick)
+            Checked = !Checked;
+
+        base.OnClick(e);
+    }
+
+    protected virtual void OnCheckedChanged(EventArgs e)
+    {
+        CheckedChanged?.Invoke(this, e);
+    }
+
+    protected override bool GetVisualCheckedState() => Checked;
+
     public override SKSize GetPreferredSize(SKSize proposedSize)
     {
-        using var font = Font;
+        using var font = CreateRenderFont(Font);
         var measurementConstraints = proposedSize;
-        if (measurementConstraints.Width <= 0)
+        if (measurementConstraints.Width <= 1)
             measurementConstraints.Width = short.MaxValue;
-        if (measurementConstraints.Height <= 0)
+        if (measurementConstraints.Height <= 1)
             measurementConstraints.Height = short.MaxValue;
 
         var textSize = TextRenderer.MeasureText(
@@ -76,6 +121,12 @@ public class Button : ElementBase
 
         var desiredWidth = textSize.Width + Padding.Left + Padding.Right + Border.Left + Border.Right;
         var desiredHeight = textSize.Height + Padding.Top + Padding.Bottom + Border.Top + Border.Bottom;
+
+        if (AutoSizeMode == AutoSizeMode.GrowOnly)
+        {
+            desiredWidth = Math.Max(desiredWidth, Size.Width);
+            desiredHeight = Math.Max(desiredHeight, Size.Height);
+        }
 
         if (MinimumSize.Width > 0)
             desiredWidth = Math.Max(desiredWidth, MinimumSize.Width);
