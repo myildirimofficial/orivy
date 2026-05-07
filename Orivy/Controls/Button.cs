@@ -8,11 +8,13 @@ namespace Orivy.Controls;
 
 public class Button : ElementBase
 {
-    private bool _accentMotionEnabled;
+    private bool _checked;
     private bool _keyboardPressArmed;
 
     public Button()
     {
+        AutoSize = true;
+        AutoSizeMode = AutoSizeMode.GrowOnly;
         AutoEllipsis = true;
         CanSelect = true;
         Cursor = Cursors.Hand;
@@ -43,6 +45,11 @@ public class Button : ElementBase
                     .BorderColor(ColorScheme.Primary.Brightness(-0.24f))
                     .Opacity(0.94f)
                     .Shadow(new BoxShadow(0f, 3f, 10f, 0, ColorScheme.Primary.WithAlpha(22))))
+                .OnChecked(rule => rule
+                    .Background(ColorScheme.Primary.Brightness(-0.04f))
+                    .Foreground(SKColors.White)
+                    .BorderColor(ColorScheme.Primary.Brightness(-0.2f))
+                    .Shadow(new BoxShadow(0f, 3f, 10f, 0, ColorScheme.Primary.WithAlpha(28))))
                 .OnFocused(rule => rule
                     .Border(2)
                     .BorderColor(ColorScheme.Primary.Brightness(0.18f)))
@@ -55,28 +62,49 @@ public class Button : ElementBase
         });
     }
 
-    [Category("Behavior")]
     [DefaultValue(false)]
-    public bool AccentMotionEnabled
+    public bool CheckOnClick { get; set; }
+
+    [DefaultValue(false)]
+    public bool Checked
     {
-        get => _accentMotionEnabled;
+        get => _checked;
         set
         {
-            if (_accentMotionEnabled == value)
+            if (_checked == value)
                 return;
 
-            _accentMotionEnabled = value;
-            UpdateAccentMotion();
+            _checked = value;
+            RefreshVisualStylesForStateChange();
+            OnCheckedChanged(EventArgs.Empty);
+            Invalidate();
         }
     }
 
+    public event EventHandler? CheckedChanged;
+
+    public override void OnClick(EventArgs e)
+    {
+        if (CheckOnClick)
+            Checked = !Checked;
+
+        base.OnClick(e);
+    }
+
+    protected virtual void OnCheckedChanged(EventArgs e)
+    {
+        CheckedChanged?.Invoke(this, e);
+    }
+
+    protected override bool GetVisualCheckedState() => Checked;
+
     public override SKSize GetPreferredSize(SKSize proposedSize)
     {
-        using var font = Font;
+        using var font = CreateRenderFont(Font);
         var measurementConstraints = proposedSize;
-        if (measurementConstraints.Width <= 0)
+        if (measurementConstraints.Width <= 1)
             measurementConstraints.Width = short.MaxValue;
-        if (measurementConstraints.Height <= 0)
+        if (measurementConstraints.Height <= 1)
             measurementConstraints.Height = short.MaxValue;
 
         var textSize = TextRenderer.MeasureText(
@@ -93,6 +121,12 @@ public class Button : ElementBase
 
         var desiredWidth = textSize.Width + Padding.Left + Padding.Right + Border.Left + Border.Right;
         var desiredHeight = textSize.Height + Padding.Top + Padding.Bottom + Border.Top + Border.Bottom;
+
+        if (AutoSizeMode == AutoSizeMode.GrowOnly)
+        {
+            desiredWidth = Math.Max(desiredWidth, Size.Width);
+            desiredHeight = Math.Max(desiredHeight, Size.Height);
+        }
 
         if (MinimumSize.Width > 0)
             desiredWidth = Math.Max(desiredWidth, MinimumSize.Width);
@@ -142,39 +176,5 @@ public class Button : ElementBase
     {
         _keyboardPressArmed = false;
         base.OnLostFocus(e);
-    }
-
-    internal virtual void UpdateAccentMotion()
-    {
-        if (!_accentMotionEnabled)
-        {
-            ClearMotionEffects();
-            return;
-        }
-
-        ConfigureMotionEffects(scene =>
-        {
-            scene
-                .Circle(circle => circle
-                    .Anchor(0.82f, 0.34f)
-                    .Size(16f, 16f)
-                    .Orbit(6f, 5f)
-                    .Duration(2.8d)
-                    .Opacity(0.05f, 0.12f)
-                    .Scale(0.92f, 1.08f)
-                    .SpeedOnHover(1.8f)
-                    .SpeedOnPressed(2.4f)
-                    .Color(SKColors.White.WithAlpha(80)))
-                .Rectangle(rect => rect
-                    .Anchor(0.2f, 0.7f)
-                    .Size(26f, 6f)
-                    .CornerRadius(3f)
-                    .Bezier(new SKPoint(-6f, 0f), new SKPoint(4f, -3f), new SKPoint(12f, 4f), new SKPoint(-3f, 1f))
-                    .Duration(3.1d)
-                    .Opacity(0.03f, 0.08f)
-                    .Scale(0.96f, 1.04f)
-                    .SpeedOnHover(1.5f)
-                    .Color(SKColors.White.WithAlpha(72)));
-        });
     }
 }

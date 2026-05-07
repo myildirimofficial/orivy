@@ -128,6 +128,21 @@ public sealed class NotificationToast : ElementBase
 	private SKFont? _cachedMessageFont;
 	private SKFont? _cachedActionFont;
 	private string? _cachedTypefaceName;
+	private readonly SKPaint _badgeFillPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+	private readonly SKPaint _badgeStrokePaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke };
+	private readonly SKPaint _iconStrokePaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round };
+	private readonly SKPaint _iconFillPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+	private readonly SKPaint _titleTextPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+	private readonly SKPaint _messageTextPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+	private readonly SKPaint _actionFillPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+	private readonly SKPaint _actionStrokePaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke };
+	private readonly SKPaint _actionTextPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+	private readonly SKPaint _closeFillPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+	private readonly SKPaint _closeOutlinePaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke };
+	private readonly SKPaint _closeLinePaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round };
+	private readonly SKPaint _progressPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+	private readonly SKPath _iconPath = new();
+	private readonly object _renderResourceSync = new();
 
 	private readonly AnimationManager _countdownAnimation;
 	private readonly NotificationAction[] _actions;
@@ -202,6 +217,8 @@ public sealed class NotificationToast : ElementBase
 		Invalidate();
 	}
 
+	protected override bool HandlesMouseWheelScroll => false;
+
 	protected override void InvalidateFontCache()
 	{
 		ClearFontCache();
@@ -210,28 +227,37 @@ public sealed class NotificationToast : ElementBase
 
 	private void EnsureFontCache()
 	{
-		var defaultTypeface = Application.SharedDefaultFont.Typeface ?? SKTypeface.Default;
-		var familyName = defaultTypeface.FamilyName;
+		lock (_renderResourceSync)
+		{
+			var defaultTypeface = Application.SharedDefaultFont.Typeface ?? SKTypeface.Default;
+			var familyName = defaultTypeface.FamilyName;
 
-		if (_cachedTitleFont != null && _cachedMessageFont != null && _cachedActionFont != null && _cachedTypefaceName == familyName)
-			return;
+			if (_cachedTitleFont != null && _cachedMessageFont != null && _cachedActionFont != null && _cachedTypefaceName == familyName)
+				return;
 
-		ClearFontCache();
+			ClearFontCacheCore();
 
-		_cachedTypefaceName = familyName;
-		_cachedBoldTypeface = SKTypeface.FromFamilyName(familyName, SKFontStyle.Bold);
-		_ownsCachedBoldTypeface = _cachedBoldTypeface != null;
-		var titleTypeface = _cachedBoldTypeface ?? defaultTypeface;
-		_cachedTitleFont = Application.CreateUiFont(titleTypeface, TitleFontSize);
-		_cachedMessageFont = Application.CreateUiFont(defaultTypeface, MessageFontSize);
-		_cachedActionFont = Application.CreateUiFont(defaultTypeface, ActionFontSize);
+			_cachedTypefaceName = familyName;
+			_cachedBoldTypeface = SKTypeface.FromFamilyName(familyName, SKFontStyle.Bold);
+			_ownsCachedBoldTypeface = _cachedBoldTypeface != null;
+			var titleTypeface = _cachedBoldTypeface ?? defaultTypeface;
+			_cachedTitleFont = Application.CreateUiFont(titleTypeface, TitleFontSize);
+			_cachedMessageFont = Application.CreateUiFont(defaultTypeface, MessageFontSize);
+			_cachedActionFont = Application.CreateUiFont(defaultTypeface, ActionFontSize);
+		}
 	}
 
-	private static void EnsureMouseWheelRouting(object? sender, MouseEventArgs e)
+	private static void EnsureStackMouseWheelRouting(object? sender, MouseEventArgs e)
 	{
 	}
 
 	private void ClearFontCache()
+	{
+		lock (_renderResourceSync)
+			ClearFontCacheCore();
+	}
+
+	private void ClearFontCacheCore()
 	{
 		_cachedTitleFont?.Dispose();
 		_cachedMessageFont?.Dispose();
@@ -285,7 +311,8 @@ public sealed class NotificationToast : ElementBase
 		ApplyTheme();
 		ZOrder = 9999;
 		Opacity = 0f;
-		MouseWheel += EnsureMouseWheelRouting;
+		if (_layoutMode == NotificationToastLayoutMode.Stack)
+			MouseWheel += EnsureStackMouseWheelRouting;
 		ColorScheme.ThemeChanged += OnThemeChanged;
 
 		ConfigureEntryExitStyles();
@@ -385,8 +412,8 @@ public sealed class NotificationToast : ElementBase
 			}
 
 			_transitionPhase = ToastTransitionPhase.StackReflow;
-			OffsetEffectiveTranslateY(screenDelta);
-			ReevaluateVisualStyles();
+			SetEffectiveTranslateY(screenDelta);
+			ReevaluateVisualStyles();	
 		}
 	}
 
@@ -515,6 +542,19 @@ public sealed class NotificationToast : ElementBase
 			return;
 		}
 
+		if (Parent is NotificationTray tray)
+		{
+			var trayEvent = new MouseEventArgs(
+				e.Button,
+				e.Clicks,
+				(int)(Location.X + e.X),
+				(int)(Location.Y + e.Y),
+				e.Delta,
+				e.IsHorizontalWheel);
+			tray.OnMouseWheel(trayEvent);
+			return;
+		}
+
 		base.OnMouseWheel(e);
 	}
 
@@ -563,22 +603,35 @@ public sealed class NotificationToast : ElementBase
 
 	public override void OnPaint(SKCanvas canvas)
 	{
+		if (Disposing || IsDisposed)
+			return;
+
 		base.OnPaint(canvas);
+		if (Disposing || IsDisposed)
+			return;
 
-		var width = (float)Width;
-		var height = (float)Height;
-		var accent =  _palette.AccentColor;
+		lock (_renderResourceSync)
+		{
+			if (Disposing || IsDisposed)
+				return;
 
-		//ElevationHelper.DrawStateLayer(canvas, new SKRect(0f, 0f, width, height), CardRadius.TopLeft, GetBackgroundColor().WithAlpha(100));
-		//ElevationHelper.DrawFluentGlass(canvas, new SKRect(0f, 0f, width, height), CardRadius.TopLeft, GetBackgroundColor());
-		DrawIconBadge(canvas, accent);
-		DrawTitle(canvas);
-		DrawMessage(canvas, height);
-		DrawCloseButton(canvas);
-		if (_actions.Length > 0)
-			DrawActions(canvas);
-		if (_showProgressBar)
-			DrawProgress(canvas, width, height, accent);
+			EnsureFontCache();
+
+			var width = (float)Width;
+			var height = (float)Height;
+			var accent =  _palette.AccentColor;
+
+			//ElevationHelper.DrawStateLayer(canvas, new SKRect(0f, 0f, width, height), CardRadius.TopLeft, GetBackgroundColor().WithAlpha(100));
+			//ElevationHelper.DrawFluentGlass(canvas, new SKRect(0f, 0f, width, height), CardRadius.TopLeft, GetBackgroundColor());
+			DrawIconBadge(canvas, accent);
+			DrawTitle(canvas);
+			DrawMessage(canvas, height);
+			DrawCloseButton(canvas);
+			if (_actions.Length > 0)
+				DrawActions(canvas);
+			if (_showProgressBar)
+				DrawProgress(canvas, width, height, accent);
+		}
 	}
 
 	private void OnThemeChanged(object? sender, EventArgs e)
@@ -688,34 +741,29 @@ public sealed class NotificationToast : ElementBase
 		var centerY = PaddingV + (1f * ScaleFactor) + IconRadius;
 		var badgeRect = new SKRect(centerX - IconRadius, centerY - IconRadius, centerX + IconRadius, centerY + IconRadius);
 
-		using var fillPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = accent.WithAlpha(22) };
-		using var strokePaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = MathF.Max(1f, ScaleFactor), Color = accent.WithAlpha(82) };
-		using var iconPaint = new SKPaint
-		{
-			IsAntialias = true,
-			Style = SKPaintStyle.Stroke,
-			StrokeWidth = 1.8f * ScaleFactor,
-			StrokeCap = SKStrokeCap.Round,
-			StrokeJoin = SKStrokeJoin.Round,
-			Color = accent,
-		};
+		_badgeFillPaint.Color = accent.WithAlpha(22);
+		_badgeStrokePaint.StrokeWidth = MathF.Max(1f, ScaleFactor);
+		_badgeStrokePaint.Color = accent.WithAlpha(82);
+		_iconStrokePaint.StrokeWidth = 1.8f * ScaleFactor;
+		_iconStrokePaint.Color = accent;
 
-		canvas.DrawRoundRect(BadgeRadius.ToRoundRect(badgeRect), fillPaint);
-		canvas.DrawRoundRect(BadgeRadius.ToRoundRect(badgeRect), strokePaint);
+		var badgeRadius = BadgeRadius.All >= 0f ? BadgeRadius.All : BadgeRadius.TopLeft;
+		canvas.DrawRoundRect(badgeRect, badgeRadius, badgeRadius, _badgeFillPaint);
+		canvas.DrawRoundRect(badgeRect, badgeRadius, badgeRadius, _badgeStrokePaint);
 
 		switch (Kind)
 		{
 			case NotificationKind.Success:
-				DrawCheckIcon(canvas, centerX, centerY, iconPaint);
+				DrawCheckIcon(canvas, centerX, centerY, _iconStrokePaint);
 				break;
 			case NotificationKind.Warning:
-				DrawWarningIcon(canvas, centerX, centerY, iconPaint);
+				DrawWarningIcon(canvas, centerX, centerY, _iconStrokePaint);
 				break;
 			case NotificationKind.Error:
-				DrawErrorIcon(canvas, centerX, centerY, iconPaint);
+				DrawErrorIcon(canvas, centerX, centerY, _iconStrokePaint);
 				break;
 			default:
-				DrawInfoIcon(canvas, centerX, centerY, iconPaint);
+				DrawInfoIcon(canvas, centerX, centerY, _iconStrokePaint);
 				break;
 		}
 	}
@@ -727,11 +775,11 @@ public sealed class NotificationToast : ElementBase
 		var lowY = 4.6f * ScaleFactor;
 		var offsetY = 0.5f * ScaleFactor;
 
-		using var path = new SKPath();
-		path.MoveTo(centerX - leftX, centerY + offsetY);
-		path.LineTo(centerX - midX, centerY + lowY);
-		path.LineTo(centerX + leftX, centerY - lowY);
-		canvas.DrawPath(path, iconPaint);
+		_iconPath.Reset();
+		_iconPath.MoveTo(centerX - leftX, centerY + offsetY);
+		_iconPath.LineTo(centerX - midX, centerY + lowY);
+		_iconPath.LineTo(centerX + leftX, centerY - lowY);
+		canvas.DrawPath(_iconPath, iconPaint);
 	}
 
 	private void DrawWarningIcon(SKCanvas canvas, float centerX, float centerY, SKPaint iconPaint)
@@ -742,15 +790,8 @@ public sealed class NotificationToast : ElementBase
 		var dotRadius = 1.5f * ScaleFactor;
 
 		canvas.DrawLine(centerX, centerY - lineTop, centerX, centerY + lineBottom, iconPaint);
-		using var fillPaint = new SKPaint
-		{
-			IsAntialias = true,
-			Style = SKPaintStyle.Fill,
-			Color = iconPaint.Color,
-			StrokeCap = iconPaint.StrokeCap,
-			StrokeJoin = iconPaint.StrokeJoin,
-		};
-		canvas.DrawCircle(centerX, centerY + dotOffset, dotRadius, fillPaint);
+		_iconFillPaint.Color = iconPaint.Color;
+		canvas.DrawCircle(centerX, centerY + dotOffset, dotRadius, _iconFillPaint);
 	}
 
 	private void DrawErrorIcon(SKCanvas canvas, float centerX, float centerY, SKPaint iconPaint)
@@ -767,15 +808,8 @@ public sealed class NotificationToast : ElementBase
 		var lineTop = 1f * ScaleFactor;
 		var lineBottom = 5.2f * ScaleFactor;
 
-		using var fillPaint = new SKPaint
-		{
-			IsAntialias = true,
-			Style = SKPaintStyle.Fill,
-			Color = iconPaint.Color,
-			StrokeCap = iconPaint.StrokeCap,
-			StrokeJoin = iconPaint.StrokeJoin,
-		};
-		canvas.DrawCircle(centerX, centerY - dotOffset, dotRadius, fillPaint);
+		_iconFillPaint.Color = iconPaint.Color;
+		canvas.DrawCircle(centerX, centerY - dotOffset, dotRadius, _iconFillPaint);
 		canvas.DrawLine(centerX, centerY - lineTop, centerX, centerY + lineBottom, iconPaint);
 	}
 
@@ -783,8 +817,8 @@ public sealed class NotificationToast : ElementBase
 	{
 		var titleTop = PaddingV;
 		var titleRect = new SKRect(ContentLeft, titleTop, ContentRight, titleTop + TitleLineHeight);
-		using var textPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = ForeColor };
-		TextRenderer.DrawText(canvas, Title, titleRect, textPaint, _cachedTitleFont!, ContentAlignment.MiddleLeft, autoEllipsis: true);
+		_titleTextPaint.Color = ForeColor;
+		TextRenderer.DrawText(canvas, Title, titleRect, _titleTextPaint, _cachedTitleFont!, ContentAlignment.MiddleLeft, autoEllipsis: true);
 	}
 
 	private void DrawMessage(SKCanvas canvas, float height)
@@ -795,7 +829,7 @@ public sealed class NotificationToast : ElementBase
 		if (messageBottom <= messageTop)
 			return;
 
-		using var textPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = ForeColor };
+		_messageTextPaint.Color = ForeColor;
 		var baseLineHeight = _cachedMessageFont!.Metrics.Descent - _cachedMessageFont.Metrics.Ascent;
 		var lineSpacing = MessageLineHeight / Math.Max(1f, baseLineHeight);
 		var baselineY = messageTop - _cachedMessageFont.Metrics.Ascent;
@@ -806,7 +840,7 @@ public sealed class NotificationToast : ElementBase
 			baselineY,
 			SKTextAlign.Left,
 			_cachedMessageFont!,
-			textPaint,
+			_messageTextPaint,
 			new TextRenderOptions
 			{
 				Wrap = TextWrap.WordWrap,
@@ -825,9 +859,7 @@ public sealed class NotificationToast : ElementBase
 
 	private void DrawActions(SKCanvas canvas)
 	{
-		using var fillPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
-		using var strokePaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = MathF.Max(1f, ScaleFactor) };
-		using var textPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
+		_actionStrokePaint.StrokeWidth = MathF.Max(1f, ScaleFactor);
 
 		for (var i = 0; i < _actions.Length; i++)
 		{
@@ -846,14 +878,14 @@ public sealed class NotificationToast : ElementBase
 
 			var foreground = isPrimary ? _palette.PrimaryActionForegroundColor : _palette.SecondaryActionForegroundColor;
 
-			fillPaint.Color = background;
-			strokePaint.Color = borderColor;
-			textPaint.Color = foreground;
+			_actionFillPaint.Color = background;
+			_actionStrokePaint.Color = borderColor;
+			_actionTextPaint.Color = foreground;
 
-			var rr = ActionRadius.ToRoundRect(rect);
-			canvas.DrawRoundRect(rr, fillPaint);
-			canvas.DrawRoundRect(rr, strokePaint);
-			TextRenderer.DrawText(canvas, _actions[i].Label, rect, textPaint, _cachedActionFont!, ContentAlignment.MiddleCenter, autoEllipsis: false);
+			var actionRadius = ActionRadius.All >= 0f ? ActionRadius.All : ActionRadius.TopLeft;
+			canvas.DrawRoundRect(rect, actionRadius, actionRadius, _actionFillPaint);
+			canvas.DrawRoundRect(rect, actionRadius, actionRadius, _actionStrokePaint);
+			TextRenderer.DrawText(canvas, _actions[i].Label, rect, _actionTextPaint, _cachedActionFont!, ContentAlignment.MiddleCenter, autoEllipsis: false);
 		}
 	}
 
@@ -869,27 +901,22 @@ public sealed class NotificationToast : ElementBase
 			? _palette.OutlineColor.WithAlpha(_palette.IsDarkSurface ? (byte)110 : (byte)80)
 			: SKColors.Transparent;
 
-		using var fillPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = background };
-		using var outlinePaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = MathF.Max(1f, ScaleFactor), Color = outline };
-		using var linePaint = new SKPaint
-		{
-			IsAntialias = true,
-			Style = SKPaintStyle.Stroke,
-			StrokeWidth = 1.55f * ScaleFactor,
-			StrokeCap = SKStrokeCap.Round,
-			Color = foreground,
-		};
+		_closeFillPaint.Color = background;
+		_closeOutlinePaint.StrokeWidth = MathF.Max(1f, ScaleFactor);
+		_closeOutlinePaint.Color = outline;
+		_closeLinePaint.StrokeWidth = 1.55f * ScaleFactor;
+		_closeLinePaint.Color = foreground;
 
 		var centerX = _closeRect.MidX;
 		var centerY = _closeRect.MidY;
 		var radius = Math.Max(6f * ScaleFactor, (_closeRect.Width / 2f) - (2f * ScaleFactor));
-		canvas.DrawCircle(centerX, centerY, radius, fillPaint);
+		canvas.DrawCircle(centerX, centerY, radius, _closeFillPaint);
 		if (outline != SKColors.Transparent)
-			canvas.DrawCircle(centerX, centerY, radius - 0.5f, outlinePaint);
+			canvas.DrawCircle(centerX, centerY, radius - 0.5f, _closeOutlinePaint);
 
 		var delta = 3.9f * ScaleFactor;
-		canvas.DrawLine(centerX - delta, centerY - delta, centerX + delta, centerY + delta, linePaint);
-		canvas.DrawLine(centerX + delta, centerY - delta, centerX - delta, centerY + delta, linePaint);
+		canvas.DrawLine(centerX - delta, centerY - delta, centerX + delta, centerY + delta, _closeLinePaint);
+		canvas.DrawLine(centerX + delta, centerY - delta, centerX - delta, centerY + delta, _closeLinePaint);
 	}
 
 	private void LayoutInteractiveElements()
@@ -949,9 +976,8 @@ public sealed class NotificationToast : ElementBase
 			return;
 
 		var barRect = new SKRect(0, height - ProgressHeight, width * fraction, height);
-
-		using var fillPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = accent.WithAlpha(168) };
-		canvas.DrawRect(barRect, fillPaint);
+		_progressPaint.Color = accent.WithAlpha(168);
+		canvas.DrawRect(barRect, _progressPaint);
 	}
 
 	protected override void OnVisualStyleTransitionCompleted()
@@ -1076,12 +1102,30 @@ public sealed class NotificationToast : ElementBase
 	{
 		if (disposing)
 		{
-			MouseWheel -= EnsureMouseWheelRouting;
-			ClearFontCache();
+			MouseWheel -= EnsureStackMouseWheelRouting;
 			ColorScheme.ThemeChanged -= OnThemeChanged;
 			_countdownAnimation.OnAnimationProgress -= HandleCountdownAnimationProgress;
 			_countdownAnimation.OnAnimationFinished -= HandleCountdownAnimationFinished;
 			_countdownAnimation.Dispose();
+
+			lock (_renderResourceSync)
+			{
+				ClearFontCacheCore();
+				_badgeFillPaint.Dispose();
+				_badgeStrokePaint.Dispose();
+				_iconStrokePaint.Dispose();
+				_iconFillPaint.Dispose();
+				_titleTextPaint.Dispose();
+				_messageTextPaint.Dispose();
+				_actionFillPaint.Dispose();
+				_actionStrokePaint.Dispose();
+				_actionTextPaint.Dispose();
+				_closeFillPaint.Dispose();
+				_closeOutlinePaint.Dispose();
+				_closeLinePaint.Dispose();
+				_progressPaint.Dispose();
+				_iconPath.Dispose();
+			}
 
 			DetachHandle();
 		}

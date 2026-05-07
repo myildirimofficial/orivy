@@ -8,6 +8,9 @@ internal sealed class NotificationTray : ElementBase
 {
 	private const float DialogScrimAnimationSpeed = 0.08f;
 	private readonly AnimationManager _dialogScrimAnimation;
+	private readonly SKPaint _dialogScrimPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+	private readonly SKPaint _dialogVignettePaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+	private readonly SKPaint _scrollShadowPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
 	private bool _dialogScrimVisible;
 	private NotificationToastLayoutMode _layoutMode;
 	private NotificationToastPresentationMode _presentationMode;
@@ -34,6 +37,18 @@ internal sealed class NotificationTray : ElementBase
 		AutoScroll = true;
 		AutoScrollMargin = SKSize.Empty;
 		AutoScrollMinSize = new SKSize((NotificationToast.BaseToastWidth * ScaleFactor) + (NotificationToast.BaseShadowPadding * ScaleFactor * 2f), 1);
+
+		if (_vScrollBar != null)
+		{
+			_vScrollBar.ScrollAnimationIncrement = 0.18;
+			_vScrollBar.ScrollAnimationType = AnimationType.QuarticEaseOut;
+		}
+
+		if (_hScrollBar != null)
+		{
+			_hScrollBar.ScrollAnimationIncrement = 0.18;
+			_hScrollBar.ScrollAnimationType = AnimationType.QuarticEaseOut;
+		}
 	}
 
 	internal bool ParticipatesInHitTesting
@@ -113,6 +128,22 @@ internal sealed class NotificationTray : ElementBase
 		if (_layoutMode != NotificationToastLayoutMode.Stack && _presentationMode != NotificationToastPresentationMode.Dialog)
 			DrawScrollShadows(canvas);
 		return true;
+	}
+
+	internal override void OnMouseWheel(MouseEventArgs e)
+	{
+		if (_layoutMode != NotificationToastLayoutMode.Stack
+			&& _presentationMode != NotificationToastPresentationMode.Dialog
+			&& !WantsHorizontalMouseWheel(e)
+			&& _vScrollBar != null
+			&& (_vScrollBar.Visible || _vScrollBar.Maximum > 0))
+		{
+			var deltaValue = GetMouseWheelDelta(e, _vScrollBar);
+			_vScrollBar.ApplyInputDelta(-deltaValue);
+			return;
+		}
+
+		base.OnMouseWheel(e);
 	}
 
 	internal void ScrollToTop()
@@ -212,38 +243,28 @@ internal sealed class NotificationTray : ElementBase
 			: new SKColor(15, 23, 42, 92);
 		scrim = scrim.WithAlpha((byte)Math.Clamp(MathF.Round(scrim.Alpha * easedProgress), 0f, 255f));
 
-		using var scrimPaint = new SKPaint
-		{
-			IsAntialias = true,
-			Style = SKPaintStyle.Fill,
-			Color = scrim,
-		};
-
-		canvas.DrawRect(new SKRect(0f, 0f, Width, Height), scrimPaint);
+		_dialogScrimPaint.Color = scrim;
+		canvas.DrawRect(new SKRect(0f, 0f, Width, Height), _dialogScrimPaint);
 
 		var vignetteColor = ColorScheme.IsDarkMode
 			? new SKColor(1, 3, 9, (byte)Math.Clamp(MathF.Round(86f * easedProgress), 0f, 255f))
 			: new SKColor(15, 23, 42, (byte)Math.Clamp(MathF.Round(54f * easedProgress), 0f, 255f));
 		var center = new SKPoint(Width * 0.5f, Height * 0.5f);
 		var radius = MathF.Max(Width, Height) * 0.58f;
-		using var vignettePaint = new SKPaint
-		{
-			IsAntialias = true,
-			Style = SKPaintStyle.Fill,
-			Shader = SKShader.CreateRadialGradient(
-				center,
-				radius,
-				new[]
-				{
-					SKColors.Transparent,
-					vignetteColor.WithAlpha((byte)(vignetteColor.Alpha * 0.55f)),
-					vignetteColor
-				},
-				new[] { 0f, 0.68f, 1f },
-				SKShaderTileMode.Clamp)
-		};
-
-		canvas.DrawRect(new SKRect(0f, 0f, Width, Height), vignettePaint);
+		using var vignetteShader = SKShader.CreateRadialGradient(
+			center,
+			radius,
+			new[]
+			{
+				SKColors.Transparent,
+				vignetteColor.WithAlpha((byte)(vignetteColor.Alpha * 0.55f)),
+				vignetteColor
+			},
+			new[] { 0f, 0.68f, 1f },
+			SKShaderTileMode.Clamp);
+		_dialogVignettePaint.Shader = vignetteShader;
+		canvas.DrawRect(new SKRect(0f, 0f, Width, Height), _dialogVignettePaint);
+		_dialogVignettePaint.Shader = null;
 	}
 
 	private void HandleDialogScrimAnimationProgress(object _)
@@ -315,24 +336,20 @@ internal sealed class NotificationTray : ElementBase
 			? new SKPoint(0f, shadowRect.Bottom)
 			: new SKPoint(0f, shadowRect.Top);
 
-		using var paint = new SKPaint
-		{
-			IsAntialias = true,
-			Style = SKPaintStyle.Fill,
-			Shader = SKShader.CreateLinearGradient(
-				startPoint,
-				endPoint,
-				new[]
-				{
-					shadowColor,
-					shadowColor.WithAlpha((byte)(shadowColor.Alpha * 0.55f)),
-					shadowColor.WithAlpha(0)
-				},
-				new[] { 0f, 0.34f, 1f },
-				SKShaderTileMode.Clamp)
-		};
-
-		canvas.DrawRect(shadowRect, paint);
+		using var shadowShader = SKShader.CreateLinearGradient(
+			startPoint,
+			endPoint,
+			new[]
+			{
+				shadowColor,
+				shadowColor.WithAlpha((byte)(shadowColor.Alpha * 0.55f)),
+				shadowColor.WithAlpha(0)
+			},
+			new[] { 0f, 0.34f, 1f },
+			SKShaderTileMode.Clamp);
+		_scrollShadowPaint.Shader = shadowShader;
+		canvas.DrawRect(shadowRect, _scrollShadowPaint);
+		_scrollShadowPaint.Shader = null;
 	}
 
 	protected override void Dispose(bool disposing)
@@ -342,6 +359,9 @@ internal sealed class NotificationTray : ElementBase
 			_dialogScrimAnimation.OnAnimationProgress -= HandleDialogScrimAnimationProgress;
 			_dialogScrimAnimation.OnAnimationFinished -= HandleDialogScrimAnimationFinished;
 			_dialogScrimAnimation.Dispose();
+			_dialogScrimPaint.Dispose();
+			_dialogVignettePaint.Dispose();
+			_scrollShadowPaint.Dispose();
 		}
 
 		base.Dispose(disposing);

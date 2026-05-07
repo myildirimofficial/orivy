@@ -8,7 +8,7 @@ Orivy styling is split across three layers:
 
 1. `ColorScheme` defines the shared palette, theme state, and color derivation rules.
 2. `ElementBase.ConfigureVisualStyles(...)` applies state-driven appearance rules to individual controls.
-3. `WindowBase.WindowThemeType` bridges Orivy theme colors into native window chrome on supported Windows hosts.
+3. `WindowBase.WindowThemeType` bridges Orivy theme colors into native window effects on supported Windows hosts.
 
 Together these layers give controls a common visual language while still letting each control opt into richer hover, pressed, focused, and disabled states.
 
@@ -67,6 +67,7 @@ Built-in state flags:
 - `Focused`
 - `Disabled`
 - `Hidden`
+- `Invalid`
 
 ## 3. Style Builder Surface
 
@@ -81,6 +82,7 @@ Most useful entry points:
 - `OnFocused(...)`
 - `OnDisabled(...)`
 - `OnHidden(...)`
+- `OnInvalid(...)`
 - `When(ElementVisualStates, ...)`
 - `When((element, state) => ..., ...)`
 
@@ -102,6 +104,9 @@ card.ConfigureVisualStyles(styles =>
             .BorderColor(ColorScheme.Primary))
         .OnPressed(rule => rule
             .Opacity(0.94f))
+        .OnInvalid(rule => rule
+            .BorderColor(ColorScheme.Error)
+            .Foreground(ColorScheme.Error))
         .When(
             (element, state) => Equals(element.Tag, "danger") && state.IsPointerOver,
             rule => rule
@@ -109,6 +114,22 @@ card.ConfigureVisualStyles(styles =>
                 .Foreground(SKColors.White));
 });
 ```
+
+`OnInvalid(...)` follows `ElementBase.IsValid` / `HasValidationError`. The style engine refreshes when validation status changes, so validation-driven styles stay in sync without extra calls.
+
+One element can also drive another element's visual styles. The source element is the owner of `VisualStyles`; the elements passed to `With(...)` are the targets that animate when the source state changes:
+
+```csharp
+primaryButton.VisualStyles
+    .With(detailsPanel)
+    .DefaultTransition(TimeSpan.FromMilliseconds(160), AnimationType.CubicEaseOut)
+    .OnHover(rule => rule
+        .Width(320)
+        .Background(ColorScheme.SurfaceContainerHigh)
+        .BorderColor(ColorScheme.Primary));
+```
+
+`With(...)` supports the same state helpers as normal visual styles: `OnHover`, `OnPressed`, `OnChecked`, `OnFocused`, `OnDisabled`, `OnHidden`, `OnInvalid`, and `When(...)`. The target can animate any value currently supported by visual styles, including size, background, foreground, border, radius, shadow, opacity, translate, and scale.
 
 ## 4. Theme-Aware Control Pattern
 
@@ -121,9 +142,135 @@ Controls with richer appearance often follow this pattern:
 
 `ComboBox` and `ColorPicker` are good examples of this pattern. They rebuild their theme-derived colors when the global palette changes, then refresh their effective visual styles without requiring the entire control to be recreated.
 
-The default `Button` also demonstrates this flow by defining a full visual-style profile in its constructor, including hover, pressed, focused, and disabled states.
+The default `Button` also demonstrates this flow by defining a full visual-style profile in its constructor, including hover, pressed, checked, focused, and disabled states.
 
-## 5. Native Window Theme Integration
+For styles configured directly with `ConfigureVisualStyles(...)`, `ElementBase` remembers the builder configuration and replays it on `ColorScheme.ThemeChanged`. This keeps `ColorScheme`-derived colors current across normal, hover, pressed, checked, focused, disabled, hidden, and invalid states. If a control rebuilds styles manually with `clearExisting: true`, the remembered configuration is replaced instead of accumulated.
+
+## 5. Toggle Buttons and Button Groups
+
+`Button` can act as a toggle by enabling `CheckOnClick`. Its `Checked` value participates in visual styles through `OnChecked(...)`.
+
+```csharp
+var fluentButton = new Button
+{
+    Text = "Fluent",
+    CheckOnClick = true
+};
+
+fluentButton.ConfigureVisualStyles(styles => styles
+    .Base(rule => rule
+        .Background(ColorScheme.Surface)
+        .Foreground(ColorScheme.ForeColor))
+    .OnChecked(rule => rule
+        .Background(ColorScheme.Primary)
+        .Foreground(SKColors.White)));
+```
+
+For segmented/radio-like toolbars, use `ButtonGroup<TValue>` as the container. Add buttons to its `Controls` collection, put each typed value in `Tag`, and listen to one group-level event. The group sets `CheckOnClick`, keeps one button checked, and exposes the selected value.
+
+```csharp
+var designModes = new ButtonGroup<TabViewDesignMode>
+{
+    Dock = DockStyle.Top,
+    Height = 36,
+    Orientation = Orientation.Horizontal,
+    Alignment = ContentAlignment.MiddleLeft,
+    Gap = 0
+};
+
+designModes.Controls.Add(new Button { Text = "Rounded", Tag = TabViewDesignMode.Rounded });
+designModes.Controls.Add(new Button { Text = "Fluent", Tag = TabViewDesignMode.Fluent });
+designModes.Controls.Add(new Button { Text = "MacOS", Tag = TabViewDesignMode.MacOS });
+
+designModes.SelectedValueChanged += (_, e) =>
+{
+    tabView.TabDesignMode = e.SelectedValue;
+};
+
+designModes.SetSelectedValue(TabViewDesignMode.Rounded);
+```
+
+Use `Gap = 0` for a Bootstrap/Tailwind-style segmented group. The group will join adjacent borders and keep only the outer corners rounded. Use `Orientation.Vertical` for stacked groups; the same radius logic is applied from top to bottom.
+
+## 6. Window Tab Styling
+
+`TabView` supports preset tab appearances through `TabDesignMode`, and it can also accept a user-defined tab style through `CustomTabStyle` or `ConfigureTabStyle(...)`.
+
+The tab style API is intentionally data-first. Tabs are still lightweight, virtual header items painted by `TabView`; they are not separate `ElementBase` children. This keeps titlebar tabs, embedded tabs, drag ordering, hit testing, and close button behavior on the existing fast path.
+
+The style is split into focused groups:
+
+- `TabViewVisual`: background, foreground, border, radius, and blur for normal, hover, and selected states
+- `TabViewMetrics`: padding, surface inset, gap, and min/max tab dimensions
+- `TabViewHeaderStyle`: tab strip background and border
+- `TabViewIndicatorStyle`: selected indicator color and thickness
+
+Example with the fluent builder:
+
+```csharp
+tabViewControl.ConfigureTabStyle(style => style
+    .Header(header => header
+        .Background(ColorScheme.SurfaceContainer)
+        .Border(ColorScheme.Outline.WithAlpha(54)))
+    .Metrics(metrics => metrics
+        .Padding(horizontal: 16, vertical: 7)
+        .SurfaceInset(4)
+        .Gap(4)
+        .Height(min: 36, max: 72))
+    .Normal(tab => tab
+        .Foreground(ColorScheme.ForeColor.WithAlpha(170)))
+    .Hover(tab => tab
+        .Background(ColorScheme.Primary.WithAlpha(18))
+        .Radius(8))
+    .Selected(tab => tab
+        .Background(ColorScheme.Primary)
+        .Foreground(SKColors.Empty)
+        .Border(ColorScheme.Primary.WithAlpha(180), thickness: 1)
+        .Radius(10)
+        .Blur(4))
+    .Indicator(indicator => indicator
+        .Color(SKColors.White.WithAlpha(220))
+        .Thickness(3)));
+```
+
+`SKColors.Empty` means "not specified". For foreground colors, an empty selected foreground is resolved from the selected background automatically.
+
+The same style can be assigned directly:
+
+```csharp
+tabViewControl.CustomTabStyle = new TabViewStyle
+{
+    Selected = new TabViewVisual
+    {
+        BackgroundColor = ColorScheme.Primary,
+        ForegroundColor = SKColors.Empty,
+        BorderRadius = 999,
+        BorderThickness = 0
+    },
+    Metrics = new TabViewMetrics
+    {
+        Padding = new Thickness(18, 8, 18, 8),
+        SurfaceInset = new Thickness(4),
+        Gap = 6
+    }
+};
+```
+
+Call `ClearCustomTabStyle()` to return to the selected `TabDesignMode` preset.
+
+The example app exposes this through the Tab Control page:
+
+- `Custom` applies a builder-defined tab style to both embedded and titlebar tabs.
+- `Clear` removes `CustomTabStyle` and returns rendering to the active preset.
+
+Notes:
+
+- Metrics can be used without custom drawing; if only padding or gap is supplied, the selected preset renderer stays active.
+- Custom visual values switch the tab surface to the generic custom renderer.
+- `CustomTabStyle` applies to both embedded tabs and titlebar tabs.
+- `TabViewMetrics.Padding` is content padding. `SurfaceInset` is the visual surface inset. Keep these separate to avoid layout changes when only the painted shape should move.
+
+## 7. Native Window Theme Integration
 
 `WindowBase` exposes `WindowThemeType` to align the native window with Orivy's theme. Supported values are:
 
@@ -146,7 +293,7 @@ var window = new Window
 ColorScheme.SetThemeInstant(dark: true);
 ```
 
-## 6. Elevation and Flat Design
+## 8. Elevation and Flat Design
 
 `Orivy/Helpers/ElevationHelper.cs` provides higher-level styling helpers for depth and polish.
 
@@ -158,20 +305,33 @@ Key behaviors:
 
 Use these helpers when a custom control needs manual paint logic but still wants to match the shared theme vocabulary.
 
-## 7. Best Practices
+## 9. Best Practices
 
 - Prefer `ColorScheme` properties over hard-coded colors for default surfaces and text.
 - Use `ConfigureVisualStyles(...)` for state changes instead of manually mutating colors in every mouse event.
 - Reuse a single `ApplyTheme()` method when a control listens to `ThemeChanged`.
 - Keep visual style rules small and composable; put the common shape in `Base(...)` and state deltas in individual rules.
+- For `TabView` tabs, prefer `CustomTabStyle` over adding another `TabViewDesignMode` when the style is app-specific.
 - Use `ReevaluateVisualStyles()` after state or theme changes that affect predicate-based rules.
 - Reserve motion and ambient decorative effects for `ConfigureMotionEffects(...)`; keep them separate from the core styling contract.
 
-## 8. Source Reference
+## 10. Source Reference
 
 - `Orivy/ColorScheme.cs`
 - `Orivy/Controls/ElementBase.VisualStyles.cs`
+- `Orivy/Controls/TabView.cs`
+- `Orivy/Controls/TabView.TabStyles.cs`
 - `Orivy/Styling/ElementVisualStyles.cs`
+- `Orivy/Styling/TabViewStyle.cs`
+- `Orivy/Styling/TabViewVisual.cs`
+- `Orivy/Styling/TabViewMetrics.cs`
+- `Orivy/Styling/TabViewHeaderStyle.cs`
+- `Orivy/Styling/TabViewIndicatorStyle.cs`
+- `Orivy/Styling/TabViewStyleBuilder.cs`
+- `Orivy/Styling/TabViewVisualBuilder.cs`
+- `Orivy/Styling/TabViewMetricsBuilder.cs`
+- `Orivy/Styling/TabViewHeaderStyleBuilder.cs`
+- `Orivy/Styling/TabViewIndicatorStyleBuilder.cs`
 - `Orivy/Helpers/ElevationHelper.cs`
 - `Orivy/Controls/Button.cs`
 - `Orivy/Controls/ComboBox.cs`

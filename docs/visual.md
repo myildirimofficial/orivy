@@ -34,6 +34,7 @@ Available built-in states:
 - Focused
 - Disabled
 - Hidden
+- Invalid
 
 Example:
 
@@ -73,6 +74,8 @@ card.ConfigureVisualStyles(styles =>
             .BorderColor(ColorScheme.Primary));
 });
 ```
+
+`Invalid` is driven by the built-in validation flow. When `IsValid` changes, visual styles are re-resolved automatically, so validation styling does not need a manual `ReevaluateVisualStyles()` call.
 
 ### Predicate Rules
 
@@ -152,15 +155,13 @@ Characteristics:
 - Uses the new visual style builder internally.
 - Supports hover, pressed, focused, and disabled states.
 - Keeps keyboard activation through Enter and Space.
-- Exposes optional `AccentMotionEnabled` for subtle motion overlays.
 
 Example:
 
 ```csharp
 var saveButton = new Button
 {
-    Text = "Save",
-    AccentMotionEnabled = true
+    Text = "Save"
 };
 
 saveButton.Click += (_, _) => SaveDocument();

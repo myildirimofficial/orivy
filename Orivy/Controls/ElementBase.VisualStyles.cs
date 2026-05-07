@@ -2,6 +2,7 @@ using Orivy.Animation;
 using Orivy.Styling;
 using SkiaSharp;
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 
 namespace Orivy.Controls;
@@ -14,7 +15,12 @@ public abstract partial class ElementBase
     private ElementVisualTransitionDescriptor _styleAnimationTransition;
     private ElementVisualStyleSnapshot _styleBaseSnapshot;
     private ElementVisualStyleSnapshot _styleEffectiveSnapshot;
+    private readonly List<VisualStyleConfiguration> _visualStyleConfigurations = new();
+    private readonly List<ElementBase> _visualStyleStateDependents = new();
+    private bool _isReplayingVisualStyleConfigurations;
     private bool _hasVisualStyleBaseOverride;
+    private bool _styleBaseOverridesWidth;
+    private bool _styleBaseOverridesHeight;
     private bool _isPressed;
     private bool _isPointerOver;
     private bool _visualStylesEnabled;
@@ -42,6 +48,14 @@ public abstract partial class ElementBase
     {
         ArgumentNullException.ThrowIfNull(configure);
 
+        if (!_isReplayingVisualStyleConfigurations)
+        {
+            if (clearExisting)
+                _visualStyleConfigurations.Clear();
+
+            _visualStyleConfigurations.Add(new VisualStyleConfiguration(configure, clearExisting));
+        }
+
         var builder = new ElementVisualStyleBuilder(this);
         if (clearExisting)
             builder.ClearRules();
@@ -53,8 +67,13 @@ public abstract partial class ElementBase
 
     public void ClearVisualStyles()
     {
+        if (!_isReplayingVisualStyleConfigurations)
+            _visualStyleConfigurations.Clear();
+
         VisualStyles.Clear();
         _hasVisualStyleBaseOverride = false;
+        _styleBaseOverridesWidth = false;
+        _styleBaseOverridesHeight = false;
         UpdateVisualStylesEnabledState();
         if (!_visualStylesEnabled)
             return;
@@ -97,6 +116,28 @@ public abstract partial class ElementBase
         RefreshVisualStyles();
     }
 
+    internal void RegisterVisualStyleStateDependent(ElementBase dependent)
+    {
+        if (dependent == null || ReferenceEquals(dependent, this) || _visualStyleStateDependents.Contains(dependent))
+            return;
+
+        _visualStyleStateDependents.Add(dependent);
+    }
+
+    internal void RefreshVisualStylesForThemeChange()
+    {
+        if (!_visualStylesInitialized)
+            return;
+
+        _isPressed = false;
+        ReplayVisualStyleConfigurations();
+
+        if (!_visualStylesEnabled)
+            return;
+
+        RefreshVisualStyles(forceImmediate: true);
+    }
+
     public void ApplyVisualStyleBase(ElementVisualStyle style)
     {
         ArgumentNullException.ThrowIfNull(style);
@@ -105,16 +146,9 @@ public abstract partial class ElementBase
         style.ApplyTo(ref snapshot);
         _styleBaseSnapshot = snapshot;
         _hasVisualStyleBaseOverride = true;
+        _styleBaseOverridesWidth |= style.Width.HasValue;
+        _styleBaseOverridesHeight |= style.Height.HasValue;
         UpdateVisualStylesEnabledState();
-
-        _size = snapshot.Size;
-        _backColor = snapshot.BackColor;
-        _foreColor = snapshot.ForeColor;
-        _border = snapshot.Border;
-        _borderColor = snapshot.BorderColor;
-        _radius = snapshot.Radius;
-        _shadows = ElementVisualStyleInterpolator.CloneShadows(snapshot.Shadows);
-        _opacity = snapshot.Opacity;
 
         RefreshVisualStyles(forceImmediate: true);
     }
@@ -167,8 +201,16 @@ public abstract partial class ElementBase
         if (!Visible)
             states |= ElementVisualStates.Hidden;
 
+        if (HasValidationError)
+            states |= ElementVisualStates.Invalid;
+
+        if (GetVisualCheckedState())
+            states |= ElementVisualStates.Checked;
+
         return new ElementVisualStateContext(this, states);
     }
+
+    protected virtual bool GetVisualCheckedState() => false;
 
     private void HandleVisualStyleAnimationProgress(object _)
     {
@@ -277,15 +319,58 @@ public abstract partial class ElementBase
                              Math.Abs(previousScaleY - _renderScaleY) > 0.001f ||
                              !ElementVisualStyleInterpolator.AreShadowsEqual(previousShadows, _shadows);
 
+        if (!CanReceivePointerInput())
+            ClearPointerStateRecursive();
+
         if (sizeChanged)
             HandleEffectiveSizeChanged();
         else if (visualsChanged)
             Invalidate();
     }
 
+    private bool CanReceivePointerInput()
+    {
+        return Visible && Enabled && Width > 0 && Height > 0 && Opacity > 0.01f;
+    }
+
+    private void ClearPointerStateRecursive()
+    {
+        var stateChanged = false;
+
+        if (_isPointerOver)
+        {
+            _isPointerOver = false;
+            stateChanged = true;
+        }
+
+        if (_isPressed)
+        {
+            _isPressed = false;
+            stateChanged = true;
+        }
+
+        _lastHoveredElement = null!;
+
+        for (var i = 0; i < Controls.Count; i++)
+        {
+            if (Controls[i] is ElementBase child)
+                child.ClearPointerStateRecursive();
+        }
+
+        if (!stateChanged)
+            return;
+
+        if (_visualStylesEnabled)
+            RefreshVisualStyles();
+
+        NotifyVisualStyleStateDependents();
+    }
+
     private void HandleEffectiveSizeChanged()
     {
-        if (!IsPerformingLayout && Controls.Count > 0)
+        if (Parent is ElementBase parent && !parent.IsPerformingLayout)
+            parent.PerformLayout();
+        else if (!IsPerformingLayout && Controls.Count > 0)
             PerformLayout();
 
         Invalidate();
@@ -308,6 +393,34 @@ public abstract partial class ElementBase
             _renderScaleY);
     }
 
+    private void ReplayVisualStyleConfigurations()
+    {
+        if (_visualStyleConfigurations.Count == 0)
+            return;
+
+        var configurations = _visualStyleConfigurations.ToArray();
+
+        _isReplayingVisualStyleConfigurations = true;
+        try
+        {
+            VisualStyles.Clear();
+            _hasVisualStyleBaseOverride = false;
+            _styleBaseOverridesWidth = false;
+            _styleBaseOverridesHeight = false;
+            UpdateVisualStylesEnabledState();
+
+            for (var i = 0; i < configurations.Length; i++)
+            {
+                var configuration = configurations[i];
+                ConfigureVisualStyles(configuration.Configure, configuration.ClearExisting);
+            }
+        }
+        finally
+        {
+            _isReplayingVisualStyleConfigurations = false;
+        }
+    }
+
     internal void OffsetEffectiveTranslateY(float delta)
     {
         if (Math.Abs(delta) < 0.5f)
@@ -318,8 +431,25 @@ public abstract partial class ElementBase
         Invalidate();
     }
 
-    private void SetStyleBaseSize(SKSize size)
+    internal void SetEffectiveTranslateY(float value)
     {
+        if (Math.Abs(_renderTranslateY - value) < 0.5f)
+            return;
+
+        _renderTranslateY = value;
+        _styleEffectiveSnapshot = _styleEffectiveSnapshot.WithTranslateY(value);
+        Invalidate();
+    }
+
+    private void SetStyleBaseSize(SKSize size, bool preserveOverriddenDimensions)
+    {
+        if (preserveOverriddenDimensions)
+        {
+            size = new SKSize(
+                _styleBaseOverridesWidth ? _styleBaseSnapshot.Size.Width : size.Width,
+                _styleBaseOverridesHeight ? _styleBaseSnapshot.Size.Height : size.Height);
+        }
+
         _styleBaseSnapshot = _styleBaseSnapshot.WithSize(size);
     }
 
@@ -360,34 +490,34 @@ public abstract partial class ElementBase
 
     private void UpdatePointerOverState(bool isPointerOver)
     {
-        if (!_visualStylesEnabled)
-            return;
-
         if (_isPointerOver == isPointerOver)
             return;
 
         _isPointerOver = isPointerOver;
-        RefreshVisualStyles();
+        if (_visualStylesEnabled)
+            RefreshVisualStyles();
+
+        NotifyVisualStyleStateDependents();
     }
 
     protected void UpdatePressedState(bool isPressed)
     {
-        if (!_visualStylesEnabled)
-            return;
-
         if (_isPressed == isPressed)
             return;
 
         _isPressed = isPressed;
-        RefreshVisualStyles();
+        if (_visualStylesEnabled)
+            RefreshVisualStyles();
+
+        NotifyVisualStyleStateDependents();
     }
 
-    private void RefreshVisualStylesForStateChange()
+    protected void RefreshVisualStylesForStateChange()
     {
-        if (!_visualStylesEnabled)
-            return;
+        if (_visualStylesEnabled)
+            RefreshVisualStyles();
 
-        RefreshVisualStyles();
+        NotifyVisualStyleStateDependents();
     }
 
     private void UpdateVisualStylesEnabledState()
@@ -410,4 +540,23 @@ public abstract partial class ElementBase
         _visualStyleAnimation.OnAnimationFinished -= HandleVisualStyleAnimationFinished;
         _visualStyleAnimation.Dispose();
     }
+
+    private void NotifyVisualStyleStateDependents()
+    {
+        for (var i = _visualStyleStateDependents.Count - 1; i >= 0; i--)
+        {
+            var dependent = _visualStyleStateDependents[i];
+            if (dependent == null || dependent.IsDisposed || dependent.Disposing)
+            {
+                _visualStyleStateDependents.RemoveAt(i);
+                continue;
+            }
+
+            dependent.ReevaluateVisualStyles();
+        }
+    }
+
+    private readonly record struct VisualStyleConfiguration(
+        Action<ElementVisualStyleBuilder> Configure,
+        bool ClearExisting);
 }

@@ -2,6 +2,7 @@ using Orivy.Animation;
 using Orivy.Controls;
 using SkiaSharp;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 
 namespace Orivy.Styling;
@@ -14,7 +15,9 @@ public enum ElementVisualStates
     Pressed = 1 << 1,
     Focused = 1 << 2,
     Disabled = 1 << 3,
-    Hidden = 1 << 4
+    Hidden = 1 << 4,
+    Invalid = 1 << 5,
+    Checked = 1 << 6
 }
 
 public readonly record struct ElementVisualStateContext(ElementBase Element, ElementVisualStates States)
@@ -24,6 +27,9 @@ public readonly record struct ElementVisualStateContext(ElementBase Element, Ele
     public bool IsFocused => States.HasFlag(ElementVisualStates.Focused);
     public bool IsEnabled => !States.HasFlag(ElementVisualStates.Disabled);
     public bool IsVisible => !States.HasFlag(ElementVisualStates.Hidden);
+    public bool IsValid => !States.HasFlag(ElementVisualStates.Invalid);
+    public bool HasValidationError => States.HasFlag(ElementVisualStates.Invalid);
+    public bool IsChecked => States.HasFlag(ElementVisualStates.Checked);
 }
 
 public enum ElementVisualTransitionMode
@@ -197,6 +203,11 @@ public sealed class ElementVisualStyleCollection : Collection<ElementVisualStyle
         _owner = owner ?? throw new ArgumentNullException(nameof(owner));
     }
 
+    public ElementVisualInteractionBuilder With(params ElementBase[] targets)
+    {
+        return new ElementVisualInteractionBuilder(_owner, targets);
+    }
+
     protected override void InsertItem(int index, ElementVisualStyleRule item)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -221,6 +232,119 @@ public sealed class ElementVisualStyleCollection : Collection<ElementVisualStyle
     {
         base.ClearItems();
         _owner.OnVisualStyleDefinitionsChanged();
+    }
+}
+
+public sealed class ElementVisualInteractionBuilder
+{
+    private readonly ElementBase _source;
+    private readonly ElementBase[] _targets;
+
+    internal ElementVisualInteractionBuilder(ElementBase source, ElementBase[]? targets)
+    {
+        _source = source ?? throw new ArgumentNullException(nameof(source));
+        _targets = NormalizeTargets(targets);
+    }
+
+    public ElementVisualInteractionBuilder DefaultTransition(
+        TimeSpan duration,
+        AnimationType animationType = AnimationType.EaseInOut,
+        ElementVisualTransitionMode mode = ElementVisualTransitionMode.TargetChange)
+    {
+        ForEachTarget(builder => builder.DefaultTransition(duration, animationType, mode));
+        return this;
+    }
+
+    public ElementVisualInteractionBuilder Base(Action<ElementVisualStyleValueBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        ForEachTarget(builder => builder.Base(configure));
+        return this;
+    }
+
+    public ElementVisualInteractionBuilder When(
+        ElementVisualStates sourceStates,
+        Action<ElementVisualStyleRuleBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        return WhenSource((_, state) => (state.States & sourceStates) == sourceStates, configure);
+    }
+
+    public ElementVisualInteractionBuilder WhenSource(
+        Func<ElementBase, ElementVisualStateContext, bool> predicate,
+        Action<ElementVisualStyleRuleBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        ForEachTarget(builder => builder.When(
+            (_, _) => predicate(_source, _source.VisualState),
+            configure));
+        return this;
+    }
+
+    public ElementVisualInteractionBuilder OnHover(Action<ElementVisualStyleRuleBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        return WhenSource((_, state) => state.IsPointerOver && !state.IsPressed, configure);
+    }
+
+    public ElementVisualInteractionBuilder OnPressed(Action<ElementVisualStyleRuleBuilder> configure)
+    {
+        return When(ElementVisualStates.Pressed, configure);
+    }
+
+    public ElementVisualInteractionBuilder OnFocused(Action<ElementVisualStyleRuleBuilder> configure)
+    {
+        return When(ElementVisualStates.Focused, configure);
+    }
+
+    public ElementVisualInteractionBuilder OnDisabled(Action<ElementVisualStyleRuleBuilder> configure)
+    {
+        return When(ElementVisualStates.Disabled, configure);
+    }
+
+    public ElementVisualInteractionBuilder OnHidden(Action<ElementVisualStyleRuleBuilder> configure)
+    {
+        return When(ElementVisualStates.Hidden, configure);
+    }
+
+    public ElementVisualInteractionBuilder OnInvalid(Action<ElementVisualStyleRuleBuilder> configure)
+    {
+        return When(ElementVisualStates.Invalid, configure);
+    }
+
+    public ElementVisualInteractionBuilder OnChecked(Action<ElementVisualStyleRuleBuilder> configure)
+    {
+        return When(ElementVisualStates.Checked, configure);
+    }
+
+    private void ForEachTarget(Action<ElementVisualStyleBuilder> configure)
+    {
+        for (var i = 0; i < _targets.Length; i++)
+        {
+            var target = _targets[i];
+            _source.RegisterVisualStyleStateDependent(target);
+            target.ConfigureVisualStyles(configure);
+        }
+    }
+
+    private static ElementBase[] NormalizeTargets(ElementBase[]? targets)
+    {
+        if (targets == null || targets.Length == 0)
+            return Array.Empty<ElementBase>();
+
+        var unique = new List<ElementBase>();
+        for (var i = 0; i < targets.Length; i++)
+        {
+            var target = targets[i];
+            if (target == null || unique.Contains(target))
+                continue;
+
+            unique.Add(target);
+        }
+
+        return unique.ToArray();
     }
 }
 
@@ -734,6 +858,16 @@ public sealed class ElementVisualStyleBuilder
     public ElementVisualStyleBuilder OnHidden(Action<ElementVisualStyleRuleBuilder> configure)
     {
         return When(ElementVisualStates.Hidden, configure);
+    }
+
+    public ElementVisualStyleBuilder OnInvalid(Action<ElementVisualStyleRuleBuilder> configure)
+    {
+        return When(ElementVisualStates.Invalid, configure);
+    }
+
+    public ElementVisualStyleBuilder OnChecked(Action<ElementVisualStyleRuleBuilder> configure)
+    {
+        return When(ElementVisualStates.Checked, configure);
     }
 
     public ElementVisualStyleBuilder When(

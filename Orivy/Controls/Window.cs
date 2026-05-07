@@ -1,4 +1,4 @@
-﻿using Orivy.Animation;
+using Orivy.Animation;
 using Orivy.Extensions;
 using Orivy.Helpers;
 using Orivy.Native.Windows;
@@ -139,11 +139,19 @@ public partial class Window : WindowBase
 
     private bool _popupMouseInteractionActive;
     private bool _suppressNextPopupClick;
+    private SKImage? _cachedTitleBarTitleSampleImage;
+    private SKColor _cachedTitleBarTitleSampleColor;
+    private ImageLayout _cachedTitleBarTitleSampleLayout;
+    private int _cachedTitleBarTitleSampleWindowWidth;
+    private int _cachedTitleBarTitleSampleWindowHeight;
+    private int _cachedTitleBarTitleSampleTop;
+    private int _cachedTitleBarTitleSampleHeight;
+    private bool _hasResolvedTitleBarTitleSample;
+    private bool _hasCachedTitleBarTitleSampleColor;
 
     private long _stickyBorderTime = 5000000;
 
     private float _symbolSize = 24;
-    private int _pendingTabSelectionIndex = -1;
     private SKPoint _pendingTabMouseDownScreen;
 
     /// <summary>
@@ -151,15 +159,15 @@ public partial class Window : WindowBase
     /// </summary>
     private float _titleHeight = 35;
 
-    private WindowPageControl _windowPageControl;
+    private TabView _tabView;
     private SKPoint animationSource;
 
-    private bool UsesWindowChromeTabs =>
-        _windowPageControl != null &&
-        _windowPageControl.Count > 0 &&
-        _windowPageControl.TabMode == WindowPageTabMode.WindowChrome;
+    private bool UsesTitleBarTabs =>
+        _tabView != null &&
+        _tabView.Count > 0 &&
+        _tabView.TabMode == TabViewMode.TitleBar;
 
-    private bool ShowWindowPageTabCloseButton => UsesWindowChromeTabs && _windowPageControl.TabCloseButton;
+    private bool ShowTabViewTabCloseButton => UsesTitleBarTabs && _tabView.TabCloseButton;
 
     /// <summary>
     ///     Whether to trigger the stay event on the edge of the display
@@ -223,7 +231,8 @@ public partial class Window : WindowBase
         //WindowsHelper.ApplyRoundCorner(this.Handle);
     }
 
-    private float _titleHeightDPI => _titleHeight * ScaleFactor;
+    private float _configuredTitleHeightDPI => _titleHeight * ScaleFactor;
+    private float _titleHeightDPI => Math.Max(_configuredTitleHeightDPI, GetTitleBarRequiredTitleHeightDpi());
     private float _maximizedTitleInsetDPI => GetMaximizedTitleInsetDpi();
     private float _maximizedHorizontalInsetDPI => GetMaximizedHorizontalInsetDpi();
     private float _titleBarLeftInsetDPI => _maximizedHorizontalInsetDPI;
@@ -231,6 +240,14 @@ public partial class Window : WindowBase
     private float _titleBarTopDPI => _maximizedTitleInsetDPI;
     private float _titleBarBottomDPI => _titleBarTopDPI + _titleHeightDPI;
     private float _titleBarCenterYDPI => _titleBarTopDPI + (_titleHeightDPI / 2f);
+
+    private float GetTitleBarRequiredTitleHeightDpi()
+    {
+        if (!UsesTitleBarTabs || _tabView == null)
+            return 0f;
+
+        return _tabView.MeasureTitleBarRequiredHeight();
+    }
 
     private float GetMaximizedTitleInsetDpi()
     {
@@ -267,7 +284,7 @@ public partial class Window : WindowBase
     [Description("Gets or sets form can movable")]
     public bool Movable { get; set; } = true;
 
-    [DefaultValue(false)] 
+    [DefaultValue(false)]
     public bool AllowAddControlOnTitle { get; set; }
 
     [DefaultValue(false)]
@@ -322,7 +339,10 @@ public partial class Window : WindowBase
                 return;
 
             if (_titleBarMenuStrip != null)
+            {
+                _titleBarMenuStrip.ClearHostedTitleBarForeColorOverride();
                 RestoreTitleBarMenuStripLayout(_titleBarMenuStrip);
+            }
 
             _titleBarMenuStrip = value;
             _titleBarMenuStripRect = SKRect.Empty;
@@ -438,6 +458,7 @@ public partial class Window : WindowBase
         set
         {
             _titleHeight = Math.Max(value, 31);
+            ResetTitleBarTitleSampleCache();
             Invalidate();
             CalcSystemBoxPos();
         }
@@ -449,6 +470,7 @@ public partial class Window : WindowBase
         set
         {
             _gradient = value;
+            ResetTitleBarTitleSampleCache();
             Invalidate();
         }
     }
@@ -464,6 +486,7 @@ public partial class Window : WindowBase
         set
         {
             titleColor = value;
+            ResetTitleBarTitleSampleCache();
             Invalidate();
         }
     }
@@ -498,65 +521,64 @@ public partial class Window : WindowBase
         _cacheBitmap == null ? SKSize.Empty : new SKSize(_cacheBitmap.Width, _cacheBitmap.Height);
 
 
-    public WindowPageControl WindowPageControl
+    public TabView TabView
     {
-        get => _windowPageControl;
+        get => _tabView;
         set
         {
-            if (ReferenceEquals(_windowPageControl, value))
+            if (ReferenceEquals(_tabView, value))
                 return;
 
-            if (_windowPageControl != null)
+            if (_tabView != null)
             {
-                _windowPageControl.SelectedIndexChanged -= HandleWindowPageControlSelectedIndexChanged;
-                _windowPageControl.ControlAdded -= HandleWindowPageControlStructureChanged;
-                _windowPageControl.ControlRemoved -= HandleWindowPageControlStructureChanged;
-                _windowPageControl.TabModeChanged -= HandleWindowPageControlTabModeChanged;
+                _tabView.SelectedIndexChanged -= HandleTabViewSelectedIndexChanged;
+                _tabView.ControlAdded -= HandleTabViewStructureChanged;
+                _tabView.ControlRemoved -= HandleTabViewStructureChanged;
+                _tabView.TabModeChanged -= HandleTabViewTabModeChanged;
             }
 
-            _windowPageControl = value;
-            if (_windowPageControl == null)
+            _tabView = value;
+            if (_tabView == null)
             {
                 Invalidate();
                 return;
             }
 
-            _windowPageControl.SelectedIndexChanged += HandleWindowPageControlSelectedIndexChanged;
-            _windowPageControl.ControlAdded += HandleWindowPageControlStructureChanged;
-            _windowPageControl.ControlRemoved += HandleWindowPageControlStructureChanged;
-            _windowPageControl.TabModeChanged += HandleWindowPageControlTabModeChanged;
+            _tabView.SelectedIndexChanged += HandleTabViewSelectedIndexChanged;
+            _tabView.ControlAdded += HandleTabViewStructureChanged;
+            _tabView.ControlRemoved += HandleTabViewStructureChanged;
+            _tabView.TabModeChanged += HandleTabViewTabModeChanged;
 
-            RefreshWindowPageControlHostState();
+            RefreshTabViewHostState();
         }
     }
 
-    private void HandleWindowPageControlSelectedIndexChanged(object? sender, int previousIndex)
+    private void HandleTabViewSelectedIndexChanged(object? sender, int previousIndex)
     {
-        if (_windowPageControl == null)
+        if (_tabView == null)
             return;
 
-        _windowPageControl.HandleWindowChromeSelectionChanged(previousIndex);
+        _tabView.HandleTitleBarSelectionChanged(previousIndex);
         Invalidate();
     }
 
-    private void HandleWindowPageControlStructureChanged(object sender, ElementEventArgs e)
+    private void HandleTabViewStructureChanged(object sender, ElementEventArgs e)
     {
-        RefreshWindowPageControlHostState();
+        RefreshTabViewHostState();
     }
 
-    private void HandleWindowPageControlTabModeChanged(object? sender, EventArgs e)
+    private void HandleTabViewTabModeChanged(object? sender, EventArgs e)
     {
-        RefreshWindowPageControlHostState();
+        RefreshTabViewHostState();
     }
 
-    private void RefreshWindowPageControlHostState()
+    private void RefreshTabViewHostState()
     {
-        if (_windowPageControl == null)
+        if (_tabView == null)
             return;
 
-        _pendingTabSelectionIndex = -1;
-        _windowPageControl.ResetWindowChromeHoverState();
-        _windowPageControl.InvalidateWindowChromeLayout();
+        _tabView.ResetTitleBarHoverState();
+        _tabView.InvalidateTitleBarLayout();
         CalcSystemBoxPos();
         InvalidateMeasureRecursive();
         PerformLayout();
@@ -600,8 +622,8 @@ public partial class Window : WindowBase
     private void RefreshHostedTitleBarLayout()
     {
         CalcSystemBoxPos();
-        if (UsesWindowChromeTabs)
-            _windowPageControl.InvalidateWindowChromeLayout();
+        if (UsesTitleBarTabs)
+            _tabView.InvalidateTitleBarLayout();
 
         InvalidateMeasureRecursive();
         PerformLayout();
@@ -609,6 +631,11 @@ public partial class Window : WindowBase
         NeedsFullChildRedraw = true;
         InvalidateRenderTree();
         Invalidate();
+    }
+
+    internal void RefreshTitleBarTabsHostLayout()
+    {
+        RefreshHostedTitleBarLayout();
     }
 
     private float GetTitleBarLeadingContentX()
@@ -638,6 +665,7 @@ public partial class Window : WindowBase
 
         if (!HasVisibleTitleBarMenuStrip)
         {
+            _titleBarMenuStrip.ClearHostedTitleBarForeColorOverride();
             _titleBarMenuStripRect = SKRect.Empty;
             return;
         }
@@ -668,6 +696,20 @@ public partial class Window : WindowBase
 
         if (_titleBarMenuStrip.Size != newSize)
             _titleBarMenuStrip.Size = newSize;
+    }
+
+    private void SyncTitleBarMenuStripForeColor(SKColor foreColor)
+    {
+        if (_titleBarMenuStrip == null)
+            return;
+
+        if (!HasVisibleTitleBarMenuStrip)
+        {
+            _titleBarMenuStrip.ClearHostedTitleBarForeColorOverride();
+            return;
+        }
+
+        _titleBarMenuStrip.SetHostedTitleBarForeColorOverride(foreColor);
     }
 
     private float GetTitleBarMenuReservedWidth()
@@ -717,6 +759,7 @@ public partial class Window : WindowBase
             if (newDpi == oldDpi)
                 return;
 
+            ResetTitleBarTitleSampleCache();
             BeginImmediateUpdateSuppression();
 
             // CRITICAL: Aggressive layout recalculation to handle all control repositioning
@@ -727,10 +770,10 @@ public partial class Window : WindowBase
             // Perform full layout pass to reposition all children.
             PerformLayout();
 
-            // Step 3: Update window chrome (title bar buttons, tabs)
+            // Step 3: Update title bar buttons and tabs
             CalcSystemBoxPos();
-            if (UsesWindowChromeTabs)
-                _windowPageControl.InvalidateWindowChromeLayout();
+            if (UsesTitleBarTabs)
+                _tabView.InvalidateTitleBarLayout();
 
             // Step 4: Final invalidation to ensure complete redraw
             NeedsFullChildRedraw = true;
@@ -803,8 +846,8 @@ public partial class Window : WindowBase
             InvalidateMeasureRecursive();
             PerformLayout();
             CalcSystemBoxPos();
-            if (UsesWindowChromeTabs)
-                _windowPageControl.InvalidateWindowChromeLayout();
+            if (UsesTitleBarTabs)
+                _tabView.InvalidateTitleBarLayout();
             Invalidate();
         }
         catch
@@ -844,7 +887,7 @@ public partial class Window : WindowBase
         if (clientPt.Y >= _titleBarBottomDPI)
             return false;
 
-        if (UsesWindowChromeTabs && IsPointOverTabHeader(clientPt))
+        if (UsesTitleBarTabs && IsPointOverTabHeader(clientPt))
             return false;
 
         // ignore control button areas
@@ -860,10 +903,10 @@ public partial class Window : WindowBase
         if (_extendBoxRect.Contains(clientPt))
             return false;
 
-        if (UsesWindowChromeTabs && _windowPageControl.IsPointOverWindowChromeCloseButton(clientPt, CreateWindowChromeLayoutContext()))
+        if (UsesTitleBarTabs && _tabView.IsPointOverTitleBarCloseButton(clientPt, CreateTitleBarLayoutContext()))
             return false;
 
-        if (UsesWindowChromeTabs && _windowPageControl.IsPointOverWindowChromeNewTabButton(clientPt, CreateWindowChromeLayoutContext()))
+        if (UsesTitleBarTabs && _tabView.IsPointOverTitleBarNewTabButton(clientPt, CreateTitleBarLayoutContext()))
             return false;
 
         // if the menu glyph is visible we must exclude its bounds from the
@@ -947,10 +990,10 @@ public partial class Window : WindowBase
     {
         tabIndex = -1;
 
-        if (!UsesWindowChromeTabs)
+        if (!UsesTitleBarTabs)
             return false;
 
-        return _windowPageControl.TryGetWindowChromeTabIndexAtPoint(point, CreateWindowChromeLayoutContext(), out tabIndex);
+        return _tabView.TryGetTitleBarTabIndexAtPoint(point, CreateTitleBarLayoutContext(), out tabIndex);
     }
 
     private bool IsPointOverTabHeader(SKPoint point)
@@ -1102,21 +1145,21 @@ public partial class Window : WindowBase
                 OnFormMenuClick?.Invoke(this, EventArgs.Empty);
         }
 
-        if (UsesWindowChromeTabs && _windowPageControl.IsPointOverWindowChromeCloseButton(e.Location, CreateWindowChromeLayoutContext()))
+        if (UsesTitleBarTabs && _tabView.IsPointOverTitleBarCloseButton(e.Location, CreateTitleBarLayoutContext()))
         {
-            _windowPageControl.RaiseTabCloseButtonClick(_windowPageControl.SelectedIndex);
+            _tabView.RaiseTabCloseButtonClick(_tabView.SelectedIndex);
         }
 
-        if (UsesWindowChromeTabs && _windowPageControl.IsPointOverWindowChromeNewTabButton(e.Location, CreateWindowChromeLayoutContext()))
+        if (UsesTitleBarTabs && _tabView.IsPointOverTitleBarNewTabButton(e.Location, CreateTitleBarLayoutContext()))
         {
-            _windowPageControl.RaiseNewTabButtonClick();
+            _tabView.RaiseNewTabButtonClick();
         }
 
         if (_formMoveMouseDown && !CursorScreenPosition.Equals(_mouseOffset))
             return;
 
-        if (UsesWindowChromeTabs && ShowWindowPageTabCloseButton && e.Button == MouseButtons.Middle && TryGetTabIndexAtPoint(e.Location, out var middleClickTabIndex))
-            _windowPageControl.RaiseTabCloseButtonClick(middleClickTabIndex);
+        if (UsesTitleBarTabs && ShowTabViewTabCloseButton && e.Button == MouseButtons.Middle && TryGetTabIndexAtPoint(e.Location, out var middleClickTabIndex))
+            _tabView.RaiseTabCloseButtonClick(middleClickTabIndex);
     }
 
     internal override void OnMouseDown(MouseEventArgs e)
@@ -1132,24 +1175,20 @@ public partial class Window : WindowBase
         }
 
         // Title bar drag has absolute priority over child controls.
-        // Check this BEFORE hit-testing children so that a misplaced child
-        // (e.g. during the first layout pass) cannot steal the drag.
         var inTitleArea = ShowTitle && e.Y < Padding.Top;
-        var clickedTabIndex = -1;
         var inTitleBarMenu = IsPointOverTitleBarMenuStrip(e.Location);
-        var inTabHeader = UsesWindowChromeTabs && TryGetTabIndexAtPoint(e.Location, out clickedTabIndex);
-        var inControlBox = _inCloseBox || _inMaxBox || _inMinBox || _inExtendBox
-                   || (UsesWindowChromeTabs && (_windowPageControl.IsPointOverWindowChromeCloseButton(e.Location, CreateWindowChromeLayoutContext()) ||
-                                               _windowPageControl.IsPointOverWindowChromeNewTabButton(e.Location, CreateWindowChromeLayoutContext())))
-               || _inFormMenuBox
-               || inTitleBarMenu;
+        var inTabHeader = UsesTitleBarTabs && _tabView != null && _tabView.TryGetTitleBarTabIndexAtPoint(e.Location, CreateTitleBarLayoutContext(), out _);
+        
+        var inTitleBarButtons = UsesTitleBarTabs && _tabView != null && 
+                                    (_tabView.IsPointOverTitleBarCloseButton(e.Location, CreateTitleBarLayoutContext()) || 
+                                     _tabView.IsPointOverTitleBarNewTabButton(e.Location, CreateTitleBarLayoutContext()));
+        
+        var inControlBox = _inCloseBox || _inMaxBox || _inMinBox || _inExtendBox || _inFormMenuBox || inTitleBarMenu || inTitleBarButtons;
 
-        if (e.Button == MouseButtons.Left && inTabHeader && !inControlBox)
+        if (UsesTitleBarTabs && _tabView != null && 
+            _tabView.ProcessTitleBarMouseDown(e, CreateTitleBarLayoutContext()))
         {
-            _pendingTabSelectionIndex = clickedTabIndex;
-            _pendingTabMouseDownScreen = CursorScreenPosition;
             SetCapture(Handle);
-
             return;
         }
 
@@ -1186,18 +1225,18 @@ public partial class Window : WindowBase
         if (TryRouteMouseEventToOpenPopup(e, static (popup, localEvent) => popup.OnMouseDoubleClick(localEvent)))
             return;
 
-        // Title bar maximize gesture has priority — check before child hit-testing.
+        // Title bar maximize gesture has priority � check before child hit-testing.
         var inTitleAreaDbl = ShowTitle && MaximizeBox && e.Y < Padding.Top;
         if (inTitleAreaDbl)
         {
-            var inTabHeaderDbl = UsesWindowChromeTabs && IsPointOverTabHeader(e.Location);
+            var inTabHeaderDbl = UsesTitleBarTabs && IsPointOverTabHeader(e.Location);
             var inTitleBarMenuDbl = IsPointOverTitleBarMenuStrip(e.Location);
             var inControlBoxDbl = _controlBoxRect.Contains(e.Location)
                                   || _maximizeBoxRect.Contains(e.Location)
                                   || _minimizeBoxRect.Contains(e.Location)
                                   || _extendBoxRect.Contains(e.Location)
-                                  || (UsesWindowChromeTabs && _windowPageControl.IsPointOverWindowChromeCloseButton(e.Location, CreateWindowChromeLayoutContext()))
-                                  || (UsesWindowChromeTabs && _windowPageControl.IsPointOverWindowChromeNewTabButton(e.Location, CreateWindowChromeLayoutContext()))
+                                  || (UsesTitleBarTabs && _tabView.IsPointOverTitleBarCloseButton(e.Location, CreateTitleBarLayoutContext()))
+                                  || (UsesTitleBarTabs && _tabView.IsPointOverTitleBarNewTabButton(e.Location, CreateTitleBarLayoutContext()))
                                   || (showMenuInsteadOfIcon && _formMenuRect.Contains(e.Location))
                                   || inTitleBarMenuDbl;
 
@@ -1231,9 +1270,6 @@ public partial class Window : WindowBase
             TryRouteMouseEventToOpenPopup(e, static (popup, localEvent) => popup.OnMouseUp(localEvent)))
             return;
 
-        var pendingTabSelectionIndex = _pendingTabSelectionIndex;
-        var shouldSelectPendingTab = e.Button == MouseButtons.Left && pendingTabSelectionIndex >= 0 && !_formMoveMouseDown;
-
         // If an element captured the mouse, forward the mouse up to it and release capture if left button
         if (_mouseCapturedElement != null)
         {
@@ -1264,19 +1300,13 @@ public partial class Window : WindowBase
 
         IsStayAtTopBorder = false;
         Cursor.Clip = null;
-        // Always release capture on mouse-up regardless of which code path acquired it
-        // (title-bar drag, tab-header drag detection, or child element capture). If capture
-        // is not released here, WM_NCHITTEST is never sent and resize stops working until
-        // the window is maximised/restored.
         ReleaseCapture();
         _formMoveMouseDown = false;
 
-        if (shouldSelectPendingTab && UsesWindowChromeTabs && _windowPageControl != null && pendingTabSelectionIndex < _windowPageControl.Count)
+        if (UsesTitleBarTabs && _tabView != null)
         {
-            _windowPageControl.SelectedIndex = pendingTabSelectionIndex;
+            _tabView.ProcessTitleBarMouseUp(e, CreateTitleBarLayoutContext());
         }
-
-        _pendingTabSelectionIndex = -1;
 
         animationSource = e.Location;
 
@@ -1312,28 +1342,14 @@ public partial class Window : WindowBase
         // (e.g. due to a wrong initial layout position) would block all window movement.
         var screenCursor = CursorScreenPosition;
 
-        if (!_formMoveMouseDown && _mouseCapturedElement == null && _pendingTabSelectionIndex < 0 &&
+        if (!_formMoveMouseDown && _mouseCapturedElement == null && 
             TryRouteMouseEventToOpenPopup(e, static (popup, localEvent) => popup.OnMouseMove(localEvent)))
             return;
 
-        if (!_formMoveMouseDown && _pendingTabSelectionIndex >= 0)
+        if (!_formMoveMouseDown && UsesTitleBarTabs && _tabView != null && 
+            _tabView.ProcessTitleBarMouseMove(e, CreateTitleBarLayoutContext()))
         {
-            var deltaX = screenCursor.X - _pendingTabMouseDownScreen.X;
-            var deltaY = screenCursor.Y - _pendingTabMouseDownScreen.Y;
-            var dragDistanceSquared = (deltaX * deltaX) + (deltaY * deltaY);
-            var dragThresholdSquared = TAB_DRAG_THRESHOLD * TAB_DRAG_THRESHOLD;
-
-            if (Movable && dragDistanceSquared >= dragThresholdSquared)
-            {
-                _formMoveMouseDown = true;
-                _dragStartLocation = Location;
-                _mouseOffset = _pendingTabMouseDownScreen;
-            }
-            else
-            {
-                base.OnMouseMove(e);
-                return;
-            }
+            return;
         }
 
         if (!_formMoveMouseDown && _mouseCapturedElement != null)
@@ -1392,7 +1408,7 @@ public partial class Window : WindowBase
             var inExtendBox = _extendBoxRect.Contains(e.Location.X, e.Location.Y);
             var inFormMenuBox = showMenuInsteadOfIcon && _formMenuRect.Contains(e.Location.X, e.Location.Y);
 
-            var isChange = UsesWindowChromeTabs && _windowPageControl.UpdateWindowChromeHoverState(e.Location, CreateWindowChromeLayoutContext());
+            var isChange = UsesTitleBarTabs && _tabView.UpdateTitleBarHoverState(e.Location, CreateTitleBarLayoutContext());
 
             if (inCloseBox != _inCloseBox)
             {
@@ -1442,8 +1458,8 @@ public partial class Window : WindowBase
         base.OnMouseLeave(e);
         _inExtendBox = _inCloseBox = _inMaxBox = _inMinBox = _inFormMenuBox = false;
 
-        if (UsesWindowChromeTabs)
-            _windowPageControl.ResetWindowChromeHoverState();
+        if (UsesTitleBarTabs)
+            _tabView.ResetTitleBarHoverState();
 
         // End all hover animations in a single loop to avoid repetition
         EndAllHoverAnimations();
@@ -1534,25 +1550,22 @@ public partial class Window : WindowBase
 
         if (!ShowTitle)
         {
+            _titleBarMenuStrip?.ClearHostedTitleBarForeColorOverride();
             return;
         }
 
         var foreColor = ColorScheme.ForeColor;
         var hoverColor = ColorScheme.BorderColor;
-        var effectiveWindowChromeTitleColor = titleColor;
+        var effectiveTitleBarTitleColor = titleColor;
         var hasGradientTitle = _gradient.Length == 2 &&
                                !(_gradient[0] == SKColors.Transparent && _gradient[1] == SKColors.Transparent);
 
-        if (effectiveWindowChromeTitleColor == SKColor.Empty && !hasGradientTitle)
+        if (effectiveTitleBarTitleColor == SKColor.Empty && !hasGradientTitle &&
+            TryGetCachedTitleBarTitleSampleColor(out var sampledTitleColor))
         {
-            var fullBounds = SKRect.Create(0f, 0f, Width, Height);
-            var titleSampleBounds = SKRect.Create(0f, _titleBarTopDPI, Width, _titleHeightDPI);
-            if (TryGetBackgroundImageSampleColor(fullBounds, titleSampleBounds, out var sampledTitleColor))
-            {
-                effectiveWindowChromeTitleColor = sampledTitleColor;
-                foreColor = sampledTitleColor.Determine();
-                hoverColor = foreColor.WithAlpha(20);
-            }
+            effectiveTitleBarTitleColor = sampledTitleColor;
+            foreColor = sampledTitleColor.Determine();
+            hoverColor = foreColor.WithAlpha(20);
         }
 
         if (FullDrawHatch)
@@ -1794,7 +1807,7 @@ public partial class Window : WindowBase
             canvas.DrawImage(image, iconRect);
         }
 
-        if (!UsesWindowChromeTabs)
+        if (!UsesTitleBarTabs)
         {
             var baseFont = Font;
             var font = GetOrCreateFont("title", () => new SKFont(baseFont.Typeface ?? SKTypeface.Default)
@@ -1836,11 +1849,11 @@ public partial class Window : WindowBase
             }
         }
 
-        WindowPageChromeLayoutContext? windowChromeLayoutContext = null;
-        if (UsesWindowChromeTabs)
+        TabViewTitleBarLayoutContext? titleBarLayoutContext = null;
+        if (UsesTitleBarTabs)
         {
-            windowChromeLayoutContext = CreateWindowChromeLayoutContext();
-            _windowPageControl.DrawWindowChromeTabs(canvas, windowChromeLayoutContext.Value, foreColor, hoverColor, effectiveWindowChromeTitleColor);
+            titleBarLayoutContext = CreateTitleBarLayoutContext();
+            _tabView.DrawTitleBarTabs(canvas, titleBarLayoutContext.Value, foreColor, hoverColor, effectiveTitleBarTitleColor);
         }
 
         // Title border
@@ -1851,13 +1864,97 @@ public partial class Window : WindowBase
                 StrokeWidth = 1,
                 IsAntialias = true
             });
-            borderPaint.Color = effectiveWindowChromeTitleColor != SKColor.Empty
-                ? effectiveWindowChromeTitleColor.Determine().WithAlpha(30)
+            borderPaint.Color = effectiveTitleBarTitleColor != SKColor.Empty
+                ? effectiveTitleBarTitleColor.Determine().WithAlpha(30)
                 : ColorScheme.BorderColor;
 
             var borderY = _titleBarBottomDPI - 1;
             canvas.DrawLine(Width, borderY, 0, borderY, borderPaint);
         }
+    }
+
+    private bool TryGetCachedTitleBarTitleSampleColor(out SKColor sampledColor)
+    {
+        sampledColor = SKColor.Empty;
+
+        var backgroundImage = BackgroundImage;
+        var windowWidth = Width;
+        var windowHeight = Height;
+        if (backgroundImage == null || windowWidth <= 0 || windowHeight <= 0)
+        {
+            ResetTitleBarTitleSampleCache();
+            return false;
+        }
+
+        var titleBarTop = Math.Max(0, (int)MathF.Round(_titleBarTopDPI));
+        var titleBarHeight = Math.Max(0, (int)MathF.Round(_titleHeightDPI));
+        if (titleBarHeight <= 0)
+        {
+            ResetTitleBarTitleSampleCache();
+            return false;
+        }
+
+        var backgroundLayout = BackgroundImageLayout;
+        if (_hasResolvedTitleBarTitleSample &&
+            ReferenceEquals(_cachedTitleBarTitleSampleImage, backgroundImage) &&
+            _cachedTitleBarTitleSampleLayout == backgroundLayout &&
+            _cachedTitleBarTitleSampleWindowWidth == windowWidth &&
+            _cachedTitleBarTitleSampleWindowHeight == windowHeight &&
+            _cachedTitleBarTitleSampleTop == titleBarTop &&
+            _cachedTitleBarTitleSampleHeight == titleBarHeight)
+        {
+            if (_hasCachedTitleBarTitleSampleColor)
+            {
+                sampledColor = _cachedTitleBarTitleSampleColor;
+                return true;
+            }
+
+            return false;
+        }
+
+        var fullBounds = SKRect.Create(0f, 0f, windowWidth, windowHeight);
+        var titleSampleBounds = SKRect.Create(0f, _titleBarTopDPI, windowWidth, _titleHeightDPI);
+        if (!TryGetBackgroundImageSampleColor(fullBounds, titleSampleBounds, out sampledColor))
+        {
+            UpdateTitleBarTitleSampleCacheKey(backgroundImage, backgroundLayout, windowWidth, windowHeight, titleBarTop, titleBarHeight);
+            _hasCachedTitleBarTitleSampleColor = false;
+            return false;
+        }
+
+        UpdateTitleBarTitleSampleCacheKey(backgroundImage, backgroundLayout, windowWidth, windowHeight, titleBarTop, titleBarHeight);
+        _cachedTitleBarTitleSampleColor = sampledColor;
+        _hasCachedTitleBarTitleSampleColor = true;
+        return true;
+    }
+
+    private void UpdateTitleBarTitleSampleCacheKey(SKImage backgroundImage, ImageLayout backgroundLayout, int windowWidth, int windowHeight, int titleBarTop, int titleBarHeight)
+    {
+        _cachedTitleBarTitleSampleImage = backgroundImage;
+        _cachedTitleBarTitleSampleLayout = backgroundLayout;
+        _cachedTitleBarTitleSampleWindowWidth = windowWidth;
+        _cachedTitleBarTitleSampleWindowHeight = windowHeight;
+        _cachedTitleBarTitleSampleTop = titleBarTop;
+        _cachedTitleBarTitleSampleHeight = titleBarHeight;
+        _hasResolvedTitleBarTitleSample = true;
+    }
+
+    private void ResetTitleBarTitleSampleCache()
+    {
+        _cachedTitleBarTitleSampleImage = null;
+        _hasResolvedTitleBarTitleSample = false;
+        _hasCachedTitleBarTitleSampleColor = false;
+    }
+
+    protected override void OnBackgroundImageChanged(EventArgs e)
+    {
+        ResetTitleBarTitleSampleCache();
+        base.OnBackgroundImageChanged(e);
+    }
+
+    protected override void OnBackgroundImageLayoutChanged(EventArgs e)
+    {
+        ResetTitleBarTitleSampleCache();
+        base.OnBackgroundImageLayoutChanged(e);
     }
 
     internal override void OnTextChanged(EventArgs e)
@@ -1868,6 +1965,7 @@ public partial class Window : WindowBase
 
     internal override void OnSizeChanged(EventArgs e)
     {
+        ResetTitleBarTitleSampleCache();
         CalcSystemBoxPos();
         NeedsFullChildRedraw = true;
 
@@ -1886,7 +1984,7 @@ public partial class Window : WindowBase
         Invalidate();
     }
 
-    private WindowPageChromeLayoutContext CreateWindowChromeLayoutContext()
+    private TabViewTitleBarLayoutContext CreateTitleBarLayoutContext()
     {
         SyncTitleBarMenuStripLayout();
 
@@ -1918,13 +2016,13 @@ public partial class Window : WindowBase
         var maxSize = 250f * ScaleFactor;
 
         var currentX = leadingInset + (leftGroupVisible ? 44 * ScaleFactor : 0) + titleBarMenuReservedWidth;
-        return new WindowPageChromeLayoutContext(currentX, availableWidth, _titleBarTopDPI, _titleHeightDPI, _titleBarCenterYDPI, maxSize);
+        return new TabViewTitleBarLayoutContext(currentX, availableWidth, _titleBarTopDPI, _titleHeightDPI, _titleBarCenterYDPI, maxSize);
     }
 
     // optimization helpers --------------------------------------------------
 
     /// <summary>
-    /// Lightweight factory for hover‑style animation managers.
+    /// Lightweight factory for hover-style animation managers.
     /// </summary>
     private AnimationManager CreateHoverAnimation(double increment = HOVER_ANIMATION_SPEED)
     {

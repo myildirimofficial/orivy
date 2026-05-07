@@ -11,17 +11,18 @@ using System.Threading;
 
 namespace Orivy.Controls;
 
-public class WindowPageControl : ElementBase
+public partial class TabView : ElementBase
 {
+    private const long DefaultMaxTransitionSnapshotBytes = 32L * 1024 * 1024;
     private const float DefaultTabGap = 0f;
     private const float TabHorizontalPadding = 14f;
     private const float TabVerticalInset = 4f;
     private const float TabIndicatorHeight = 3f;
     private const float TabIconSize = 24f;
-    private const float TabIconSpacing = 8f;
+    private const float TabIconSpacing = 4f;
     private const float TabCloseButtonSize = 18f;
     private const float TabCloseButtonSpacing = 8f;
-    private const float TabMinWidth = 130f;
+    private const float TabMinWidth = 30f;
     private const float TabMaxWidth = 240f;
     private const float VerticalTabMinWidth = 160f;
     private const float VerticalTabMaxWidth = 360f;
@@ -34,35 +35,37 @@ public class WindowPageControl : ElementBase
     private const float TabStripResizerAnimationSpeed = 0.14f;
     private const float NewTabButtonSize = 22f;
     private const float TabSelectionAnimationSpeed = 0.14f;
+    private const float TabHoverAnimationStep = 0.18f;
     private const float TabDragThreshold = 6f;
-    private const float WindowChromeTabHorizontalPadding = 10f;
-    private const float WindowChromeTabIconSize = 16f;
-    private const float WindowChromeTabIconSpacing = 8f;
-    private const float WindowChromeTabCloseButtonSize = 20f;
-    private const float WindowChromeTabCloseButtonInset = 4.5f;
-    private const float WindowChromeTabSelectionAnimationSpeed = 0.10f;
-    private const float WindowChromeHoverAnimationSpeed = 0.10f;
+    private const float TitleBarTabHorizontalPadding = 8f;
+    private const float TitleBarTabIconSize = 16f;
+    private const float TitleBarTabIconSpacing = 4f;
+    private const float TitleBarTabCloseButtonSize = 20f;
+    private const float TitleBarTabCloseButtonInset = 4.5f;
+    private const float TitleBarTabSelectionAnimationSpeed = 0.10f;
+    private const float TitleBarHoverAnimationSpeed = 0.10f;
     private const float TabFontSize = 9.5f;
-    private const float WindowChromeTabFontSize = 8.5f;
-    private const float WindowChromeTabFontSizeWithIcon = 9.25f;
+    private const float TitleBarTabFontSize = 8.5f;
+    private const float TitleBarTabFontSizeWithIcon = 9.25f;
 
     private readonly AnimationManager _transitionAnimation;
     private readonly AnimationManager _tabSelectionAnimation;
     private readonly AnimationManager _tabStripResizerAnimation;
-    private readonly AnimationManager _windowChromeTabSelectionAnimation;
-    private readonly AnimationManager _windowChromeTabCloseHoverAnimation;
-    private readonly AnimationManager _windowChromeNewTabHoverAnimation;
+    private readonly AnimationManager _titleBarTabSelectionAnimation;
+    private readonly AnimationManager _titleBarTabCloseHoverAnimation;
+    private readonly AnimationManager _titleBarNewTabHoverAnimation;
     private readonly object _transitionSnapshotSync = new();
     private readonly List<SKRect> _tabCloseButtonRects = new();
     private readonly List<SKRect> _tabRects = new();
     private readonly List<float> _tabWidthBuffer = new();
-    private readonly List<SKRect> _windowChromeTabRects = new();
-    private readonly List<float> _windowChromeTabWidthBuffer = new();
+    private readonly List<SKRect> _titleBarTabRects = new();
+    private readonly List<float> _titleBarTabWidthBuffer = new();
     private readonly SKPaint _tabBackgroundPaint;
     private readonly SKPaint _tabBorderPaint;
+    private readonly SKPaint _tabGlyphPaint;
     private readonly SKPaint _tabIndicatorPaint;
     private readonly SKPaint _tabTextPaint;
-    private readonly SKPath _tabChromePath;
+    private readonly SKPath _tabPath;
     private readonly SKFont _tabFont;
     private EventHandler? _onNewTabButtonClick;
     private EventHandler<int>? _onSelectedIndexChanged;
@@ -72,16 +75,17 @@ public class WindowPageControl : ElementBase
     private int _previousSelectedIndex = -1;
     private int _hoveredTabCloseIndex = -1;
     private bool _hoveredNewTabButton;
-    private SKRect _windowChromeCloseButtonRect = SKRect.Empty;
-    private SKRect _windowChromeNewTabButtonRect = SKRect.Empty;
-    private int _windowChromePreviousSelectedIndex = -1;
-    private int _hoveredWindowChromeTabIndex = -1;
-    private bool _hoveredWindowChromeCloseButton;
-    private bool _hoveredWindowChromeNewTabButton;
-    private WindowPageChromeLayoutContext _lastWindowChromeLayoutContext;
-    private bool _hasWindowChromeLayoutContext;
-    private int _windowChromeLayoutPageCount = -1;
+    private SKRect _titleBarCloseButtonRect = SKRect.Empty;
+    private SKRect _titleBarNewTabButtonRect = SKRect.Empty;
+    private int _titleBarPreviousSelectedIndex = -1;
+    private int _hoveredTitleBarTabIndex = -1;
+    private bool _hoveredTitleBarCloseButton;
+    private bool _hoveredTitleBarNewTabButton;
+    private TabViewTitleBarLayoutContext _lastTitleBarLayoutContext;
+    private bool _hasTitleBarLayoutContext;
+    private int _titleBarLayoutPageCount = -1;
     private float _tabStripHeight = 44f;
+    private float _verticalTabStripWidth = 44f;
     private float _verticalTabScrollOffset;
     private float _verticalTabScrollableExtent;
     private bool _showTabStripResizer;
@@ -95,11 +99,12 @@ public class WindowPageControl : ElementBase
     private float _tabStripResizeOrigin;
     private float _tabStripResizeStartHeight;
     private float _tabGap = DefaultTabGap;
-    private WindowPageTabDesignMode _tabDesignMode = WindowPageTabDesignMode.Rectangle;
-    private WindowPageTabAlignment _tabAlignment = WindowPageTabAlignment.Start;
-    private WindowPageTabLayoutMode _tabLayoutMode = WindowPageTabLayoutMode.Top;
-    private WindowPageTabMode _tabMode = WindowPageTabMode.WindowChrome;
+    private TabViewDesignMode _tabDesignMode = TabViewDesignMode.Rectangle;
+    private TabViewAlignment _tabAlignment = TabViewAlignment.Start;
+    private TabViewLayoutMode _tabLayoutMode = TabViewLayoutMode.Top;
+    private TabViewMode _tabMode = TabViewMode.TitleBar;
     private SKColor _tabStripBackground = SKColors.Transparent;
+    private TabViewStyle? _customTabStyle;
     private bool _allowTabDrag = true;
     private List<ElementBase>? _pageOrder;
     private int _dragTabSourceIndex = -1;
@@ -108,11 +113,18 @@ public class WindowPageControl : ElementBase
     private float _dragTabCurrentX;
     private int _dragTabInsertIndex = -1;
     private float[] _tabDodgeAnimOffsets = Array.Empty<float>();
+    private float[] _tabHoverProgress = Array.Empty<float>();
+    private float[] _tabHoverTargets = Array.Empty<float>();
+    private float[] _titleBarTabHoverProgress = Array.Empty<float>();
+    private float[] _titleBarTabHoverTargets = Array.Empty<float>();
+    private readonly object _tabHoverSync = new();
+    private readonly System.Timers.Timer _tabHoverTimer;
     private int _transitionFinalizationPending;
     private int _transitionFromIndex = -1;
     private int _transitionToIndex = -1;
     private SKImage? _transitionFromSnapshot;
     private SKImage? _transitionToSnapshot;
+    private SKRect _transitionViewport = SKRect.Empty;
     private readonly SKPaint _transitionPaint;
     internal event EventHandler? TabModeChanged;
 
@@ -136,17 +148,17 @@ public class WindowPageControl : ElementBase
 
             return _tabLayoutMode switch
             {
-                WindowPageTabLayoutMode.Left => new SKRect(
+                TabViewLayoutMode.Left => new SKRect(
                     Math.Min(rect.Right, rect.Left + headerThickness),
                     rect.Top,
                     rect.Right,
                     rect.Bottom),
-                WindowPageTabLayoutMode.Right => new SKRect(
+                TabViewLayoutMode.Right => new SKRect(
                     rect.Left,
                     rect.Top,
                     Math.Max(rect.Left, rect.Right - headerThickness),
                     rect.Bottom),
-                WindowPageTabLayoutMode.Bottom => new SKRect(
+                TabViewLayoutMode.Bottom => new SKRect(
                     rect.Left,
                     rect.Top,
                     rect.Right,
@@ -160,9 +172,10 @@ public class WindowPageControl : ElementBase
         }
     }
 
-    public WindowPageControl()
+    public TabView()
     {
         MouseWheel += HandleMouseWheelRouting;
+        ImageAlign = ContentAlignment.MiddleLeft;
 
         _tabBackgroundPaint = new SKPaint
         {
@@ -175,6 +188,12 @@ public class WindowPageControl : ElementBase
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1f
         };
+        _tabGlyphPaint = new SKPaint
+        {
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeCap = SKStrokeCap.Round
+        };
         _tabIndicatorPaint = new SKPaint
         {
             IsAntialias = true,
@@ -185,7 +204,7 @@ public class WindowPageControl : ElementBase
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
-        _tabChromePath = new SKPath();
+        _tabPath = new SKPath();
         _tabFont = new SKFont();
 
         _tabSelectionAnimation = new AnimationManager
@@ -199,6 +218,13 @@ public class WindowPageControl : ElementBase
         _tabSelectionAnimation.OnAnimationProgress += HandleTabSelectionProgress;
         _tabSelectionAnimation.OnAnimationFinished += HandleTabSelectionFinished;
 
+        _tabHoverTimer = new System.Timers.Timer(16)
+        {
+            AutoReset = true,
+            Enabled = false
+        };
+        _tabHoverTimer.Elapsed += HandleTabHoverTimerElapsed;
+
         _tabStripResizerAnimation = new AnimationManager
         {
             Singular = true,
@@ -209,36 +235,36 @@ public class WindowPageControl : ElementBase
         };
         _tabStripResizerAnimation.OnAnimationProgress += HandleTabStripResizerProgress;
 
-        _windowChromeTabSelectionAnimation = new AnimationManager
+        _titleBarTabSelectionAnimation = new AnimationManager
         {
             Singular = true,
             InterruptAnimation = true,
-            Increment = WindowChromeTabSelectionAnimationSpeed,
-            SecondaryIncrement = WindowChromeTabSelectionAnimationSpeed,
+            Increment = TitleBarTabSelectionAnimationSpeed,
+            SecondaryIncrement = TitleBarTabSelectionAnimationSpeed,
             AnimationType = AnimationType.CubicEaseOut
         };
-        _windowChromeTabSelectionAnimation.OnAnimationProgress += HandleWindowChromeSelectionProgress;
-        _windowChromeTabSelectionAnimation.OnAnimationFinished += HandleWindowChromeSelectionFinished;
+        _titleBarTabSelectionAnimation.OnAnimationProgress += HandleTitleBarSelectionProgress;
+        _titleBarTabSelectionAnimation.OnAnimationFinished += HandleTitleBarSelectionFinished;
 
-        _windowChromeTabCloseHoverAnimation = new AnimationManager
+        _titleBarTabCloseHoverAnimation = new AnimationManager
         {
             Singular = true,
             InterruptAnimation = true,
-            Increment = WindowChromeHoverAnimationSpeed,
-            SecondaryIncrement = WindowChromeHoverAnimationSpeed,
+            Increment = TitleBarHoverAnimationSpeed,
+            SecondaryIncrement = TitleBarHoverAnimationSpeed,
             AnimationType = AnimationType.EaseInOut
         };
-        _windowChromeTabCloseHoverAnimation.OnAnimationProgress += HandleWindowChromeHoverProgress;
+        _titleBarTabCloseHoverAnimation.OnAnimationProgress += HandleTitleBarHoverProgress;
 
-        _windowChromeNewTabHoverAnimation = new AnimationManager
+        _titleBarNewTabHoverAnimation = new AnimationManager
         {
             Singular = true,
             InterruptAnimation = true,
-            Increment = WindowChromeHoverAnimationSpeed,
-            SecondaryIncrement = WindowChromeHoverAnimationSpeed,
+            Increment = TitleBarHoverAnimationSpeed,
+            SecondaryIncrement = TitleBarHoverAnimationSpeed,
             AnimationType = AnimationType.EaseInOut
         };
-        _windowChromeNewTabHoverAnimation.OnAnimationProgress += HandleWindowChromeHoverProgress;
+        _titleBarNewTabHoverAnimation.OnAnimationProgress += HandleTitleBarHoverProgress;
 
         _transitionPaint = new SKPaint
         {
@@ -259,8 +285,8 @@ public class WindowPageControl : ElementBase
     }
 
     [Category("Behavior")]
-    [DefaultValue(WindowPageTabMode.WindowChrome)]
-    public WindowPageTabMode TabMode
+    [DefaultValue(TabViewMode.TitleBar)]
+    public TabViewMode TabMode
     {
         get => _tabMode;
         set
@@ -272,7 +298,7 @@ public class WindowPageControl : ElementBase
             ResetTabStripResizerInteraction();
             _hoveredTabIndex = -1;
             ResetTabSelectionAnimation();
-            ResetWindowChromeState();
+            ResetTitleBarState();
 
             CancelTransitionPreservingSelection();
             PerformLayout();
@@ -283,9 +309,9 @@ public class WindowPageControl : ElementBase
     }
 
     [Category("Layout")]
-    [DefaultValue(WindowPageTabLayoutMode.Top)]
-    [Description("Controls which edge hosts the embedded tab strip. WindowChrome mode always renders tabs on the top edge.")]
-    public WindowPageTabLayoutMode TabLayoutMode
+    [DefaultValue(TabViewLayoutMode.Top)]
+    [Description("Controls which edge hosts the embedded tab strip. TitleBar mode always renders tabs on the top edge.")]
+    public TabViewLayoutMode TabLayoutMode
     {
         get => _tabLayoutMode;
         set
@@ -295,7 +321,7 @@ public class WindowPageControl : ElementBase
 
             _tabLayoutMode = value;
             ResetTabStripResizerInteraction();
-            if (_tabLayoutMode is not WindowPageTabLayoutMode.Left and not WindowPageTabLayoutMode.Right)
+            if (_tabLayoutMode is not TabViewLayoutMode.Left and not TabViewLayoutMode.Right)
                 ResetVerticalTabScroll();
             else
                 EnsureSelectedVerticalTabVisible();
@@ -311,21 +337,36 @@ public class WindowPageControl : ElementBase
     [DefaultValue(44f)]
     public float TabStripHeight
     {
-        get => _tabStripHeight;
+        get => UsesVerticalTabLayout ? _verticalTabStripWidth : _tabStripHeight;
         set
         {
             var clamped = Math.Max(32f, value);
-            if (Math.Abs(_tabStripHeight - clamped) < 0.001f)
+            if (Math.Abs(_tabStripHeight - clamped) < 0.001f && Math.Abs(_verticalTabStripWidth - clamped) < 0.001f)
                 return;
 
             _tabStripHeight = clamped;
-            EnsureSelectedVerticalTabVisible();
-
-            CancelTransitionPreservingSelection();
-            PerformLayout();
-            InvalidateRenderTree();
-            Invalidate();
+            _verticalTabStripWidth = clamped;
+            ApplyTabStripThicknessChange();
         }
+    }
+
+    private void ApplyTabStripThicknessChange()
+    {
+        EnsureSelectedVerticalTabVisible();
+        CancelTransitionPreservingSelection();
+        PerformLayout();
+        InvalidateRenderTree();
+        Invalidate();
+    }
+
+    private void SetVerticalTabStripWidth(float value)
+    {
+        var clamped = Math.Max(VerticalTabMinWidth, value);
+        if (Math.Abs(_verticalTabStripWidth - clamped) < 0.001f)
+            return;
+
+        _verticalTabStripWidth = clamped;
+        ApplyTabStripThicknessChange();
     }
 
     [Category("Layout")]
@@ -350,7 +391,7 @@ public class WindowPageControl : ElementBase
     }
 
     [Browsable(false)]
-    public bool UsesTabStrip => TabMode == WindowPageTabMode.Embedded;
+    public bool UsesTabStrip => TabMode == TabViewMode.Embedded;
 
     [Category("Layout")]
     [Description("Sets space between tabs.")]
@@ -415,8 +456,8 @@ public class WindowPageControl : ElementBase
     }
 
     [Category("Appearance")]
-    [DefaultValue(WindowPageTabDesignMode.Rectangle)]
-    public WindowPageTabDesignMode TabDesignMode
+    [DefaultValue(TabViewDesignMode.Rectangle)]
+    public TabViewDesignMode TabDesignMode
     {
         get => _tabDesignMode;
         set
@@ -427,6 +468,33 @@ public class WindowPageControl : ElementBase
             _tabDesignMode = value;
             InvalidateTabChrome();
         }
+    }
+
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public TabViewStyle? CustomTabStyle
+    {
+        get => _customTabStyle;
+        set
+        {
+            _customTabStyle = value;
+            InvalidateTabChrome();
+        }
+    }
+
+    public TabView ConfigureTabStyle(Action<TabViewStyleBuilder> configure, bool clearExisting = false)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+
+        var builder = new TabViewStyleBuilder(clearExisting ? default : _customTabStyle ?? default);
+        configure(builder);
+        CustomTabStyle = builder.Build();
+        return this;
+    }
+
+    public void ClearCustomTabStyle()
+    {
+        CustomTabStyle = null;
     }
 
     [Category("Appearance")]
@@ -451,9 +519,9 @@ public class WindowPageControl : ElementBase
     }
 
     [Category("Appearance")]
-    [DefaultValue(WindowPageTabAlignment.Start)]
+    [DefaultValue(TabViewAlignment.Start)]
     [Description("Controls alignment of tabs along the embedded tab strip's primary axis.")]
-    public WindowPageTabAlignment TabAlignment
+    public TabViewAlignment TabAlignment
     {
         get => _tabAlignment;
         set
@@ -469,7 +537,7 @@ public class WindowPageControl : ElementBase
     [Browsable(false)]
     [EditorBrowsable(EditorBrowsableState.Never)]
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-    public WindowPageTabDesignMode WindowChromeTabDesignMode
+    public TabViewDesignMode TitleBarTabDesignMode
     {
         get => TabDesignMode;
         set => TabDesignMode = value;
@@ -480,8 +548,13 @@ public class WindowPageControl : ElementBase
     public bool EnableTransitions { get; set; } = true;
 
     [Category("Behavior")]
-    [DefaultValue(WindowPageTransitionEffect.SlideHorizontal)]
-    public WindowPageTransitionEffect TransitionEffect { get; set; } = WindowPageTransitionEffect.SlideHorizontal;
+    [DefaultValue(DefaultMaxTransitionSnapshotBytes)]
+    [Description("Upper bound for retained page transition snapshots in bytes. Set to 0 to disable the limit.")]
+    public long MaxTransitionSnapshotBytes { get; set; } = DefaultMaxTransitionSnapshotBytes;
+
+    [Category("Behavior")]
+    [DefaultValue(TabViewTransitionEffect.SlideHorizontal)]
+    public TabViewTransitionEffect TransitionEffect { get; set; } = TabViewTransitionEffect.SlideHorizontal;
 
     [Category("Behavior")]
     [DefaultValue(true)]
@@ -529,18 +602,18 @@ public class WindowPageControl : ElementBase
     public bool IsTransitioning => _transitionAnimation.IsAnimating() && HasTransitionSnapshots();
 
     [Browsable(false)]
-    internal float ResolvedTabGap => _tabGap;
+    internal float ResolvedTabGap => Math.Max(0f, _customTabStyle?.Metrics.Gap ?? _tabGap);
 
-    private bool ShouldDrawTabStrip => TabMode == WindowPageTabMode.Embedded && Count > 0;
+    private bool ShouldDrawTabStrip => TabMode == TabViewMode.Embedded && Count > 0;
     private bool ShouldDrawTabStripResizer => _showTabStripResizer && SupportsTabStripResizer;
     private bool ShouldDrawTabIcons => ShouldDrawTabStrip && DrawTabIcons;
     private bool ShouldDrawTabCloseButtons => ShouldDrawTabStrip && TabCloseButton;
     private bool ShouldDrawNewTabButton => ShouldDrawTabStrip && NewTabButton;
-    private bool SupportsTabStripResizer => ShouldDrawTabStrip && _tabLayoutMode is WindowPageTabLayoutMode.Left or WindowPageTabLayoutMode.Right;
-    private bool UsesVerticalTabLayout => ShouldDrawTabStrip && _tabLayoutMode is WindowPageTabLayoutMode.Left or WindowPageTabLayoutMode.Right;
-    private bool UsesNonTopEmbeddedTabLayout => ShouldDrawTabStrip && _tabLayoutMode != WindowPageTabLayoutMode.Top;
+    private bool SupportsTabStripResizer => ShouldDrawTabStrip && _tabLayoutMode is TabViewLayoutMode.Left or TabViewLayoutMode.Right;
+    private bool UsesVerticalTabLayout => ShouldDrawTabStrip && _tabLayoutMode is TabViewLayoutMode.Left or TabViewLayoutMode.Right;
+    private bool UsesNonTopEmbeddedTabLayout => ShouldDrawTabStrip && _tabLayoutMode != TabViewLayoutMode.Top;
 
-    private bool IsPageControl(ElementBase element)
+    private bool IsTabViewPage(ElementBase element)
     {
         return element is Container;
     }
@@ -550,7 +623,7 @@ public class WindowPageControl : ElementBase
         var count = 0;
         for (var i = 0; i < Controls.Count; i++)
         {
-            if (Controls[i] is ElementBase element && IsPageControl(element))
+            if (Controls[i] is ElementBase element && IsTabViewPage(element))
                 count++;
         }
 
@@ -568,7 +641,7 @@ public class WindowPageControl : ElementBase
         var currentPageIndex = 0;
         for (var i = 0; i < Controls.Count; i++)
         {
-            if (Controls[i] is not ElementBase element || !IsPageControl(element))
+            if (Controls[i] is not ElementBase element || !IsTabViewPage(element))
                 continue;
 
             if (currentPageIndex == pageIndex)
@@ -608,7 +681,7 @@ public class WindowPageControl : ElementBase
             _selectedIndex = value;
             EnsureSelectedVerticalTabVisible();
             StartTabSelectionAnimation(previousSelectedIndex, _selectedIndex);
-            StartWindowChromeSelectionAnimation(previousSelectedIndex, _selectedIndex);
+            StartTitleBarSelectionAnimation(previousSelectedIndex, _selectedIndex);
 
             var transitionStarted = TryStartTransition(previousSelectedIndex, _selectedIndex);
             if (!transitionStarted)
@@ -650,6 +723,7 @@ public class WindowPageControl : ElementBase
         _transitionFromIndex = -1;
         _transitionToIndex = -1;
         _isTransitionDirty = false;
+        _transitionViewport = SKRect.Empty;
 
         if (commitTargetPage)
             CommitSelectedPageVisibility();
@@ -672,7 +746,7 @@ public class WindowPageControl : ElementBase
     {
         base.OnControlAdded(e);
 
-        if (e.Element is not ElementBase element || !IsPageControl(element))
+        if (e.Element is not ElementBase element || !IsTabViewPage(element))
             return;
 
         element.Dock = DockStyle.Fill;
@@ -697,7 +771,7 @@ public class WindowPageControl : ElementBase
     {
         base.OnControlRemoved(e);
 
-        if (e.Element is not ElementBase element || !IsPageControl(element))
+        if (e.Element is not ElementBase element || !IsTabViewPage(element))
             return;
 
         if (_pageOrder != null)
@@ -722,7 +796,7 @@ public class WindowPageControl : ElementBase
             StopTransition();
 
         if (!Visible)
-            ResetWindowChromeHoverState();
+            ResetTitleBarHoverState();
     }
 
     internal override void OnSizeChanged(EventArgs e)
@@ -730,7 +804,7 @@ public class WindowPageControl : ElementBase
         base.OnSizeChanged(e);
         SyncAllPageBounds();
         EnsureSelectedVerticalTabVisible();
-        InvalidateWindowChromeLayout();
+        InvalidateTitleBarLayout();
 
         if (IsTransitioning)
             _isTransitionDirty = true;
@@ -741,7 +815,7 @@ public class WindowPageControl : ElementBase
         if (!base.ShouldIncludeHitTestElement(element, requireEnabled))
             return false;
 
-        if (!IsPageControl(element) || !IsTransitioning || !LockInputDuringTransition)
+        if (!IsTabViewPage(element) || !IsTransitioning || !LockInputDuringTransition)
             return true;
 
         var targetPage = GetPageAt(_transitionToIndex);
@@ -879,7 +953,11 @@ public class WindowPageControl : ElementBase
             !resizerStateChanged)
             return;
 
-        _hoveredTabIndex = hoveredTabIndex;
+        if (_hoveredTabIndex != hoveredTabIndex)
+        {
+            _hoveredTabIndex = hoveredTabIndex;
+            SetTabHoverTarget(_tabRects.Count, hoveredTabIndex);
+        }
         _hoveredTabCloseIndex = hoveredCloseTabIndex;
         _hoveredNewTabButton = hoveredNewTabButton;
         Invalidate();
@@ -924,6 +1002,7 @@ public class WindowPageControl : ElementBase
         if (_hoveredTabIndex >= 0 || _hoveredTabCloseIndex >= 0 || _hoveredNewTabButton || _hoveredTabStripResizer)
         {
             _hoveredTabIndex = -1;
+            SetTabHoverTarget(_tabRects.Count, -1);
             _hoveredTabCloseIndex = -1;
             _hoveredNewTabButton = false;
             if (_hoveredTabStripResizer)
@@ -951,7 +1030,7 @@ public class WindowPageControl : ElementBase
                 if (Controls[i] is not ElementBase child || !child.Visible || child.Width <= 0f || child.Height <= 0f)
                     continue;
 
-                if (IsPageControl(child))
+                if (IsTabViewPage(child))
                 {
                     if (!ReferenceEquals(child, selectedPage))
                         continue;
@@ -993,20 +1072,29 @@ public class WindowPageControl : ElementBase
         }
     }
 
+    protected override void OnImageAlignChanged(EventArgs e)
+    {
+        base.OnImageAlignChanged(e);
+        InvalidateTabChrome();
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
-            _windowChromeTabSelectionAnimation.OnAnimationProgress -= HandleWindowChromeSelectionProgress;
-            _windowChromeTabSelectionAnimation.OnAnimationFinished -= HandleWindowChromeSelectionFinished;
-            _windowChromeTabSelectionAnimation.Dispose();
-            _windowChromeTabCloseHoverAnimation.OnAnimationProgress -= HandleWindowChromeHoverProgress;
-            _windowChromeTabCloseHoverAnimation.Dispose();
-            _windowChromeNewTabHoverAnimation.OnAnimationProgress -= HandleWindowChromeHoverProgress;
-            _windowChromeNewTabHoverAnimation.Dispose();
+            _titleBarTabSelectionAnimation.OnAnimationProgress -= HandleTitleBarSelectionProgress;
+            _titleBarTabSelectionAnimation.OnAnimationFinished -= HandleTitleBarSelectionFinished;
+            _titleBarTabSelectionAnimation.Dispose();
+            _titleBarTabCloseHoverAnimation.OnAnimationProgress -= HandleTitleBarHoverProgress;
+            _titleBarTabCloseHoverAnimation.Dispose();
+            _titleBarNewTabHoverAnimation.OnAnimationProgress -= HandleTitleBarHoverProgress;
+            _titleBarNewTabHoverAnimation.Dispose();
             _tabSelectionAnimation.OnAnimationProgress -= HandleTabSelectionProgress;
             _tabSelectionAnimation.OnAnimationFinished -= HandleTabSelectionFinished;
             _tabSelectionAnimation.Dispose();
+            _tabHoverTimer.Elapsed -= HandleTabHoverTimerElapsed;
+            _tabHoverTimer.Stop();
+            _tabHoverTimer.Dispose();
             _tabStripResizerAnimation.OnAnimationProgress -= HandleTabStripResizerProgress;
             _tabStripResizerAnimation.Dispose();
             _transitionAnimation.OnAnimationProgress -= HandleTransitionProgress;
@@ -1014,9 +1102,10 @@ public class WindowPageControl : ElementBase
             _transitionAnimation.Dispose();
             _tabBackgroundPaint.Dispose();
             _tabBorderPaint.Dispose();
+            _tabGlyphPaint.Dispose();
             _tabIndicatorPaint.Dispose();
             _tabTextPaint.Dispose();
-            _tabChromePath.Dispose();
+            _tabPath.Dispose();
             _tabFont.Dispose();
             _transitionPaint.Dispose();
             ReleaseTransitionSnapshots();
@@ -1039,24 +1128,29 @@ public class WindowPageControl : ElementBase
         Invalidate();
     }
 
+    private void HandleTabHoverTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
+    {
+        UpdateTabHoverAnimationFrame();
+    }
+
     private void HandleTabStripResizerProgress(object _)
     {
         Invalidate();
     }
 
-    private void HandleWindowChromeSelectionProgress(object _)
+    private void HandleTitleBarSelectionProgress(object _)
     {
         Invalidate();
     }
 
-    private void HandleWindowChromeSelectionFinished(object _)
+    private void HandleTitleBarSelectionFinished(object _)
     {
-        _windowChromePreviousSelectedIndex = _selectedIndex;
-        UpdateWindowChromeAuxiliaryRects();
+        _titleBarPreviousSelectedIndex = _selectedIndex;
+        UpdateTitleBarAuxiliaryRects();
         Invalidate();
     }
 
-    private void HandleWindowChromeHoverProgress(object _)
+    private void HandleTitleBarHoverProgress(object _)
     {
         Invalidate();
     }
@@ -1077,13 +1171,10 @@ public class WindowPageControl : ElementBase
     {
         FinalizeCompletedTransitionIfPending();
 
-        var carryForwardSnapshot = IsTransitioning ? CaptureActiveTransitionSnapshot() : null;
-
         if (!ShouldAnimateTransition(previousSelectedIndex, nextSelectedIndex))
-        {
-            carryForwardSnapshot?.Dispose();
             return false;
-        }
+
+        var carryForwardSnapshot = IsTransitioning ? CaptureActiveTransitionSnapshot() : null;
 
         SyncAllPageBounds();
 
@@ -1109,7 +1200,7 @@ public class WindowPageControl : ElementBase
 
     private bool ShouldAnimateTransition(int previousSelectedIndex, int nextSelectedIndex)
     {
-        if (!EnableTransitions || TransitionEffect == WindowPageTransitionEffect.None)
+        if (!EnableTransitions || TransitionEffect == TabViewTransitionEffect.None)
             return false;
 
         if (previousSelectedIndex < 0 || nextSelectedIndex < 0 || previousSelectedIndex == nextSelectedIndex)
@@ -1121,7 +1212,27 @@ public class WindowPageControl : ElementBase
             return false;
 
         var viewport = GetTransitionViewport();
-        return viewport.Width > 0 && viewport.Height > 0;
+        if (viewport.Width <= 0 || viewport.Height <= 0)
+            return false;
+
+        if (MaxTransitionSnapshotBytes <= 0)
+            return true;
+
+        return EstimateTransitionSnapshotBytes(viewport) <= MaxTransitionSnapshotBytes;
+    }
+
+    private static long EstimateTransitionSnapshotBytes(SKRect viewport)
+    {
+        try
+        {
+            var width = Math.Max(1L, (long)Math.Ceiling(viewport.Width));
+            var height = Math.Max(1L, (long)Math.Ceiling(viewport.Height));
+            return checked(width * height * 4L * 2L);
+        }
+        catch (OverflowException)
+        {
+            return long.MaxValue;
+        }
     }
 
     private void CommitSelectedPageVisibility()
@@ -1129,7 +1240,7 @@ public class WindowPageControl : ElementBase
         var selectedPage = GetPageAt(_selectedIndex);
         for (var i = 0; i < Controls.Count; i++)
         {
-            if (Controls[i] is not ElementBase element || !IsPageControl(element))
+            if (Controls[i] is not ElementBase element || !IsTabViewPage(element))
                 continue;
 
             SyncPageBounds(element);
@@ -1159,6 +1270,7 @@ public class WindowPageControl : ElementBase
         _transitionFromIndex = -1;
         _transitionToIndex = -1;
         _isTransitionDirty = false;
+        _transitionViewport = SKRect.Empty;
         CommitSelectedPageVisibility();
         InvalidateRenderTree();
         Invalidate();
@@ -1189,6 +1301,12 @@ public class WindowPageControl : ElementBase
 
         SyncPageBounds(fromPage);
         SyncPageBounds(toPage);
+
+        var viewport = DisplayRectangle;
+        if (viewport.Width <= 0f || viewport.Height <= 0f)
+            return false;
+
+        _transitionViewport = viewport;
 
         var fromSnapshot = fromSnapshotOverride ?? CapturePageSnapshot(fromPage);
         var toSnapshot = CapturePageSnapshot(toPage);
@@ -1280,49 +1398,49 @@ public class WindowPageControl : ElementBase
     {
         switch (TransitionEffect)
         {
-            case WindowPageTransitionEffect.Fade:
+            case TabViewTransitionEffect.Fade:
                 DrawFade(canvas, fromSnapshot, toSnapshot, viewport, progress);
                 break;
-            case WindowPageTransitionEffect.SlideHorizontal:
+            case TabViewTransitionEffect.SlideHorizontal:
                 DrawSlideHorizontal(canvas, fromSnapshot, toSnapshot, viewport, progress, pushExistingPage: false);
                 break;
-            case WindowPageTransitionEffect.SlideVertical:
+            case TabViewTransitionEffect.SlideVertical:
                 DrawSlideVertical(canvas, fromSnapshot, toSnapshot, viewport, progress);
                 break;
-            case WindowPageTransitionEffect.ScaleFade:
+            case TabViewTransitionEffect.ScaleFade:
                 DrawScaleFade(canvas, fromSnapshot, toSnapshot, viewport, progress);
                 break;
-            case WindowPageTransitionEffect.Push:
+            case TabViewTransitionEffect.Push:
                 DrawSlideHorizontal(canvas, fromSnapshot, toSnapshot, viewport, progress, pushExistingPage: true, drawJunctionShadow: true);
                 break;
-            case WindowPageTransitionEffect.Cover:
+            case TabViewTransitionEffect.Cover:
                 DrawCover(canvas, fromSnapshot, toSnapshot, viewport, progress);
                 break;
-            case WindowPageTransitionEffect.Reveal:
+            case TabViewTransitionEffect.Reveal:
                 DrawReveal(canvas, fromSnapshot, toSnapshot, viewport, progress);
                 break;
-            case WindowPageTransitionEffect.Uncover:
+            case TabViewTransitionEffect.Uncover:
                 DrawUncover(canvas, fromSnapshot, toSnapshot, viewport, progress);
                 break;
-            case WindowPageTransitionEffect.Flip:
+            case TabViewTransitionEffect.Flip:
                 DrawFlip(canvas, fromSnapshot, toSnapshot, viewport, progress);
                 break;
-            case WindowPageTransitionEffect.Iris:
+            case TabViewTransitionEffect.Iris:
                 DrawIris(canvas, fromSnapshot, toSnapshot, viewport, progress);
                 break;
-            case WindowPageTransitionEffect.Morph:
+            case TabViewTransitionEffect.Morph:
                 DrawMorph(canvas, fromSnapshot, toSnapshot, viewport, progress);
                 break;
-            case WindowPageTransitionEffect.Zoom:
+            case TabViewTransitionEffect.Zoom:
                 DrawZoom(canvas, fromSnapshot, toSnapshot, viewport, progress);
                 break;
-            case WindowPageTransitionEffect.CrossZoom:
+            case TabViewTransitionEffect.CrossZoom:
                 DrawCrossZoom(canvas, fromSnapshot, toSnapshot, viewport, progress);
                 break;
-            case WindowPageTransitionEffect.Split:
+            case TabViewTransitionEffect.Split:
                 DrawSplit(canvas, fromSnapshot, toSnapshot, viewport, progress);
                 break;
-            case WindowPageTransitionEffect.Wipe:
+            case TabViewTransitionEffect.Wipe:
                 DrawWipe(canvas, fromSnapshot, toSnapshot, viewport, progress);
                 break;
             default:
@@ -1438,8 +1556,8 @@ public class WindowPageControl : ElementBase
     private void DrawFlip(SKCanvas canvas, SKImage fromSnapshot, SKImage toSnapshot, SKRect viewport, float progress)
     {
         // Horizontal card flip via horizontal squash
-        // 0â†’0.5: from squashes from full width to zero
-        // 0.5â†’1: to expands from zero to full width
+        // 0›0.5: from squashes from full width to zero
+        // 0.5›1: to expands from zero to full width
         // dark overlay peaks at the flip midpoint
         var darkness = 1f - Math.Abs(progress - 0.5f) * 2f;
 
@@ -1575,7 +1693,7 @@ public class WindowPageControl : ElementBase
     private void DrawMorph(SKCanvas canvas, SKImage fromSnapshot, SKImage toSnapshot, SKRect viewport, float progress)
     {
         // Both pages cross-fade while simultaneously counter-scaling:
-        // from shrinks 1.0 â†’ 0.96, to grows 1.04 â†’ 1.0, giving a soft dissolve-morph feel.
+        // from shrinks 1.0 › 0.96, to grows 1.04 › 1.0, giving a soft dissolve-morph feel.
         var fromScale = 1f - 0.04f * progress;
         var toScale   = 1.04f - 0.04f * progress;
 
@@ -1610,9 +1728,9 @@ public class WindowPageControl : ElementBase
     private void DrawCrossZoom(SKCanvas canvas, SKImage fromSnapshot, SKImage toSnapshot, SKRect viewport, float progress)
     {
         // Two-phase transition with a brief mid-point gap (like a lens blink):
-        //   0.0 â†’ 0.55 : FROM shrinks (1.0 â†’ 0.6) and fades completely out.
-        //   0.45 â†’ 1.0 : TO grows (0.6 â†’ 1.0) and fades fully in.
-        // The overlap zone (0.45â€“0.55) lets both briefly coexist at the crossover.
+        //   0.0 › 0.55 : FROM shrinks (1.0 › 0.6) and fades completely out.
+        //   0.45 › 1.0 : TO grows (0.6 › 1.0) and fades fully in.
+        // The overlap zone (0.45–0.55) lets both briefly coexist at the crossover.
         var fromAlpha = (byte)(255f * Math.Max(0f, 1f - progress / 0.55f));
         var fromScale = 1f - 0.4f * (progress / 0.55f);
         fromScale = Math.Clamp(fromScale, 0.6f, 1f);
@@ -1783,7 +1901,7 @@ public class WindowPageControl : ElementBase
 
         _pageOrder = new List<ElementBase>();
         for (var i = 0; i < Controls.Count; i++)
-            if (Controls[i] is ElementBase el && IsPageControl(el))
+            if (Controls[i] is ElementBase el && IsTabViewPage(el))
                 _pageOrder.Add(el);
     }
 
@@ -1826,7 +1944,7 @@ public class WindowPageControl : ElementBase
         var tabGap = ResolvedTabGap * ScaleFactor;
         var iconSize = TabIconSize * ScaleFactor;
         var iconSpacing = TabIconSpacing * ScaleFactor;
-        var horizontalPadding = TabHorizontalPadding * ScaleFactor;
+        var horizontalPadding = GetTabHorizontalContentPadding();
         var closeButtonSpacing = TabCloseButtonSpacing * ScaleFactor;
         var isDark = ColorScheme.IsDarkMode;
 
@@ -1838,7 +1956,7 @@ public class WindowPageControl : ElementBase
 
         switch (TabDesignMode)
         {
-            case WindowPageTabDesignMode.Rectangle:
+            case TabViewDesignMode.Rectangle:
                 // Tailwind underline tabs: zero fill, bold primary indicator, subtle hover ghost
                 headerBackground    = SKColors.Transparent;
                 headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)72 : (byte)52);
@@ -1851,7 +1969,7 @@ public class WindowPageControl : ElementBase
                 inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)165 : (byte)148) : ForeColor.WithAlpha(110);
                 break;
 
-            case WindowPageTabDesignMode.Rounded:
+            case TabViewDesignMode.Rounded:
                 // Segmented control / pill tabs: muted container, solid tinted fill on selected
                 headerBackground    = ColorScheme.SurfaceContainerHigh;
                 headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)60 : (byte)44);
@@ -1864,7 +1982,7 @@ public class WindowPageControl : ElementBase
                 inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)162 : (byte)148) : ForeColor.WithAlpha(110);
                 break;
 
-            case WindowPageTabDesignMode.RoundedCompact:
+            case TabViewDesignMode.RoundedCompact:
                 // bg-muted container, bg-background card on selected, crisp border
                 headerBackground    = ColorScheme.SurfaceVariant;
                 headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)48 : (byte)36);
@@ -1877,7 +1995,7 @@ public class WindowPageControl : ElementBase
                 inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)158 : (byte)142) : ForeColor.WithAlpha(110);
                 break;
 
-            case WindowPageTabDesignMode.Pill:
+            case TabViewDesignMode.Pill:
                 // GitHub/Vercel pill nav: filled Primary pill on selected, no container background
                 headerBackground    = SKColors.Transparent;
                 headerBorderColor   = SKColors.Transparent;
@@ -1890,7 +2008,7 @@ public class WindowPageControl : ElementBase
                 inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)160 : (byte)144) : ForeColor.WithAlpha(110);
                 break;
 
-            case WindowPageTabDesignMode.Outlined:
+            case TabViewDesignMode.Outlined:
                 // Classic 3-sided tab: open bottom, selected sits on the bottom divider
                 headerBackground    = SKColors.Transparent;
                 headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)72 : (byte)52);
@@ -1903,8 +2021,8 @@ public class WindowPageControl : ElementBase
                 inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)160 : (byte)144) : ForeColor.WithAlpha(110);
                 break;
 
-            case WindowPageTabDesignMode.Minimal:
-                // Linear/Raycast sidebar: no chrome, Primary left-accent bar on selected
+            case TabViewDesignMode.Minimal:
+                // Linear/Raycast sidebar: minimal surface, Primary left-accent bar on selected
                 headerBackground    = SKColors.Transparent;
                 headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)38 : (byte)28);
                 inactiveBackground  = SKColors.Transparent;
@@ -1916,9 +2034,33 @@ public class WindowPageControl : ElementBase
                 inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)155 : (byte)138) : ForeColor.WithAlpha(110);
                 break;
 
-            case WindowPageTabDesignMode.Chromed:
+            case TabViewDesignMode.Fluent:
+                headerBackground    = (isDark ? ColorScheme.SurfaceContainerHigh : ColorScheme.SurfaceContainer).WithAlpha(isDark ? (byte)184 : (byte)218);
+                headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)44 : (byte)34);
+                inactiveBackground  = SKColors.Transparent;
+                hoverBackground     = ColorScheme.Primary.WithAlpha(isDark ? (byte)22 : (byte)14);
+                selectedBackground  = (isDark ? ColorScheme.SurfaceContainerHigh : ColorScheme.Surface).WithAlpha(isDark ? (byte)232 : (byte)242);
+                inactiveBorderColor = SKColors.Transparent;
+                selectedBorderColor = SKColors.White.WithAlpha(isDark ? (byte)36 : (byte)144);
+                activeTextColor     = Enabled ? ForeColor : ForeColor.WithAlpha(170);
+                inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)166 : (byte)150) : ForeColor.WithAlpha(110);
+                break;
+
+            case TabViewDesignMode.MacOS:
+                headerBackground    = ColorScheme.SurfaceContainer.WithAlpha(isDark ? (byte)150 : (byte)178);
+                headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)54 : (byte)42);
+                inactiveBackground  = SKColors.Transparent;
+                hoverBackground     = SKColors.White.WithAlpha(isDark ? (byte)16 : (byte)70);
+                selectedBackground  = SKColors.White.WithAlpha(isDark ? (byte)34 : (byte)232);
+                inactiveBorderColor = SKColors.Transparent;
+                selectedBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)70 : (byte)46);
+                activeTextColor     = Enabled ? ForeColor : ForeColor.WithAlpha(170);
+                inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)164 : (byte)146) : ForeColor.WithAlpha(110);
+                break;
+
+            case TabViewDesignMode.Chromed:
             default:
-                // Browser chrome tabs: surface strip, elevated selected card, divider line
+                // Browser-style tabs: surface strip, elevated selected card, divider line
                 headerBackground    = ColorScheme.SurfaceContainer;
                 headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)96 : (byte)70);
                 inactiveBackground  = SKColors.Transparent;
@@ -1930,6 +2072,18 @@ public class WindowPageControl : ElementBase
                 inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)168 : (byte)152) : ForeColor.WithAlpha(110);
                 break;
         }
+
+        ApplyCustomTabPalette(
+            ref headerBackground,
+            ref headerBorderColor,
+            ref inactiveBackground,
+            ref hoverBackground,
+            ref selectedBackground,
+            ref inactiveBorderColor,
+            ref selectedBorderColor,
+            ref activeTextColor,
+            ref inactiveTextColor);
+
         var shouldAnimateSelection = _tabSelectionAnimation.IsAnimating() &&
                                      _previousSelectedIndex >= 0 &&
                                      _previousSelectedIndex < _tabRects.Count &&
@@ -1944,16 +2098,23 @@ public class WindowPageControl : ElementBase
 
             if (shouldAnimateSelection)
             {
-                animatedSelectionRect = WindowPageTabGeometry.InterpolateRect(
+                animatedSelectionRect = TabViewTabGeometry.InterpolateRect(
                     _tabRects[_previousSelectedIndex],
                     _tabRects[_selectedIndex],
                     Math.Clamp((float)_tabSelectionAnimation.GetProgress(), 0f, 1f));
             }
         }
 
+        var activeTabsRect = SKRect.Empty;
+        for (var i = 0; i < _tabRects.Count; i++)
+        {
+            if (activeTabsRect.IsEmpty) activeTabsRect = _tabRects[i];
+            else activeTabsRect.Union(_tabRects[i]);
+        }
+
         DrawTabHeaderSurface(canvas, headerRect,
             _tabStripBackground == SKColors.Transparent ? headerBackground : _tabStripBackground,
-            headerBorderColor);
+            headerBorderColor, activeTabsRect);
         DrawTabStripResizer(canvas);
 
         var clippedTabContent = UsesVerticalTabLayout;
@@ -2014,6 +2175,8 @@ public class WindowPageControl : ElementBase
             _tabDodgeAnimOffsets = Array.Empty<float>();
         }
 
+        EnsureTabHoverState(_tabRects.Count);
+
         for (var tabIndex = 0; tabIndex < _tabRects.Count; tabIndex++)
         {
             if (_isDraggingTab && tabIndex == _dragTabSourceIndex)
@@ -2025,16 +2188,17 @@ public class WindowPageControl : ElementBase
 
             var isSelected = tabIndex == _selectedIndex && !shouldAnimateSelection;
             var isHovered = tabIndex == _hoveredTabIndex;
+            var hoverProgress = GetTabHoverProgress(tabIndex, isSelected);
             DrawTabBackground(canvas, rect, isSelected, isHovered,
                 inactiveBackground, selectedBackground, hoverBackground,
-                inactiveBorderColor, selectedBorderColor, indicatorHeight);
+                inactiveBorderColor, selectedBorderColor, indicatorHeight, hoverProgress);
         }
 
         if (animatedSelectionRect.Width > 0f && shouldAnimateSelection)
         {
             DrawTabBackground(canvas, animatedSelectionRect, true, false,
                 inactiveBackground, selectedBackground, hoverBackground,
-                inactiveBorderColor, selectedBorderColor, indicatorHeight);
+                inactiveBorderColor, selectedBorderColor, indicatorHeight, 0f);
         }
 
         for (var tabIndex = 0; tabIndex < _tabRects.Count; tabIndex++)
@@ -2048,6 +2212,7 @@ public class WindowPageControl : ElementBase
 
             var rect = _tabRects[tabIndex];
             var isSelected = tabIndex == _selectedIndex;
+            var hoverProgress = GetTabHoverProgress(tabIndex, isSelected);
             var iconRect = SKRect.Empty;
             var closeButtonRect = tabIndex < _tabCloseButtonRects.Count ? _tabCloseButtonRects[tabIndex] : SKRect.Empty;
             if (_isDraggingTab && tabIndex < _tabDodgeAnimOffsets.Length)
@@ -2058,24 +2223,23 @@ public class WindowPageControl : ElementBase
                     closeButtonRect = OffsetTabRectAlongPrimaryAxis(closeButtonRect, shift);
             }
 
-            if (ShouldDrawTabIcons && page.Image != null)
-            {
-                iconRect = SKRect.Create(
-                    rect.Left + horizontalPadding,
-                    rect.MidY - iconSize / 2f,
-                    iconSize,
-                    iconSize);
-
-                canvas.DrawImage(page.Image, iconRect);
-            }
-
             if (closeButtonRect.Width > 0)
                 DrawTabCloseButton(canvas, closeButtonRect, tabIndex == _hoveredTabCloseIndex, activeTextColor);
 
-            var textRect = WindowPageTabGeometry.CreateTextRect(rect, horizontalPadding, iconRect, iconSpacing,
-                closeButtonRect, closeButtonSpacing + (tabGap > 0f ? tabGap * 0.5f : 0f));
+            var hasTabIcon = ShouldDrawTabIcons && page.Image != null;
+            var tabTrailingReserve = closeButtonRect.Width > 0f ? closeButtonRect.Width + closeButtonSpacing : 0f;
+            var innerVertPad = UsesVerticalTabLayout
+                ? GetTabVerticalContentPadding() * 2f
+                : GetTabVerticalContentPadding();
+            SKRect textRect;
+            (iconRect, textRect) = ComputeTabContentRects(rect, page.Text, hasTabIcon,
+                horizontalPadding, innerVertPad, iconSize, iconSpacing, tabTrailingReserve);
 
-            _tabTextPaint.Color = isSelected ? activeTextColor : inactiveTextColor;
+            if (hasTabIcon)
+                canvas.DrawImage(page.Image, iconRect);
+
+            _tabTextPaint.Color = ResolveCustomTabTextColor(isSelected, hoverProgress,
+                activeTextColor, inactiveTextColor, inactiveBackground, hoverBackground, selectedBackground);
             TextRenderer.DrawText(canvas, page.Text ?? string.Empty, textRect, _tabTextPaint, _tabFont, TextAlign, true, false);
         }
 
@@ -2096,24 +2260,21 @@ public class WindowPageControl : ElementBase
 
             DrawTabBackground(canvas, ghostRect, true, false,
                 inactiveBackground, selectedBackground, hoverBackground,
-                inactiveBorderColor, selectedBorderColor, indicatorHeight);
+                inactiveBorderColor, selectedBorderColor, indicatorHeight, 0f);
 
             var ghostPage = GetPageAt(_dragTabSourceIndex);
             if (ghostPage != null)
             {
-                var ghostIconRect = SKRect.Empty;
-                if (ShouldDrawTabIcons && ghostPage.Image != null)
-                {
-                    ghostIconRect = SKRect.Create(
-                        ghostRect.Left + horizontalPadding,
-                        ghostRect.MidY - iconSize / 2f,
-                        iconSize, iconSize);
-                    canvas.DrawImage(ghostPage.Image, ghostIconRect);
-                }
+                var hasGhostIcon = ShouldDrawTabIcons && ghostPage.Image != null;
+                (var ghostIconRect, var ghostTextRect) = ComputeTabContentRects(
+                    ghostRect, ghostPage.Text, hasGhostIcon,
+                    horizontalPadding, GetTabVerticalContentPadding(), iconSize, iconSpacing, 0f);
 
-                var textRect = WindowPageTabGeometry.CreateTextRect(ghostRect, horizontalPadding, ghostIconRect, iconSpacing, SKRect.Empty, 0f);
+                if (hasGhostIcon)
+                    canvas.DrawImage(ghostPage.Image, ghostIconRect);
+
                 _tabTextPaint.Color = activeTextColor;
-                TextRenderer.DrawText(canvas, ghostPage.Text ?? string.Empty, textRect, _tabTextPaint, _tabFont, TextAlign, true, false);
+                TextRenderer.DrawText(canvas, ghostPage.Text ?? string.Empty, ghostTextRect, _tabTextPaint, _tabFont, TextAlign, true, false);
             }
 
             canvas.RestoreToCount(layerSaved);
@@ -2123,99 +2284,183 @@ public class WindowPageControl : ElementBase
             canvas.RestoreToCount(clippedTabContentSave);
     }
 
-    internal void HandleWindowChromeSelectionChanged(int previousSelectedIndex)
+    internal void HandleTitleBarSelectionChanged(int previousSelectedIndex)
     {
-        StartWindowChromeSelectionAnimation(previousSelectedIndex, _selectedIndex);
+        StartTitleBarSelectionAnimation(previousSelectedIndex, _selectedIndex);
     }
 
-    internal void InvalidateWindowChromeLayout()
+    internal void InvalidateTitleBarLayout()
     {
-        _hasWindowChromeLayoutContext = false;
-        _windowChromeLayoutPageCount = -1;
-        _windowChromeTabRects.Clear();
-        _windowChromeTabWidthBuffer.Clear();
-        _windowChromeCloseButtonRect = SKRect.Empty;
-        _windowChromeNewTabButtonRect = SKRect.Empty;
+        _hasTitleBarLayoutContext = false;
+        _titleBarLayoutPageCount = -1;
+        _titleBarTabRects.Clear();
+        _titleBarTabWidthBuffer.Clear();
+        _titleBarCloseButtonRect = SKRect.Empty;
+        _titleBarNewTabButtonRect = SKRect.Empty;
     }
 
-    internal void DrawWindowChromeTabs(SKCanvas canvas, WindowPageChromeLayoutContext context, SKColor foreColor, SKColor hoverColor, SKColor titleColor)
+    internal void DrawTitleBarTabs(SKCanvas canvas, TabViewTitleBarLayoutContext context, SKColor foreColor, SKColor hoverColor, SKColor titleColor)
     {
-        if (TabMode != WindowPageTabMode.WindowChrome || Count <= 0)
+        if (TabMode != TabViewMode.TitleBar || Count <= 0)
             return;
 
-        UpdateWindowChromeLayout(context);
-        UpdateWindowChromeAuxiliaryRects();
+        UpdateTitleBarLayout(context);
+        UpdateTitleBarAuxiliaryRects();
 
-        DrawWindowChromeTabDividers(canvas, context, titleColor);
+        DrawTitleBarTabDividers(canvas, context, titleColor);
 
-        if (_selectedIndex < 0 || _selectedIndex >= _windowChromeTabRects.Count)
+        var tabGap = ResolvedTabGap * ScaleFactor;
+
+        float ComputeDragTabTarget(int tIdx)
+        {
+            var srcSlotWidth = GetTabPrimaryLength(_titleBarTabRects[_dragTabSourceIndex]) + tabGap;
+            var adjIns = _dragTabInsertIndex > _dragTabSourceIndex ? _dragTabInsertIndex - 1 : _dragTabInsertIndex;
+            var j = tIdx < _dragTabSourceIndex ? tIdx : tIdx - 1;
+            return (tIdx > _dragTabSourceIndex ? -srcSlotWidth : 0f) + (j >= adjIns ? srcSlotWidth : 0f);
+        }
+
+        if (_isDraggingTab && _dragTabSourceIndex >= 0)
+        {
+            if (_tabDodgeAnimOffsets.Length != _titleBarTabRects.Count)
+            {
+                var prev = _tabDodgeAnimOffsets;
+                _tabDodgeAnimOffsets = new float[_titleBarTabRects.Count];
+                for (var k = 0; k < Math.Min(prev.Length, _tabDodgeAnimOffsets.Length); k++)
+                    _tabDodgeAnimOffsets[k] = prev[k];
+            }
+
+            const float LerpFactor = 0.3f;
+            const float SettleTolerance = 0.5f;
+            var needsMoreFrames = false;
+
+            for (var k = 0; k < _tabDodgeAnimOffsets.Length; k++)
+            {
+                if (k == _dragTabSourceIndex) { _tabDodgeAnimOffsets[k] = 0f; continue; }
+                var target = _dragTabInsertIndex >= 0 ? ComputeDragTabTarget(k) : 0f;
+                var delta = target - _tabDodgeAnimOffsets[k];
+                if (MathF.Abs(delta) > SettleTolerance)
+                {
+                    _tabDodgeAnimOffsets[k] += delta * LerpFactor;
+                    needsMoreFrames = true;
+                }
+                else _tabDodgeAnimOffsets[k] = target;
+            }
+            if (needsMoreFrames) Invalidate();
+        }
+        else
+        {
+            _tabDodgeAnimOffsets = Array.Empty<float>();
+        }
+
+        if (_selectedIndex < 0 || _selectedIndex >= _titleBarTabRects.Count)
             return;
 
         var effectiveHoverColor = titleColor != SKColor.Empty && !titleColor.IsDark()
             ? foreColor.WithAlpha(60)
             : hoverColor;
+        EnsureTitleBarTabHoverState(_titleBarTabRects.Count);
+        var animOffset = _isDraggingTab && _selectedIndex < _tabDodgeAnimOffsets.Length ? _tabDodgeAnimOffsets[_selectedIndex] : 0f;
+        var selectedRect = OffsetTabRectAlongPrimaryAxis(GetTitleBarSelectedVisualRect(), animOffset);
 
-        if (_hoveredWindowChromeTabIndex >= 0 && _hoveredWindowChromeTabIndex < _windowChromeTabRects.Count && _hoveredWindowChromeTabIndex != _selectedIndex)
-            DrawWindowChromeTabSurface(canvas, _windowChromeTabRects[_hoveredWindowChromeTabIndex], false, true, effectiveHoverColor, foreColor, titleColor);
+        for (var hoverIndex = 0; hoverIndex < _titleBarTabRects.Count; hoverIndex++)
+        {
+            if (hoverIndex == _selectedIndex || (_isDraggingTab && hoverIndex == _dragTabSourceIndex))
+                continue;
 
-        DrawWindowChromeTabSurface(canvas, GetWindowChromeSelectedVisualRect(), true, false, effectiveHoverColor, foreColor, titleColor);
-        PrepareTabFont((DrawTabIcons ? WindowChromeTabFontSizeWithIcon : WindowChromeTabFontSize).Topx(this));
+            var hoverProgress = GetTitleBarTabHoverProgress(hoverIndex, false);
+            if (hoverProgress <= 0.001f)
+                continue;
 
-        for (var pageIndex = 0; pageIndex < _windowChromeTabRects.Count; pageIndex++)
+            var hoveredAnimOffset = _isDraggingTab && hoverIndex < _tabDodgeAnimOffsets.Length ? _tabDodgeAnimOffsets[hoverIndex] : 0f;
+            DrawTitleBarTabSurface(canvas, OffsetTabRectAlongPrimaryAxis(_titleBarTabRects[hoverIndex], hoveredAnimOffset),
+                false, true, hoverProgress, effectiveHoverColor, foreColor, titleColor);
+        }
+
+        if (!_isDraggingTab || _selectedIndex != _dragTabSourceIndex)
+            DrawTitleBarTabSurface(canvas, selectedRect, true, false, 0f, effectiveHoverColor, foreColor, titleColor);
+        PrepareTabFont((DrawTabIcons ? TitleBarTabFontSizeWithIcon : TitleBarTabFontSize).Topx(this));
+
+        for (var pageIndex = 0; pageIndex < _titleBarTabRects.Count; pageIndex++)
         {
             var page = GetPageAt(pageIndex);
             if (page == null)
                 continue;
 
-            var rect = _windowChromeTabRects[pageIndex];
+            if (_isDraggingTab && pageIndex == _dragTabSourceIndex)
+                continue;
+
+            var rect = _titleBarTabRects[pageIndex];
+            if (_isDraggingTab && pageIndex < _tabDodgeAnimOffsets.Length)
+                rect = OffsetTabRectAlongPrimaryAxis(rect, _tabDodgeAnimOffsets[pageIndex]);
             var iconRect = SKRect.Empty;
             var isSelected = pageIndex == _selectedIndex;
-            var isHovered = pageIndex == _hoveredWindowChromeTabIndex;
+            var isHovered = pageIndex == _hoveredTitleBarTabIndex;
+            var hoverProgress = GetTitleBarTabHoverProgress(pageIndex, isSelected);
 
-            _tabTextPaint.Color = GetWindowChromeTextColor(isSelected, isHovered, foreColor);
+            _tabTextPaint.Color = GetTitleBarTextColor(isSelected, isHovered, hoverProgress, foreColor);
 
-            if (DrawTabIcons && page.Image != null)
-            {
-                var iconSize = WindowChromeTabIconSize * ScaleFactor;
-                iconRect = SKRect.Create(
-                    rect.Left + WindowChromeTabHorizontalPadding * ScaleFactor,
-                    context.CenterY - iconSize / 2f,
-                    iconSize,
-                    iconSize);
+            var titleBarPadding     = GetTitleBarTabHorizontalContentPadding();
+            var titleBarIcon    = TitleBarTabIconSize * ScaleFactor;
+            var titleBarIconSpacing = TitleBarTabIconSpacing * ScaleFactor;
+            var hasTitleBarIcon = DrawTabIcons && page.Image != null;
+            var titleBarTrailingReserve = pageIndex == _selectedIndex && _titleBarCloseButtonRect.Width > 0f
+                ? _titleBarCloseButtonRect.Width + titleBarIconSpacing : 0f;
+
+            var titleBarVerticalPadding = GetTitleBarTabVerticalContentPadding();
+            (iconRect, var textRect) = ComputeTabContentRects(rect, page.Text, hasTitleBarIcon,
+                titleBarPadding, titleBarVerticalPadding, titleBarIcon, titleBarIconSpacing, titleBarTrailingReserve);
+
+            if (hasTitleBarIcon)
                 canvas.DrawImage(page.Image, iconRect);
-            }
-
-            var trailingRect = pageIndex == _selectedIndex ? _windowChromeCloseButtonRect : SKRect.Empty;
-            var textRect = WindowPageTabGeometry.CreateTextRect(
-                rect,
-                WindowChromeTabHorizontalPadding * ScaleFactor,
-                iconRect,
-                WindowChromeTabIconSpacing * ScaleFactor,
-                trailingRect,
-                Math.Max(6f * ScaleFactor, ResolvedTabGap * ScaleFactor * 0.5f));
 
             TextRenderer.DrawText(canvas, page.Text ?? string.Empty, textRect, _tabTextPaint, _tabFont,
                 TextAlign, true, false);
         }
 
-        if (_windowChromeCloseButtonRect.Width > 0)
-            DrawWindowChromeCloseButton(canvas, _windowChromeCloseButtonRect, _hoveredWindowChromeCloseButton, foreColor, effectiveHoverColor);
+        if (_isDraggingTab && _dragTabSourceIndex >= 0 && _dragTabSourceIndex < _titleBarTabRects.Count)
+        {
+            var srcRect  = _titleBarTabRects[_dragTabSourceIndex];
+            var ghostLeft = Math.Clamp(
+                _dragTabCurrentX - _dragTabGrabX,
+                context.StartX,
+                context.StartX + context.AvailableWidth - GetTabPrimaryLength(srcRect));
+            var ghostRect = CreatePrimaryAxisRect(srcRect, ghostLeft);
 
-        if (_windowChromeNewTabButtonRect.Width > 0)
-            DrawWindowChromeNewTabButton(canvas, _windowChromeNewTabButtonRect, _hoveredWindowChromeNewTabButton, foreColor, effectiveHoverColor);
+            using var ghostLayerPaint = new SKPaint { Color = new SKColor(255, 255, 255, 210) };
+            var layerSaved = canvas.SaveLayer(ghostLayerPaint);
+
+            DrawTitleBarTabSurface(canvas, ghostRect, true, false, 0f, effectiveHoverColor, foreColor, titleColor);
+            
+            var ghostPage = GetPageAt(_dragTabSourceIndex);
+            if (ghostPage != null) {
+                var hasGhostIcon = DrawTabIcons && ghostPage.Image != null;
+                var titleBarPadding = GetTitleBarTabHorizontalContentPadding();
+                (var ghostIconRect, var ghostTextRect) = ComputeTabContentRects(
+                    ghostRect, ghostPage.Text, hasGhostIcon, titleBarPadding, GetTitleBarTabVerticalContentPadding(), TitleBarTabIconSize * ScaleFactor, TitleBarTabIconSpacing * ScaleFactor, 0f);
+                if (hasGhostIcon) canvas.DrawImage(ghostPage.Image, ghostIconRect);
+                TextRenderer.DrawText(canvas, ghostPage.Text ?? string.Empty, ghostTextRect, _tabTextPaint, _tabFont, TextAlign, true, false);
+            }
+            canvas.RestoreToCount(layerSaved);
+        }
+
+        if (_titleBarCloseButtonRect.Width > 0)
+            DrawTitleBarCloseButton(canvas, _titleBarCloseButtonRect, _hoveredTitleBarCloseButton, foreColor, effectiveHoverColor);
+
+        if (_titleBarNewTabButtonRect.Width > 0)
+            DrawTitleBarNewTabButton(canvas, _titleBarNewTabButtonRect, _hoveredTitleBarNewTabButton, foreColor, effectiveHoverColor);
     }
 
-    internal bool TryGetWindowChromeTabIndexAtPoint(SKPoint point, WindowPageChromeLayoutContext context, out int tabIndex)
+    internal bool TryGetTitleBarTabIndexAtPoint(SKPoint point, TabViewTitleBarLayoutContext context, out int tabIndex)
     {
         tabIndex = -1;
 
-        if (TabMode != WindowPageTabMode.WindowChrome || Count <= 0)
+        if (TabMode != TabViewMode.TitleBar || Count <= 0)
             return false;
 
-        UpdateWindowChromeLayout(context);
-        for (var i = 0; i < _windowChromeTabRects.Count; i++)
+        UpdateTitleBarLayout(context);
+        for (var i = 0; i < _titleBarTabRects.Count; i++)
         {
-            if (_windowChromeTabRects[i].Contains(point))
+            if (_titleBarTabRects[i].Contains(point))
             {
                 tabIndex = i;
                 return true;
@@ -2225,105 +2470,216 @@ public class WindowPageControl : ElementBase
         return false;
     }
 
-    internal bool IsPointOverWindowChromeCloseButton(SKPoint point, WindowPageChromeLayoutContext context)
+    internal bool IsPointOverTitleBarCloseButton(SKPoint point, TabViewTitleBarLayoutContext context)
     {
-        if (TabMode != WindowPageTabMode.WindowChrome || !TabCloseButton)
+        if (TabMode != TabViewMode.TitleBar || !TabCloseButton)
             return false;
 
-        UpdateWindowChromeLayout(context);
-        UpdateWindowChromeAuxiliaryRects();
-        return _windowChromeCloseButtonRect.Contains(point);
+        UpdateTitleBarLayout(context);
+        UpdateTitleBarAuxiliaryRects();
+        return _titleBarCloseButtonRect.Contains(point);
     }
 
-    internal bool IsPointOverWindowChromeNewTabButton(SKPoint point, WindowPageChromeLayoutContext context)
+    internal bool IsPointOverTitleBarNewTabButton(SKPoint point, TabViewTitleBarLayoutContext context)
     {
-        if (TabMode != WindowPageTabMode.WindowChrome || !NewTabButton)
+        if (TabMode != TabViewMode.TitleBar || !NewTabButton)
             return false;
 
-        UpdateWindowChromeLayout(context);
-        UpdateWindowChromeAuxiliaryRects();
-        return _windowChromeNewTabButtonRect.Contains(point);
+        UpdateTitleBarLayout(context);
+        UpdateTitleBarAuxiliaryRects();
+        return _titleBarNewTabButtonRect.Contains(point);
     }
 
-    internal bool UpdateWindowChromeHoverState(SKPoint point, WindowPageChromeLayoutContext context)
+    internal bool UpdateTitleBarHoverState(SKPoint point, TabViewTitleBarLayoutContext context)
     {
-        if (TabMode != WindowPageTabMode.WindowChrome || Count <= 0)
-            return ResetWindowChromeHoverState();
+        if (TabMode != TabViewMode.TitleBar || Count <= 0)
+            return ResetTitleBarHoverState();
 
-        UpdateWindowChromeLayout(context);
-        UpdateWindowChromeAuxiliaryRects();
+        UpdateTitleBarLayout(context);
+        UpdateTitleBarAuxiliaryRects();
 
-        var hoveredTabIndex = TryGetWindowChromeTabIndexAtPoint(point, context, out var tabIndex) ? tabIndex : -1;
-        var hoveredCloseButton = _windowChromeCloseButtonRect.Contains(point);
-        var hoveredNewTabButton = _windowChromeNewTabButtonRect.Contains(point);
+        var hoveredTabIndex = TryGetTitleBarTabIndexAtPoint(point, context, out var tabIndex) ? tabIndex : -1;
+        var hoveredCloseButton = _titleBarCloseButtonRect.Contains(point);
+        var hoveredNewTabButton = _titleBarNewTabButtonRect.Contains(point);
 
-        if (_hoveredWindowChromeTabIndex == hoveredTabIndex &&
-            _hoveredWindowChromeCloseButton == hoveredCloseButton &&
-            _hoveredWindowChromeNewTabButton == hoveredNewTabButton)
+        if (_hoveredTitleBarTabIndex == hoveredTabIndex &&
+            _hoveredTitleBarCloseButton == hoveredCloseButton &&
+            _hoveredTitleBarNewTabButton == hoveredNewTabButton)
             return false;
 
-        _hoveredWindowChromeTabIndex = hoveredTabIndex;
-
-        if (_hoveredWindowChromeCloseButton != hoveredCloseButton)
+        if (_hoveredTitleBarTabIndex != hoveredTabIndex)
         {
-            _hoveredWindowChromeCloseButton = hoveredCloseButton;
-            _windowChromeTabCloseHoverAnimation.StartNewAnimation(hoveredCloseButton ? AnimationDirection.In : AnimationDirection.Out);
+            _hoveredTitleBarTabIndex = hoveredTabIndex;
+            SetTitleBarTabHoverTarget(_titleBarTabRects.Count, hoveredTabIndex);
         }
 
-        if (_hoveredWindowChromeNewTabButton != hoveredNewTabButton)
+        if (_hoveredTitleBarCloseButton != hoveredCloseButton)
         {
-            _hoveredWindowChromeNewTabButton = hoveredNewTabButton;
-            _windowChromeNewTabHoverAnimation.StartNewAnimation(hoveredNewTabButton ? AnimationDirection.In : AnimationDirection.Out);
+            _hoveredTitleBarCloseButton = hoveredCloseButton;
+            _titleBarTabCloseHoverAnimation.StartNewAnimation(hoveredCloseButton ? AnimationDirection.In : AnimationDirection.Out);
+        }
+
+        if (_hoveredTitleBarNewTabButton != hoveredNewTabButton)
+        {
+            _hoveredTitleBarNewTabButton = hoveredNewTabButton;
+            _titleBarNewTabHoverAnimation.StartNewAnimation(hoveredNewTabButton ? AnimationDirection.In : AnimationDirection.Out);
         }
 
         Invalidate();
         return true;
     }
 
-    internal bool ResetWindowChromeHoverState()
+    internal bool ProcessTitleBarMouseDown(MouseEventArgs e, TabViewTitleBarLayoutContext context)
     {
-        if (_hoveredWindowChromeTabIndex < 0 && !_hoveredWindowChromeCloseButton && !_hoveredWindowChromeNewTabButton)
+        if (TabMode != TabViewMode.TitleBar || Count <= 0)
             return false;
 
-        _hoveredWindowChromeTabIndex = -1;
+        UpdateTitleBarLayout(context);
 
-        if (_hoveredWindowChromeCloseButton)
+        if (e.Button == MouseButtons.Left)
         {
-            _hoveredWindowChromeCloseButton = false;
-            _windowChromeTabCloseHoverAnimation.StartNewAnimation(AnimationDirection.Out);
+            if (_titleBarNewTabButtonRect.Contains(e.Location))
+            {
+                RaiseNewTabButtonClick();
+                return true;
+            }
+
+            if (_titleBarCloseButtonRect.Contains(e.Location))
+            {
+                return true; // Handle in mouse up
+            }
+
+            if (TryGetTitleBarTabIndexAtPoint(e.Location, context, out var tabIndex))
+            {
+                SelectedIndex = tabIndex;
+                if (_allowTabDrag)
+                {
+                    _dragTabSourceIndex = tabIndex;
+                    _dragTabGrabX = tabIndex < _titleBarTabRects.Count
+                        ? GetTabPrimaryCoordinate(e.Location) - GetTabPrimaryStart(_titleBarTabRects[tabIndex])
+                        : 0f;
+                    _dragTabCurrentX = GetTabPrimaryCoordinate(e.Location);
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    internal bool ProcessTitleBarMouseMove(MouseEventArgs e, TabViewTitleBarLayoutContext context)
+    {
+        if (TabMode != TabViewMode.TitleBar || Count <= 0)
+            return false;
+
+        if (_dragTabSourceIndex >= 0)
+        {
+            var pointerPrimary = GetTabPrimaryCoordinate(e.Location);
+            var grabOriginX = _dragTabSourceIndex < _titleBarTabRects.Count
+                ? GetTabPrimaryStart(_titleBarTabRects[_dragTabSourceIndex]) + _dragTabGrabX
+                : _dragTabCurrentX;
+
+            if (!_isDraggingTab && Math.Abs(pointerPrimary - grabOriginX) > TabDragThreshold * ScaleFactor)
+                _isDraggingTab = true;
+
+            if (_isDraggingTab)
+            {
+                _dragTabCurrentX = pointerPrimary;
+                _dragTabInsertIndex = ComputeTitleBarDragInsertIndex(pointerPrimary);
+                Invalidate();
+            }
+            return true;
         }
 
-        if (_hoveredWindowChromeNewTabButton)
+        return false;
+    }
+
+    private int ComputeTitleBarDragInsertIndex(float pointerPrimary)
+    {
+        for (var i = 0; i < _titleBarTabRects.Count; i++)
         {
-            _hoveredWindowChromeNewTabButton = false;
-            _windowChromeNewTabHoverAnimation.StartNewAnimation(AnimationDirection.Out);
+            if (i == _dragTabSourceIndex) continue;
+            var tabMid = GetTabPrimaryMidpoint(_titleBarTabRects[i]);
+            if (pointerPrimary < tabMid)
+                return i;
+        }
+        return Count;
+    }
+
+    internal bool ProcessTitleBarMouseUp(MouseEventArgs e, TabViewTitleBarLayoutContext context)
+    {
+        if (TabMode != TabViewMode.TitleBar || Count <= 0)
+            return false;
+
+        if (_isDraggingTab && _dragTabSourceIndex >= 0 && _dragTabInsertIndex >= 0)
+            CommitTabDrag(_dragTabSourceIndex, _dragTabInsertIndex);
+
+        var handled = _dragTabSourceIndex >= 0 || _isDraggingTab;
+
+        _isDraggingTab = false;
+        _dragTabSourceIndex = -1;
+        _dragTabInsertIndex = -1;
+        _tabDodgeAnimOffsets = Array.Empty<float>();
+        Invalidate();
+
+        if (!handled && e.Button == MouseButtons.Left && _titleBarCloseButtonRect.Contains(e.Location) && _selectedIndex >= 0)
+        {
+            RaiseTabCloseButtonClick(_selectedIndex);
+            handled = true;
+        }
+
+        return handled;
+    }
+
+    internal bool ResetTitleBarHoverState()
+    {
+        if (_hoveredTitleBarTabIndex < 0 && !_hoveredTitleBarCloseButton && !_hoveredTitleBarNewTabButton)
+            return false;
+
+        _hoveredTitleBarTabIndex = -1;
+        SetTitleBarTabHoverTarget(_titleBarTabRects.Count, -1);
+
+        if (_hoveredTitleBarCloseButton)
+        {
+            _hoveredTitleBarCloseButton = false;
+            _titleBarTabCloseHoverAnimation.StartNewAnimation(AnimationDirection.Out);
+        }
+
+        if (_hoveredTitleBarNewTabButton)
+        {
+            _hoveredTitleBarNewTabButton = false;
+            _titleBarNewTabHoverAnimation.StartNewAnimation(AnimationDirection.Out);
         }
 
         Invalidate();
         return true;
     }
 
-    private void UpdateWindowChromeLayout(WindowPageChromeLayoutContext context)
+    private void UpdateTitleBarLayout(TabViewTitleBarLayoutContext context)
     {
-        if (TabMode != WindowPageTabMode.WindowChrome || Count <= 0)
+        if (TabMode != TabViewMode.TitleBar || Count <= 0)
         {
-            InvalidateWindowChromeLayout();
+            InvalidateTitleBarLayout();
             return;
         }
 
-        if (_hasWindowChromeLayoutContext && _lastWindowChromeLayoutContext == context && _windowChromeLayoutPageCount == Count)
+        if (_hasTitleBarLayoutContext && _lastTitleBarLayoutContext == context && _titleBarLayoutPageCount == Count)
             return;
 
-        _windowChromeTabWidthBuffer.Clear();
-        PrepareTabFont((DrawTabIcons ? WindowChromeTabFontSizeWithIcon : WindowChromeTabFontSize).Topx(this));
+        _titleBarTabWidthBuffer.Clear();
+        PrepareTabFont((DrawTabIcons ? TitleBarTabFontSizeWithIcon : TitleBarTabFontSize).Topx(this));
 
-        var horizontalPadding = WindowChromeTabHorizontalPadding * ScaleFactor;
-        var iconAllowance = (WindowChromeTabIconSize + WindowChromeTabIconSpacing) * ScaleFactor;
-        var closeButtonAllowance = TabCloseButton ? (WindowChromeTabCloseButtonSize + WindowChromeTabIconSpacing) * ScaleFactor : 0f;
+        var horizontalPadding = GetTitleBarTabHorizontalContentPadding();
+        var titleBarIconSize    = TitleBarTabIconSize    * ScaleFactor;
+        var titleBarIconSpacing = TitleBarTabIconSpacing * ScaleFactor;
+        var closeButtonAllowance = TabCloseButton ? (TitleBarTabCloseButtonSize + TitleBarTabIconSpacing) * ScaleFactor : 0f;
         var newTabButtonSize = 24f * ScaleFactor;
         var newTabButtonGap = Math.Max(ResolvedTabGap * ScaleFactor, newTabButtonSize / 2f);
         var availableWidth = Math.Max(0f, context.AvailableWidth - (NewTabButton ? newTabButtonSize + newTabButtonGap : 0f));
-        var maxTabWidth = Math.Max(0f, context.MaxTabWidth);
+        var customMetrics = _customTabStyle.HasValue ? _customTabStyle.Value.Metrics : default;
+        var maxTabWidth = customMetrics.MaxWidth.HasValue
+            ? Math.Max(0f, customMetrics.MaxWidth.Value * ScaleFactor)
+            : Math.Max(0f, context.MaxTabWidth);
+        var minTabWidth = Math.Max(0f, (customMetrics.MinWidth ?? 0f) * ScaleFactor);
 
         for (var pageIndex = 0; pageIndex < Count; pageIndex++)
         {
@@ -2331,83 +2687,136 @@ public class WindowPageControl : ElementBase
             if (page == null)
                 continue;
 
-            var desiredWidth = WindowPageTabGeometry.MeasureDesiredTabWidth(
+            var desiredWidth = TabViewTabGeometry.MeasureDesiredTabWidth(
                 page,
                 _tabFont,
                 horizontalPadding,
-                iconAllowance,
+                titleBarIconSize,
+                titleBarIconSpacing,
                 closeButtonAllowance,
-                0f,
+                minTabWidth,
                 maxTabWidth,
                 DrawTabIcons,
-                TabCloseButton);
+                TabCloseButton,
+                ImageAlign);
 
-            _windowChromeTabWidthBuffer.Add(desiredWidth);
+            _titleBarTabWidthBuffer.Add(desiredWidth);
         }
 
-        WindowPageTabGeometry.LayoutTabs(
-            _windowChromeTabWidthBuffer,
-            context.StartX,
+        var totalDesiredWidth = 0f;
+        var gap = ResolvedTabGap * ScaleFactor;
+        for (var i = 0; i < _titleBarTabWidthBuffer.Count; i++)
+            totalDesiredWidth += _titleBarTabWidthBuffer[i];
+        totalDesiredWidth += gap * MathF.Max(0f, _titleBarTabWidthBuffer.Count - 1);
+        
+        var clampedTotalWidth = MathF.Min(totalDesiredWidth, availableWidth);
+        var startX = context.StartX;
+        
+        if (TabAlignment == TabViewAlignment.Center)
+            startX += (availableWidth - clampedTotalWidth) / 2f;
+        else if (TabAlignment == TabViewAlignment.End)
+            startX += (availableWidth - clampedTotalWidth);
+
+        TabViewTabGeometry.LayoutTabs(
+            _titleBarTabWidthBuffer,
+            startX,
             context.Top,
             context.Height,
             availableWidth,
-            ResolvedTabGap * ScaleFactor,
+            gap,
             maxTabWidth,
-            true,
-            _windowChromeTabRects);
+            false,
+            _titleBarTabRects);
 
-        _lastWindowChromeLayoutContext = context;
-        _hasWindowChromeLayoutContext = true;
-        _windowChromeLayoutPageCount = Count;
+        _lastTitleBarLayoutContext = context;
+        _hasTitleBarLayoutContext = true;
+        _titleBarLayoutPageCount = Count;
     }
 
-    private void UpdateWindowChromeAuxiliaryRects()
+    internal float MeasureTitleBarRequiredHeight()
     {
-        _windowChromeCloseButtonRect = SKRect.Empty;
-        _windowChromeNewTabButtonRect = SKRect.Empty;
+        if (TabMode != TabViewMode.TitleBar || Count <= 0)
+            return 0f;
 
-        if (_selectedIndex >= 0 && _selectedIndex < _windowChromeTabRects.Count && TabCloseButton)
+        PrepareTabFont((DrawTabIcons ? TitleBarTabFontSizeWithIcon : TitleBarTabFontSize).Topx(this));
+        var closeButtonSize = TabCloseButton ? TitleBarTabCloseButtonSize * ScaleFactor : 0f;
+        var verticalPadding = GetTitleBarTabVerticalContentPadding();
+        var iconSize = TitleBarTabIconSize * ScaleFactor;
+        var iconSpacing = TitleBarTabIconSpacing * ScaleFactor;
+        var customMetrics = _customTabStyle.HasValue ? _customTabStyle.Value.Metrics : default;
+        var minHeight = (customMetrics.MinHeight ?? 0f) * ScaleFactor;
+        var maxHeight = (customMetrics.MaxHeight ?? float.MaxValue) * ScaleFactor;
+        var neededHeight = 0f;
+
+        for (var pageIndex = 0; pageIndex < Count; pageIndex++)
         {
-            _windowChromeCloseButtonRect = WindowPageTabGeometry.CreateTrailingButtonRect(
-                GetWindowChromeSelectedVisualRect(),
-                WindowChromeTabCloseButtonSize * ScaleFactor,
-                WindowChromeTabCloseButtonInset * ScaleFactor,
+            var page = GetPageAt(pageIndex);
+            if (page == null)
+                continue;
+
+            neededHeight = Math.Max(
+                neededHeight,
+                MeasureDesiredTabHeight(
+                    page,
+                    DrawTabIcons,
+                    verticalPadding,
+                    iconSize,
+                    iconSpacing,
+                    closeButtonSize,
+                    minHeight,
+                    maxHeight));
+        }
+
+        return MathF.Ceiling(neededHeight);
+    }
+
+    private void UpdateTitleBarAuxiliaryRects()
+    {
+        _titleBarCloseButtonRect = SKRect.Empty;
+        _titleBarNewTabButtonRect = SKRect.Empty;
+
+        if (_selectedIndex >= 0 && _selectedIndex < _titleBarTabRects.Count && TabCloseButton)
+        {
+            _titleBarCloseButtonRect = TabViewTabGeometry.CreateTrailingButtonRect(
+                GetTitleBarSelectedVisualRect(),
+                TitleBarTabCloseButtonSize * ScaleFactor,
+                TitleBarTabCloseButtonInset * ScaleFactor,
                 0f,
                 1f);
         }
 
-        if (NewTabButton && _windowChromeTabRects.Count > 0)
+        if (NewTabButton && _titleBarTabRects.Count > 0)
         {
             var size = 24f * ScaleFactor;
             var gap = Math.Max(ResolvedTabGap * ScaleFactor, size / 2f);
-            var lastTabRect = _windowChromeTabRects[_windowChromeTabRects.Count - 1];
-            _windowChromeNewTabButtonRect = SKRect.Create(
+            var lastTabRect = _titleBarTabRects[_titleBarTabRects.Count - 1];
+            _titleBarNewTabButtonRect = SKRect.Create(
                 lastTabRect.Right + gap,
-                _lastWindowChromeLayoutContext.CenterY - size / 2f,
+                _lastTitleBarLayoutContext.CenterY - size / 2f,
                 size,
                 size);
         }
     }
 
-    private SKRect GetWindowChromeSelectedVisualRect()
+    private SKRect GetTitleBarSelectedVisualRect()
     {
-        if (_selectedIndex < 0 || _selectedIndex >= _windowChromeTabRects.Count)
+        if (_selectedIndex < 0 || _selectedIndex >= _titleBarTabRects.Count)
             return SKRect.Empty;
 
-        var activeRect = _windowChromeTabRects[_selectedIndex];
-        if (!_windowChromeTabSelectionAnimation.IsAnimating() ||
-            _windowChromePreviousSelectedIndex < 0 ||
-            _windowChromePreviousSelectedIndex >= _windowChromeTabRects.Count ||
-            _windowChromePreviousSelectedIndex == _selectedIndex)
+        var activeRect = _titleBarTabRects[_selectedIndex];
+        if (!_titleBarTabSelectionAnimation.IsAnimating() ||
+            _titleBarPreviousSelectedIndex < 0 ||
+            _titleBarPreviousSelectedIndex >= _titleBarTabRects.Count ||
+            _titleBarPreviousSelectedIndex == _selectedIndex)
             return activeRect;
 
-        return WindowPageTabGeometry.InterpolateRect(
-            _windowChromeTabRects[_windowChromePreviousSelectedIndex],
+        return TabViewTabGeometry.InterpolateRect(
+            _titleBarTabRects[_titleBarPreviousSelectedIndex],
             activeRect,
-            Math.Clamp((float)_windowChromeTabSelectionAnimation.GetProgress(), 0f, 1f));
+            Math.Clamp((float)_titleBarTabSelectionAnimation.GetProgress(), 0f, 1f));
     }
 
-    private void DrawWindowChromeDivider(SKCanvas canvas, WindowPageChromeLayoutContext context, SKColor titleColor)
+    private void DrawTitleBarDivider(SKCanvas canvas, TabViewTitleBarLayoutContext context, SKColor titleColor)
     {
         var dividerColor = titleColor != SKColor.Empty
             ? titleColor.Determine().WithAlpha(30)
@@ -2420,10 +2829,10 @@ public class WindowPageControl : ElementBase
         canvas.DrawLine(context.StartX, y, context.StartX + context.AvailableWidth, y, _tabBorderPaint);
     }
 
-    private void DrawWindowChromeTabDividers(SKCanvas canvas, WindowPageChromeLayoutContext context, SKColor titleColor)
+    private void DrawTitleBarTabDividers(SKCanvas canvas, TabViewTitleBarLayoutContext context, SKColor titleColor)
     {
-        if (_windowChromeTabRects.Count < 2 || ResolvedTabGap * ScaleFactor > 0.5f ||
-            TabDesignMode is WindowPageTabDesignMode.RoundedCompact or WindowPageTabDesignMode.Pill or WindowPageTabDesignMode.Minimal)
+        if (_titleBarTabRects.Count < 2 || ResolvedTabGap * ScaleFactor > 0.5f ||
+            TabDesignMode is TabViewDesignMode.RoundedCompact or TabViewDesignMode.Pill or TabViewDesignMode.Minimal)
             return;
 
         var dividerColor = titleColor != SKColor.Empty
@@ -2436,26 +2845,40 @@ public class WindowPageControl : ElementBase
         var top = context.Top + 9f * ScaleFactor;
         var bottom = context.Bottom - 8f * ScaleFactor;
 
-        for (var index = 0; index < _windowChromeTabRects.Count - 1; index++)
+        for (var index = 0; index < _titleBarTabRects.Count - 1; index++)
         {
             if (index == _selectedIndex || index + 1 == _selectedIndex ||
-                index == _hoveredWindowChromeTabIndex || index + 1 == _hoveredWindowChromeTabIndex)
+                index == _hoveredTitleBarTabIndex || index + 1 == _hoveredTitleBarTabIndex)
                 continue;
 
-            var x = (_windowChromeTabRects[index].Right + _windowChromeTabRects[index + 1].Left) * 0.5f;
+            var x = (_titleBarTabRects[index].Right + _titleBarTabRects[index + 1].Left) * 0.5f;
             canvas.DrawLine(x, top, x, bottom, _tabBorderPaint);
         }
     }
 
-    private SKColor GetWindowChromeTextColor(bool isSelected, bool isHovered, SKColor foreColor)
+    private SKColor GetTitleBarTextColor(bool isSelected, bool isHovered, float hoverProgress, SKColor foreColor)
     {
         if (!Enabled)
             return foreColor.WithAlpha(156);
 
-        if (isSelected && TabDesignMode == WindowPageTabDesignMode.Pill)
+        if (_customTabStyle.HasValue)
+        {
+            var style = _customTabStyle.Value;
+            if (isSelected)
+                return ResolveCustomForeground(style.Selected.ForegroundColor, style.Selected.BackgroundColor, foreColor);
+
+            var normalText = ResolveCustomForeground(style.Normal.ForegroundColor, style.Normal.BackgroundColor, foreColor.WithAlpha(194));
+            if (style.Hover.ForegroundColor == SKColors.Empty)
+                return normalText;
+
+            var hoverText = ResolveCustomForeground(style.Hover.ForegroundColor, style.Hover.BackgroundColor, foreColor.WithAlpha(232));
+            return normalText.InterpolateColor(hoverText, Math.Clamp(hoverProgress, 0f, 1f));
+        }
+
+        if (isSelected && TabDesignMode == TabViewDesignMode.Pill)
             return ColorScheme.Primary.Determine();
 
-        if (isSelected && TabDesignMode == WindowPageTabDesignMode.Minimal)
+        if (isSelected && TabDesignMode == TabViewDesignMode.Minimal)
             return ColorScheme.Primary;
 
         if (isSelected)
@@ -2467,7 +2890,7 @@ public class WindowPageControl : ElementBase
         return foreColor.WithAlpha(194);
     }
 
-    private void DrawWindowChromeTabSurface(SKCanvas canvas, SKRect rect, bool isSelected, bool isHovered, SKColor hoverColor, SKColor foreColor, SKColor titleColor)
+    private void DrawTitleBarTabSurface(SKCanvas canvas, SKRect rect, bool isSelected, bool isHovered, float hoverProgress, SKColor hoverColor, SKColor foreColor, SKColor titleColor)
     {
         if (rect.Width <= 0f || rect.Height <= 0f)
             return;
@@ -2476,20 +2899,30 @@ public class WindowPageControl : ElementBase
         var isLightTitle = titleColor != SKColor.Empty && !titleColor.IsDark();
         var sf = ScaleFactor;
 
-        var selectedBg = (isDark ? ColorScheme.SurfaceContainerHigh : ColorScheme.Surface).WithAlpha(150);
+        var selectedBg = (isDark ? ColorScheme.SurfaceContainerHigh : ColorScheme.Surface)
+            .WithAlpha(titleColor == SKColor.Empty ? (byte)255 : (byte)150);
         var hoverBg = foreColor.WithAlpha(isLightTitle ? (byte)14 : (byte)18);
-        var backgroundColor = isSelected ? selectedBg : hoverBg;
+        var backgroundColor = isSelected
+            ? selectedBg
+            : SKColors.Transparent.InterpolateColor(hoverBg, hoverProgress);
         var borderColor = isSelected
             ? ColorScheme.Outline.WithAlpha(isDark ? (byte)90 : (byte)68)
-            : ColorScheme.Outline.WithAlpha(isDark ? (byte)36 : (byte)28);
+            : SKColors.Transparent.InterpolateColor(ColorScheme.Outline.WithAlpha(isDark ? (byte)36 : (byte)28), hoverProgress);
 
         _tabBackgroundPaint.Color = backgroundColor;
         _tabBorderPaint.Color = borderColor;
         _tabBorderPaint.StrokeWidth = MathF.Max(1f, MathF.Round(sf));
 
+        if (TryDrawCustomTabBackground(canvas, rect, isSelected, isHovered, hoverProgress,
+            SKColors.Transparent, hoverBg, selectedBg,
+            SKColors.Transparent, ColorScheme.Outline.WithAlpha(isDark ? (byte)36 : (byte)28),
+            ColorScheme.Outline.WithAlpha(isDark ? (byte)90 : (byte)68),
+            MathF.Max(2f, MathF.Round(3f * sf))))
+            return;
+
         switch (TabDesignMode)
         {
-            case WindowPageTabDesignMode.Rectangle:
+            case TabViewDesignMode.Rectangle:
             {
                 var flatRect = new SKRect(
                     MathF.Round(rect.Left),
@@ -2506,7 +2939,7 @@ public class WindowPageControl : ElementBase
                 break;
             }
 
-            case WindowPageTabDesignMode.Rounded:
+            case TabViewDesignMode.Rounded:
             {
                 var lift = 1.5f * sf;
                 var roundedRect = new SKRect(
@@ -2529,7 +2962,7 @@ public class WindowPageControl : ElementBase
                 break;
             }
 
-            case WindowPageTabDesignMode.RoundedCompact:
+            case TabViewDesignMode.RoundedCompact:
             {
                 var lift = 1.5f * sf;
                 var shadcnRect = new SKRect(
@@ -2553,7 +2986,7 @@ public class WindowPageControl : ElementBase
                 break;
             }
 
-            case WindowPageTabDesignMode.Outlined:
+            case TabViewDesignMode.Outlined:
             {
                 if (!isSelected && !isHovered)
                     break;
@@ -2575,7 +3008,7 @@ public class WindowPageControl : ElementBase
                 break;
             }
 
-            case WindowPageTabDesignMode.Pill:
+            case TabViewDesignMode.Pill:
             {
                 if (!isSelected && !isHovered)
                     break;
@@ -2593,7 +3026,7 @@ public class WindowPageControl : ElementBase
                 break;
             }
 
-            case WindowPageTabDesignMode.Minimal:
+            case TabViewDesignMode.Minimal:
             {
                 if (!isSelected && !isHovered)
                     break;
@@ -2604,7 +3037,7 @@ public class WindowPageControl : ElementBase
                     MathF.Round(rect.Bottom - sf));
                 _tabBackgroundPaint.Color = isSelected
                     ? ColorScheme.Primary.WithAlpha(isDark ? (byte)12 : (byte)9)
-                    : hoverBg;
+                    : backgroundColor;
                 canvas.DrawRect(minRect, _tabBackgroundPaint);
                 if (isSelected)
                 {
@@ -2615,7 +3048,45 @@ public class WindowPageControl : ElementBase
                 break;
             }
 
-            case WindowPageTabDesignMode.Chromed:
+            case TabViewDesignMode.Fluent:
+            {
+                if (!isSelected && !isHovered)
+                    break;
+                var fluentRect = new SKRect(
+                    MathF.Round(rect.Left + 4f * sf),
+                    MathF.Round(rect.Top + 6f * sf),
+                    MathF.Round(rect.Right - 4f * sf),
+                    MathF.Round(rect.Bottom - 4f * sf));
+                _tabBackgroundPaint.Color = isSelected ? selectedBg : backgroundColor;
+                canvas.DrawRoundRect(fluentRect, 4f * sf, 4f * sf, _tabBackgroundPaint);
+                if (isSelected)
+                {
+                    _tabIndicatorPaint.Color = ColorScheme.Primary;
+                    canvas.DrawRect(fluentRect.Left + 8f * sf, fluentRect.Bottom - 2f * sf, fluentRect.Width - 16f * sf, 2f * sf, _tabIndicatorPaint);
+                }
+                break;
+            }
+
+            case TabViewDesignMode.MacOS:
+            {
+                if (!isSelected && !isHovered)
+                    break;
+                var macRect = new SKRect(
+                    MathF.Round(rect.Left + 2f * sf),
+                    MathF.Round(rect.Top + 4f * sf),
+                    MathF.Round(rect.Right - 2f * sf),
+                    MathF.Round(rect.Bottom - 4f * sf));
+                _tabBackgroundPaint.Color = isSelected ? selectedBg : backgroundColor;
+                canvas.DrawRoundRect(macRect, macRect.Height / 2f, macRect.Height / 2f, _tabBackgroundPaint);
+                if (isSelected)
+                {
+                    _tabBorderPaint.Color = ColorScheme.BorderColor;
+                    canvas.DrawRoundRect(macRect, macRect.Height / 2f, macRect.Height / 2f, _tabBorderPaint);
+                }
+                break;
+            }
+
+            case TabViewDesignMode.Chromed:
             default:
             {
                 var lift = 2f * sf;
@@ -2626,19 +3097,19 @@ public class WindowPageControl : ElementBase
                     MathF.Round(rect.Top + offTop - lift),
                     MathF.Round(rect.Right),
                     isSelected ? MathF.Round(rect.Bottom + offBot - lift) : MathF.Round(rect.Bottom - offBot - lift));
-                WindowPageTabGeometry.BuildTopRoundedTabPath(_tabChromePath, chromedRect, MathF.Round(12f * sf));
-                canvas.DrawPath(_tabChromePath, _tabBackgroundPaint);
+                TabViewTabGeometry.BuildTopRoundedTabPath(_tabPath, chromedRect, MathF.Round(12f * sf));
+                canvas.DrawPath(_tabPath, _tabBackgroundPaint);
                 if (isSelected)
-                    canvas.DrawPath(_tabChromePath, _tabBorderPaint);
+                    canvas.DrawPath(_tabPath, _tabBorderPaint);
                 break;
             }
         }
     }
 
-    private void DrawWindowChromeCloseButton(SKCanvas canvas, SKRect rect, bool isHovered, SKColor foreColor, SKColor hoverColor)
+    private void DrawTitleBarCloseButton(SKCanvas canvas, SKRect rect, bool isHovered, SKColor foreColor, SKColor hoverColor)
     {
         var sf = ScaleFactor;
-        var progress = Math.Clamp((float)_windowChromeTabCloseHoverAnimation.GetProgress(), 0f, 1f);
+        var progress = Math.Clamp((float)_titleBarTabCloseHoverAnimation.GetProgress(), 0f, 1f);
         _tabBackgroundPaint.Color = hoverColor.WithAlpha((byte)(28 + progress * 52));
         
         var midX = MathF.Round(rect.MidX);
@@ -2655,25 +3126,17 @@ public class WindowPageControl : ElementBase
         }
 
         var stroke = MathF.Max(1f, MathF.Round(sf));
-        var crispOffset = (stroke % 2 != 0) ? 0.5f : 0f;
-        
-        using var linePaint = new SKPaint
-        {
-            Color = foreColor.WithAlpha(isHovered ? (byte)255 : (byte)222),
-            StrokeWidth = stroke,
-            StrokeCap = SKStrokeCap.Round,
-            IsAntialias = true
-        };
+        var linePaint = PrepareTabGlyphPaint(foreColor.WithAlpha(isHovered ? (byte)255 : (byte)222), stroke, isAntialias: true);
 
         var size = MathF.Round(3.5f * sf);
         canvas.DrawLine(midX - size, midY - size, midX + size, midY + size, linePaint);
         canvas.DrawLine(midX - size, midY + size, midX + size, midY - size, linePaint);
     }
 
-    private void DrawWindowChromeNewTabButton(SKCanvas canvas, SKRect rect, bool isHovered, SKColor foreColor, SKColor hoverColor)
+    private void DrawTitleBarNewTabButton(SKCanvas canvas, SKRect rect, bool isHovered, SKColor foreColor, SKColor hoverColor)
     {
         var sf = ScaleFactor;
-        var progress = Math.Clamp((float)_windowChromeNewTabHoverAnimation.GetProgress(), 0f, 1f);
+        var progress = Math.Clamp((float)_titleBarNewTabHoverAnimation.GetProgress(), 0f, 1f);
         var baseFill = ColorScheme.SurfaceContainerHigh.WithAlpha(ColorScheme.IsDarkMode ? (byte)56 : (byte)72);
         var hoverFill = ColorScheme.SurfaceVariant.InterpolateColor(hoverColor, 0.16f).WithAlpha(ColorScheme.IsDarkMode ? (byte)132 : (byte)118);
 
@@ -2689,14 +3152,7 @@ public class WindowPageControl : ElementBase
 
         var stroke = MathF.Max(1.1f, MathF.Round(sf * 1.5f));
         var crispOffset = (stroke % 2 != 0) ? 0.5f : 0f;
-
-        using var linePaint = new SKPaint
-        {
-            Color = foreColor.WithAlpha(isHovered ? (byte)255 : (byte)228),
-            StrokeWidth = stroke,
-            StrokeCap = SKStrokeCap.Round,
-            IsAntialias = false
-        };
+        var linePaint = PrepareTabGlyphPaint(foreColor.WithAlpha(isHovered ? (byte)255 : (byte)228), stroke, isAntialias: false);
 
         var size = MathF.Round(5f * sf);
         var midX = MathF.Round(roundedRect.MidX) + crispOffset;
@@ -2706,7 +3162,23 @@ public class WindowPageControl : ElementBase
         canvas.DrawLine(midX, midY - size, midX, midY + size, linePaint);
     }
 
-    private void DrawTabHeaderSurface(SKCanvas canvas, SKRect headerRect, SKColor backgroundColor, SKColor borderColor)
+    private SKPaint PrepareTabGlyphPaint(SKColor color, float strokeWidth, bool isAntialias)
+    {
+        _tabGlyphPaint.Shader = null;
+        _tabGlyphPaint.ColorFilter = null;
+        _tabGlyphPaint.PathEffect = null;
+        _tabGlyphPaint.MaskFilter = null;
+        _tabGlyphPaint.ImageFilter = null;
+        _tabGlyphPaint.BlendMode = SKBlendMode.SrcOver;
+        _tabGlyphPaint.IsAntialias = isAntialias;
+        _tabGlyphPaint.Style = SKPaintStyle.Stroke;
+        _tabGlyphPaint.StrokeCap = SKStrokeCap.Round;
+        _tabGlyphPaint.Color = color;
+        _tabGlyphPaint.StrokeWidth = strokeWidth;
+        return _tabGlyphPaint;
+    }
+
+    private void DrawTabHeaderSurface(SKCanvas canvas, SKRect headerRect, SKColor backgroundColor, SKColor borderColor, SKRect activeTabsRect)
     {
         var sf = ScaleFactor;
         _tabBorderPaint.Color = borderColor;
@@ -2714,21 +3186,62 @@ public class WindowPageControl : ElementBase
 
         if (UsesNonTopEmbeddedTabLayout)
         {
+            if (backgroundColor != SKColors.Transparent)
+            {
+                _tabBackgroundPaint.Color = backgroundColor;
+                switch (TabDesignMode)
+                {
+                    case TabViewDesignMode.Rounded:
+                    case TabViewDesignMode.RoundedCompact:
+                    case TabViewDesignMode.Pill:
+                    case TabViewDesignMode.MacOS:
+                    {
+                        if (activeTabsRect.Width > 0 && activeTabsRect.Height > 0)
+                        {
+                            var pad = MathF.Round((TabDesignMode == TabViewDesignMode.MacOS ? 6f : 4f) * sf);
+                            var wrapRect = new SKRect(
+                                activeTabsRect.Left - pad,
+                                activeTabsRect.Top - pad,
+                                activeTabsRect.Right + pad,
+                                activeTabsRect.Bottom + pad);
+                            var wrapRadius = TabDesignMode == TabViewDesignMode.MacOS
+                                ? MathF.Min(wrapRect.Width, wrapRect.Height) * 0.12f
+                                : MathF.Round(10f * sf);
+                            canvas.DrawRoundRect(wrapRect, wrapRadius, wrapRadius, _tabBackgroundPaint);
+                        }
+
+                        break;
+                    }
+
+                    case TabViewDesignMode.Fluent:
+                    {
+                        DrawFluentTabSurface(canvas, headerRect, MathF.Round(8f * sf), backgroundColor, false);
+                        break;
+                    }
+
+                    default:
+                    {
+                        canvas.DrawRect(headerRect, _tabBackgroundPaint);
+                        break;
+                    }
+                }
+            }
+
             switch (_tabLayoutMode)
             {
-                case WindowPageTabLayoutMode.Left:
+                case TabViewLayoutMode.Left:
                 {
                     var dividerX = MathF.Round(headerRect.Right) - _tabBorderPaint.StrokeWidth * 0.5f;
                     canvas.DrawLine(dividerX, MathF.Round(headerRect.Top), dividerX, MathF.Round(headerRect.Bottom), _tabBorderPaint);
                     break;
                 }
-                case WindowPageTabLayoutMode.Right:
+                case TabViewLayoutMode.Right:
                 {
                     var dividerX = MathF.Round(headerRect.Left) + _tabBorderPaint.StrokeWidth * 0.5f;
                     canvas.DrawLine(dividerX, MathF.Round(headerRect.Top), dividerX, MathF.Round(headerRect.Bottom), _tabBorderPaint);
                     break;
                 }
-                case WindowPageTabLayoutMode.Bottom:
+                case TabViewLayoutMode.Bottom:
                 {
                     var dividerY = MathF.Round(headerRect.Top) + _tabBorderPaint.StrokeWidth * 0.5f;
                     canvas.DrawLine(MathF.Round(headerRect.Left), dividerY, MathF.Round(headerRect.Right), dividerY, _tabBorderPaint);
@@ -2739,20 +3252,53 @@ public class WindowPageControl : ElementBase
             return;
         }
 
+        if (backgroundColor != SKColors.Transparent)
+        {
+            _tabBackgroundPaint.Color = backgroundColor;
+            switch (TabDesignMode)
+            {
+                case TabViewDesignMode.Rounded:
+                case TabViewDesignMode.RoundedCompact:
+                case TabViewDesignMode.Pill:
+                {
+                    if (activeTabsRect.Width > 0 && activeTabsRect.Height > 0)
+                    {
+                        var padX = MathF.Round(4f * sf);
+                        var padY = MathF.Round(4f * sf);
+                        var wrapRect = new SKRect(
+                            activeTabsRect.Left - padX,
+                            activeTabsRect.Top - padY,
+                            activeTabsRect.Right + padX,
+                            activeTabsRect.Bottom + padY);
+
+                        var wrapRadius = MathF.Round(10f * sf);
+                        canvas.DrawRoundRect(wrapRect, wrapRadius, wrapRadius, _tabBackgroundPaint);
+                    }
+                    break;
+                }
+                
+                default:
+                {
+                    canvas.DrawRect(headerRect, _tabBackgroundPaint);
+                    break;
+                }
+            }
+        }
+
         switch (TabDesignMode)
         {
-            case WindowPageTabDesignMode.Rectangle:
-            case WindowPageTabDesignMode.Chromed:
-            case WindowPageTabDesignMode.Outlined:
-            case WindowPageTabDesignMode.Minimal:
+            case TabViewDesignMode.Rectangle:
+            case TabViewDesignMode.Chromed:
+            case TabViewDesignMode.Outlined:
+            case TabViewDesignMode.Minimal:
             {
                 var divY = MathF.Round(headerRect.Bottom) - _tabBorderPaint.StrokeWidth * 0.5f;
                 canvas.DrawLine(MathF.Round(headerRect.Left), divY, MathF.Round(headerRect.Right), divY, _tabBorderPaint);
                 break;
             }
 
-            case WindowPageTabDesignMode.Rounded:
-            case WindowPageTabDesignMode.RoundedCompact:
+            case TabViewDesignMode.Rounded:
+            case TabViewDesignMode.RoundedCompact:
             default:
                 break;
         }
@@ -2792,178 +3338,30 @@ public class WindowPageControl : ElementBase
 
     private void DrawTabBackground(SKCanvas canvas, SKRect rect, bool isSelected, bool isHovered,
         SKColor inactiveBackground, SKColor selectedBackground, SKColor hoverBackground,
-        SKColor inactiveBorderColor, SKColor selectedBorderColor, float indicatorHeight)
+        SKColor inactiveBorderColor, SKColor selectedBorderColor, float indicatorHeight, float hoverProgress)
     {
         var sf = ScaleFactor;
-        var backgroundColor = isSelected ? selectedBackground : isHovered ? hoverBackground : inactiveBackground;
-        var borderColor = isSelected ? selectedBorderColor : inactiveBorderColor;
+        isHovered = isHovered || hoverProgress > 0.001f;
+        var backgroundColor = isSelected
+            ? selectedBackground
+            : inactiveBackground.InterpolateColor(hoverBackground, hoverProgress);
+        var borderColor = isSelected
+            ? selectedBorderColor
+            : inactiveBorderColor;
 
         _tabBackgroundPaint.Color = backgroundColor;
         _tabBorderPaint.Color = borderColor;
         _tabBorderPaint.StrokeWidth = MathF.Max(1f, MathF.Round(sf));
 
-        if (UsesNonTopEmbeddedTabLayout)
-        {
-            DrawOrientedEmbeddedTabBackground(canvas, rect, isSelected, isHovered, backgroundColor, borderColor);
+        if (TryDrawCustomTabBackground(canvas, rect, isSelected, isHovered, hoverProgress,
+            inactiveBackground, hoverBackground, selectedBackground,
+            inactiveBorderColor, inactiveBorderColor, selectedBorderColor,
+            indicatorHeight))
             return;
-        }
 
         switch (TabDesignMode)
         {
-            case WindowPageTabDesignMode.Rectangle:
-            {
-                // Tailwind underline tabs: ghost hover tint + primary bottom indicator
-                if (isHovered && !isSelected)
-                {
-                    var ghostRect = new SKRect(
-                        MathF.Round(rect.Left + 2f * sf), MathF.Round(rect.Top + sf),
-                        MathF.Round(rect.Right - 2f * sf), MathF.Round(rect.Bottom - sf));
-                    var ghostRadius = MathF.Round(6f * sf);
-                    canvas.DrawRoundRect(ghostRect, ghostRadius, ghostRadius, _tabBackgroundPaint);
-                }
-                if (isSelected)
-                {
-                    // Full-width 2px primary indicator at the bottom edge
-                    _tabIndicatorPaint.Color = ColorScheme.Primary;
-                    var indH = MathF.Max(2f, MathF.Round(2.5f * sf));
-                    canvas.DrawRect(MathF.Round(rect.Left), MathF.Round(rect.Bottom) - indH, rect.Width, indH, _tabIndicatorPaint);
-                }
-                break;
-            }
-
-            case WindowPageTabDesignMode.Rounded:
-            {
-                // Segmented control: fills against the container background
-                if (isSelected || isHovered)
-                {
-                    var vIn = MathF.Round(2.5f * sf);
-                    var hIn = MathF.Round(2f * sf);
-                    var pillRect = new SKRect(
-                        MathF.Round(rect.Left + hIn), MathF.Round(rect.Top + vIn),
-                        MathF.Round(rect.Right - hIn), MathF.Round(rect.Bottom - vIn));
-                    var radius = MathF.Round(8f * sf);
-                    canvas.DrawRoundRect(pillRect, radius, radius, _tabBackgroundPaint);
-                    if (isSelected)
-                        canvas.DrawRoundRect(pillRect, radius, radius, _tabBorderPaint);
-                }
-                break;
-            }
-
-            case WindowPageTabDesignMode.RoundedCompact:
-            {
-                // shadcn/ui TabsTrigger: transparent until selected (card lift)
-                if (isSelected || isHovered)
-                {
-                    var vIn = MathF.Round(3f * sf);
-                    var hIn = MathF.Round(3f * sf);
-                    var cardRect = new SKRect(
-                        MathF.Round(rect.Left + hIn), MathF.Round(rect.Top + vIn + 3f * sf),
-                        MathF.Round(rect.Right - hIn), MathF.Round(rect.Bottom - vIn - 3f * sf));
-                    var radius = MathF.Round(6f * sf);
-                    canvas.DrawRoundRect(cardRect, radius, radius, _tabBackgroundPaint);
-                    if (isSelected)
-                        canvas.DrawRoundRect(cardRect, radius, radius, _tabBorderPaint);
-                }
-                break;
-            }
-
-            case WindowPageTabDesignMode.Pill:
-            {
-                // Full-height pill: selected gets opaque Primary fill, hover gets faint tint
-                if (isSelected || isHovered)
-                {
-                    var vIn = MathF.Round(3.5f * sf);
-                    var hIn = MathF.Round(3f * sf);
-                    var pillRect = new SKRect(
-                        MathF.Round(rect.Left + hIn),  MathF.Round(rect.Top + vIn),
-                        MathF.Round(rect.Right - hIn), MathF.Round(rect.Bottom - vIn));
-                    var radius = pillRect.Height / 2f;
-                    canvas.DrawRoundRect(pillRect, radius, radius, _tabBackgroundPaint);
-                }
-                break;
-            }
-
-            case WindowPageTabDesignMode.Outlined:
-            {
-                // Classic HTML tab: 3-sided border (left/top/right), open bottom merges with content
-                var sw   = _tabBorderPaint.StrokeWidth;
-                var half = sw * 0.5f;
-                var offTop = MathF.Round(4f * sf);
-                if (isSelected)
-                {
-                    var fillRect = new SKRect(
-                        MathF.Round(rect.Left), MathF.Round(rect.Top + offTop),
-                        MathF.Round(rect.Right), MathF.Round(rect.Bottom + sw));
-                    canvas.DrawRect(fillRect, _tabBackgroundPaint);
-                    var l = MathF.Round(rect.Left) + half;
-                    var t = MathF.Round(rect.Top + offTop) + half;
-                    var r = MathF.Round(rect.Right) - half;
-                    var b = MathF.Round(rect.Bottom) + sw;
-                    canvas.DrawLine(l, b, l, t, _tabBorderPaint);
-                    canvas.DrawLine(l, t, r, t, _tabBorderPaint);
-                    canvas.DrawLine(r, t, r, b, _tabBorderPaint);
-                }
-                else if (isHovered)
-                {
-                    var ghostRect = new SKRect(
-                        MathF.Round(rect.Left + 2f * sf), MathF.Round(rect.Top + offTop + 2f * sf),
-                        MathF.Round(rect.Right - 2f * sf), MathF.Round(rect.Bottom - sf));
-                    canvas.DrawRect(ghostRect, _tabBackgroundPaint);
-                }
-                break;
-            }
-
-            case WindowPageTabDesignMode.Minimal:
-            {
-                // Linear/Raycast: subtle full-height tint fill + 3px Primary left-edge accent bar
-                if (isSelected)
-                {
-                    canvas.DrawRect(
-                        new SKRect(MathF.Round(rect.Left), MathF.Round(rect.Top), MathF.Round(rect.Right), MathF.Round(rect.Bottom)),
-                        _tabBackgroundPaint);
-                    var indW   = MathF.Max(2f, MathF.Round(3f * sf));
-                    var indTop = MathF.Round(rect.Top + 8f * sf);
-                    var indBot = MathF.Round(rect.Bottom - 8f * sf);
-                    _tabIndicatorPaint.Color = _tabBorderPaint.Color;
-                    canvas.DrawRoundRect(
-                        SKRect.Create(MathF.Round(rect.Left), indTop, indW, MathF.Max(0f, indBot - indTop)),
-                        indW / 2f, indW / 2f, _tabIndicatorPaint);
-                }
-                else if (isHovered)
-                {
-                    canvas.DrawRect(
-                        new SKRect(MathF.Round(rect.Left), MathF.Round(rect.Top), MathF.Round(rect.Right), MathF.Round(rect.Bottom)),
-                        _tabBackgroundPaint);
-                }
-                break;
-            }
-
-            case WindowPageTabDesignMode.Chromed:
-            default:
-            {
-                if (isSelected || isHovered)
-                {
-                    var chrTop = isSelected ? MathF.Round(rect.Top + 4f * sf) : MathF.Round(rect.Top + 7f * sf);
-                    var chrBot = isSelected ? MathF.Round(rect.Bottom + sf) : MathF.Round(rect.Bottom - 3f * sf);
-                    var chromedRect = new SKRect(MathF.Round(rect.Left), chrTop, MathF.Round(rect.Right), chrBot);
-                    WindowPageTabGeometry.BuildTopRoundedTabPath(_tabChromePath, chromedRect, MathF.Round(10f * sf));
-                    canvas.DrawPath(_tabChromePath, _tabBackgroundPaint);
-                    if (isSelected)
-                        canvas.DrawPath(_tabChromePath, _tabBorderPaint);
-                }
-                break;
-            }
-        }
-    }
-
-    private void DrawOrientedEmbeddedTabBackground(SKCanvas canvas, SKRect rect, bool isSelected, bool isHovered,
-        SKColor backgroundColor, SKColor borderColor)
-    {
-        var sf = ScaleFactor;
-
-        switch (TabDesignMode)
-        {
-            case WindowPageTabDesignMode.Rectangle:
+            case TabViewDesignMode.Rectangle:
             {
                 if (isHovered && !isSelected)
                 {
@@ -2980,7 +3378,7 @@ public class WindowPageControl : ElementBase
                 break;
             }
 
-            case WindowPageTabDesignMode.Pill:
+            case TabViewDesignMode.Pill:
             {
                 if (!isSelected && !isHovered)
                     break;
@@ -2994,7 +3392,7 @@ public class WindowPageControl : ElementBase
                 break;
             }
 
-            case WindowPageTabDesignMode.Minimal:
+            case TabViewDesignMode.Minimal:
             {
                 if (!isSelected && !isHovered)
                     break;
@@ -3006,7 +3404,7 @@ public class WindowPageControl : ElementBase
                 break;
             }
 
-            case WindowPageTabDesignMode.Outlined:
+            case TabViewDesignMode.Outlined:
             {
                 if (!isSelected && !isHovered)
                     break;
@@ -3021,25 +3419,151 @@ public class WindowPageControl : ElementBase
                 break;
             }
 
-            case WindowPageTabDesignMode.Rounded:
-            case WindowPageTabDesignMode.RoundedCompact:
-            case WindowPageTabDesignMode.Chromed:
+            case TabViewDesignMode.Rounded:
+            {
+                if (!isSelected && !isHovered)
+                    break;
+
+                var vIn = MathF.Round(2.5f * sf);
+                var hIn = MathF.Round(2f * sf);
+                var pillRect = new SKRect(
+                    MathF.Round(rect.Left + hIn), MathF.Round(rect.Top + vIn),
+                    MathF.Round(rect.Right - hIn), MathF.Round(rect.Bottom - vIn));
+                var radius = MathF.Round(8f * sf);
+                canvas.DrawRoundRect(pillRect, radius, radius, _tabBackgroundPaint);
+                if (isSelected)
+                    canvas.DrawRoundRect(pillRect, radius, radius, _tabBorderPaint);
+                break;
+            }
+
+            case TabViewDesignMode.RoundedCompact:
+            {
+                if (!isSelected && !isHovered)
+                    break;
+
+                var vIn = MathF.Round(3f * sf);
+                var hIn = MathF.Round(3f * sf);
+                var cardRect = new SKRect(
+                    MathF.Round(rect.Left + hIn), MathF.Round(rect.Top + vIn),
+                    MathF.Round(rect.Right - hIn), MathF.Round(rect.Bottom - vIn));
+                var radius = MathF.Round(6f * sf);
+                canvas.DrawRoundRect(cardRect, radius, radius, _tabBackgroundPaint);
+                if (isSelected)
+                    canvas.DrawRoundRect(cardRect, radius, radius, _tabBorderPaint);
+                break;
+            }
+
+            case TabViewDesignMode.Fluent:
+            {
+                if (!isSelected && !isHovered)
+                    break;
+
+                var fluentRect = new SKRect(
+                    MathF.Round(rect.Left + 4f * sf), MathF.Round(rect.Top + 4f * sf),
+                    MathF.Round(rect.Right - 4f * sf), MathF.Round(rect.Bottom - 4f * sf));
+                var radius = MathF.Round(6f * sf);
+                DrawFluentTabSurface(canvas, fluentRect, radius, backgroundColor, isSelected);
+                if (isSelected)
+                    DrawContentEdgeIndicator(canvas, rect, MathF.Max(2f, MathF.Round(2.5f * sf)), ColorScheme.Primary);
+                break;
+            }
+
+            case TabViewDesignMode.MacOS:
+            {
+                if (!isSelected && !isHovered)
+                    break;
+
+                var macRect = new SKRect(
+                    MathF.Round(rect.Left + 2f * sf), MathF.Round(rect.Top + 4f * sf),
+                    MathF.Round(rect.Right - 2f * sf), MathF.Round(rect.Bottom - 4f * sf));
+                var radius = MathF.Min(macRect.Width, macRect.Height) * 0.5f;
+                canvas.DrawRoundRect(macRect, radius, radius, _tabBackgroundPaint);
+                if (isSelected)
+                    canvas.DrawRoundRect(macRect, radius, radius, _tabBorderPaint);
+                break;
+            }
+
+            case TabViewDesignMode.Chromed:
             default:
             {
                 if (!isSelected && !isHovered)
                     break;
 
-                var inset = MathF.Round(3f * sf);
-                var roundedRect = new SKRect(
-                    MathF.Round(rect.Left + inset), MathF.Round(rect.Top + inset),
-                    MathF.Round(rect.Right - inset), MathF.Round(rect.Bottom - inset));
-                var radius = MathF.Round(TabDesignMode == WindowPageTabDesignMode.Chromed ? 10f * sf : 8f * sf);
-                canvas.DrawRoundRect(roundedRect, radius, radius, _tabBackgroundPaint);
+                var inset = MathF.Round(isSelected ? 1f * sf : 4f * sf);
+                var chromedRect = new SKRect(
+                    MathF.Round(rect.Left + inset), MathF.Round(rect.Top + 3f * sf),
+                    MathF.Round(rect.Right - inset), MathF.Round(rect.Bottom - 3f * sf));
+                var radius = MathF.Round(10f * sf);
+                canvas.DrawRoundRect(chromedRect, radius, radius, _tabBackgroundPaint);
                 if (isSelected)
-                    canvas.DrawRoundRect(roundedRect, radius, radius, _tabBorderPaint);
+                {
+                    canvas.DrawRoundRect(chromedRect, radius, radius, _tabBorderPaint);
+                    DrawContentEdgeIndicator(canvas, rect, MathF.Max(1f, MathF.Round(1.5f * sf)), selectedBorderColor);
+                }
                 break;
             }
         }
+    }
+
+    private void DrawFluentTabSurface(SKCanvas canvas, SKRect rect, float radius, SKColor baseColor, bool elevated)
+    {
+        if (rect.Width <= 0f || rect.Height <= 0f)
+            return;
+
+        var surfaceAlpha = baseColor.Alpha;
+        var topTint = ColorScheme.IsDarkMode
+            ? baseColor.WithAlpha((byte)Math.Min(255, surfaceAlpha + (elevated ? 18 : 8)))
+            : elevated
+                ? SKColors.White.WithAlpha(210)
+                : baseColor.WithAlpha((byte)Math.Min(255, surfaceAlpha + 10));
+        var bottomTint = ColorScheme.IsDarkMode
+            ? baseColor.WithAlpha((byte)Math.Max(0, surfaceAlpha - (elevated ? 10 : 4)))
+            : baseColor;
+
+        using var fillPaint = new SKPaint
+        {
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill,
+            Shader = SKShader.CreateLinearGradient(
+                new SKPoint(rect.Left, rect.Top),
+                new SKPoint(rect.Right, rect.Bottom),
+                new[] { topTint, bottomTint },
+                new[] { 0f, 1f },
+                SKShaderTileMode.Clamp)
+        };
+
+        canvas.DrawRoundRect(rect, radius, radius, fillPaint);
+
+        var revealAlpha = elevated
+            ? (ColorScheme.IsDarkMode ? (byte)42 : (byte)170)
+            : (byte)Math.Clamp(MathF.Round(surfaceAlpha * (ColorScheme.IsDarkMode ? 0.8f : 0.55f)), 0f, ColorScheme.IsDarkMode ? 24f : 52f);
+        using var revealPaint = new SKPaint
+        {
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = MathF.Max(1f, MathF.Round(ScaleFactor)),
+            Color = SKColors.White.WithAlpha(revealAlpha)
+        };
+        canvas.DrawRoundRect(rect, radius, radius, revealPaint);
+
+        if (!elevated)
+            return;
+
+        var shineRect = new SKRect(
+            rect.Left + MathF.Round(8f * ScaleFactor),
+            rect.Top + MathF.Round(4f * ScaleFactor),
+            rect.Right - MathF.Round(8f * ScaleFactor),
+            rect.Top + MathF.Round(5f * ScaleFactor));
+        if (shineRect.Width <= 0f || shineRect.Height <= 0f)
+            return;
+
+        using var shinePaint = new SKPaint
+        {
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill,
+            Color = SKColors.White.WithAlpha(ColorScheme.IsDarkMode ? (byte)36 : (byte)120)
+        };
+        canvas.DrawRoundRect(shineRect, shineRect.Height * 0.5f, shineRect.Height * 0.5f, shinePaint);
     }
 
     private void DrawContentEdgeIndicator(SKCanvas canvas, SKRect rect, float thickness, SKColor color)
@@ -3049,13 +3573,13 @@ public class WindowPageControl : ElementBase
 
         switch (_tabLayoutMode)
         {
-            case WindowPageTabLayoutMode.Left:
+            case TabViewLayoutMode.Left:
                 indicatorRect = SKRect.Create(rect.Right - thickness, rect.Top + inset, thickness, Math.Max(0f, rect.Height - inset * 2f));
                 break;
-            case WindowPageTabLayoutMode.Right:
+            case TabViewLayoutMode.Right:
                 indicatorRect = SKRect.Create(rect.Left, rect.Top + inset, thickness, Math.Max(0f, rect.Height - inset * 2f));
                 break;
-            case WindowPageTabLayoutMode.Bottom:
+            case TabViewLayoutMode.Bottom:
                 indicatorRect = SKRect.Create(rect.Left + inset, rect.Top, Math.Max(0f, rect.Width - inset * 2f), thickness);
                 break;
             default:
@@ -3102,14 +3626,10 @@ public class WindowPageControl : ElementBase
             canvas.DrawCircle(midX, midY, circleR, _tabBackgroundPaint);
         }
 
-        using var xPaint = new SKPaint
-        {
-            Color = foreground.WithAlpha(isHovered ? (byte)220 : (byte)150),
-            StrokeWidth = MathF.Max(1f, MathF.Round(1.5f * sf)),
-            StrokeCap = SKStrokeCap.Round,
-            IsAntialias = true,
-            IsStroke = true
-        };
+        var xPaint = PrepareTabGlyphPaint(
+            foreground.WithAlpha(isHovered ? (byte)220 : (byte)150),
+            MathF.Max(1f, MathF.Round(1.5f * sf)),
+            isAntialias: true);
         var size = MathF.Round(3f * sf);
         canvas.DrawLine(midX - size, midY - size, midX + size, midY + size, xPaint);
         canvas.DrawLine(midX + size, midY - size, midX - size, midY + size, xPaint);
@@ -3155,9 +3675,9 @@ public class WindowPageControl : ElementBase
 
         return _tabLayoutMode switch
         {
-            WindowPageTabLayoutMode.Left => new SKRect(rect.Left, rect.Top, Math.Min(rect.Right, rect.Left + headerThickness), rect.Bottom),
-            WindowPageTabLayoutMode.Right => new SKRect(Math.Max(rect.Left, rect.Right - headerThickness), rect.Top, rect.Right, rect.Bottom),
-            WindowPageTabLayoutMode.Bottom => new SKRect(rect.Left, Math.Max(rect.Top, rect.Bottom - headerThickness), rect.Right, rect.Bottom),
+            TabViewLayoutMode.Left => new SKRect(rect.Left, rect.Top, Math.Min(rect.Right, rect.Left + headerThickness), rect.Bottom),
+            TabViewLayoutMode.Right => new SKRect(Math.Max(rect.Left, rect.Right - headerThickness), rect.Top, rect.Right, rect.Bottom),
+            TabViewLayoutMode.Bottom => new SKRect(rect.Left, Math.Max(rect.Top, rect.Bottom - headerThickness), rect.Right, rect.Bottom),
             _ => new SKRect(rect.Left, rect.Top, rect.Right, rect.Top + headerThickness)
         };
     }
@@ -3176,12 +3696,12 @@ public class WindowPageControl : ElementBase
 
         return _tabLayoutMode switch
         {
-            WindowPageTabLayoutMode.Left => new SKRect(
+            TabViewLayoutMode.Left => new SKRect(
                 headerRect.Right - halfThickness,
                 headerRect.Top,
                 headerRect.Right + halfThickness,
                 headerRect.Bottom),
-            WindowPageTabLayoutMode.Right => new SKRect(
+            TabViewLayoutMode.Right => new SKRect(
                 headerRect.Left - halfThickness,
                 headerRect.Top,
                 headerRect.Left + halfThickness,
@@ -3192,11 +3712,41 @@ public class WindowPageControl : ElementBase
 
     private float GetTabHeaderThickness()
     {
-        var minimumThickness = TabStripHeight * ScaleFactor;
-        if (!UsesVerticalTabLayout || Count <= 0)
+        var minimumThickness = (UsesVerticalTabLayout ? _verticalTabStripWidth : _tabStripHeight) * ScaleFactor;
+
+        if (!UsesVerticalTabLayout)
+            return MeasureHorizontalTabHeaderThickness(minimumThickness);
+
+        if (Count <= 0)
             return minimumThickness;
 
         return MeasureVerticalTabHeaderThickness(minimumThickness);
+    }
+
+    private float MeasureHorizontalTabHeaderThickness(float minimumThickness)
+    {
+        if (!ShouldDrawTabIcons)
+            return minimumThickness;
+
+        var isHorizontalIcon = ImageAlign is
+            ContentAlignment.MiddleLeft or ContentAlignment.MiddleRight;
+        if (isHorizontalIcon)
+            return minimumThickness;
+
+        PrepareTabFont();
+        var iconSize    = TabIconSize    * ScaleFactor;
+        var iconSpacing = TabIconSpacing * ScaleFactor;
+        var vertInset   = GetTabVerticalContentPadding();
+
+        // blockH = iconSize + iconSpacing + textH via MeasureContentBlockSize (text=null › just font metrics)
+        var (_, blockH) = TabViewTabGeometry.MeasureContentBlockSize(
+            null, true, _tabFont, iconSize, iconSpacing, ContentAlignment.TopCenter);
+
+        // Header height = blockH + 4*vertInset
+        // (LayoutTabs will strip 2*vertInset at strip level › tab rect height = blockH + 2*vertInset)
+        // (ComputeTabContentRects will strip 1*vertInset per side › available area = blockH) ?
+        var needed = blockH + 4f * vertInset;
+        return Math.Max(minimumThickness, MathF.Ceiling(needed));
     }
 
     private float GetTabStripResizerThickness()
@@ -3208,11 +3758,12 @@ public class WindowPageControl : ElementBase
     {
         PrepareTabFont();
 
-        var axisPadding = Math.Max(4f * ScaleFactor, TabVerticalInset * ScaleFactor);
-        var horizontalPadding = TabHorizontalPadding * ScaleFactor;
+        var axisPadding = Math.Max(4f * ScaleFactor, GetTabVerticalContentPadding());
+        var horizontalPadding = GetTabHorizontalContentPadding();
         var minWidth = Math.Max(VerticalTabMinWidth * ScaleFactor, minimumThickness);
         var maxWidth = Math.Max(VerticalTabMaxWidth * ScaleFactor, minWidth);
-        var iconAllowance = (TabIconSize + TabIconSpacing) * ScaleFactor;
+        var iconSize    = TabIconSize    * ScaleFactor;
+        var iconSpacing = TabIconSpacing  * ScaleFactor;
         var closeButtonSize = TabCloseButtonSize * ScaleFactor;
         var closeButtonSpacing = TabCloseButtonSpacing * ScaleFactor;
         var closeButtonAllowance = ShouldDrawTabCloseButtons ? closeButtonSize + closeButtonSpacing : 0f;
@@ -3224,16 +3775,18 @@ public class WindowPageControl : ElementBase
             if (page == null)
                 continue;
 
-            var desiredWidth = WindowPageTabGeometry.MeasureDesiredTabWidth(
+            var desiredWidth = TabViewTabGeometry.MeasureDesiredTabWidth(
                 page,
                 _tabFont,
                 horizontalPadding,
-                iconAllowance,
+                iconSize,
+                iconSpacing,
                 closeButtonAllowance,
                 minWidth,
                 maxWidth,
                 ShouldDrawTabIcons,
-                ShouldDrawTabCloseButtons);
+                ShouldDrawTabCloseButtons,
+                ImageAlign);
 
             requiredThickness = Math.Max(requiredThickness, desiredWidth + axisPadding * 2f);
         }
@@ -3330,11 +3883,13 @@ public class WindowPageControl : ElementBase
         PrepareTabFont();
 
         var gap = ResolvedTabGap * ScaleFactor;
-        var horizontalPadding = TabHorizontalPadding * ScaleFactor;
-        var verticalInset = TabVerticalInset * ScaleFactor;
-        var minWidth = TabMinWidth * ScaleFactor;
-        var maxWidth = TabMaxWidth * ScaleFactor;
-        var iconAllowance = (TabIconSize + TabIconSpacing) * ScaleFactor;
+        var horizontalPadding = GetTabHorizontalContentPadding();
+        var verticalInset = GetTabVerticalContentPadding();
+        var customMetrics = _customTabStyle.HasValue ? _customTabStyle.Value.Metrics : default;
+        var minWidth = (customMetrics.MinWidth ?? TabMinWidth) * ScaleFactor;
+        var maxWidth = Math.Max(minWidth, (customMetrics.MaxWidth ?? TabMaxWidth) * ScaleFactor);
+        var iconSize    = TabIconSize    * ScaleFactor;
+        var iconSpacing = TabIconSpacing  * ScaleFactor;
         var closeButtonSize = TabCloseButtonSize * ScaleFactor;
         var closeButtonSpacing = TabCloseButtonSpacing * ScaleFactor;
         var closeButtonAllowance = ShouldDrawTabCloseButtons ? closeButtonSize + closeButtonSpacing : 0f;
@@ -3346,7 +3901,9 @@ public class WindowPageControl : ElementBase
             var axisPadding = Math.Max(4f * ScaleFactor, verticalInset);
             var tabWidth = Math.Max(0f, headerRect.Width - (axisPadding * 2f));
             var contentHeight = Math.Max(0f, headerRect.Height - (axisPadding * 2f) - newTabReserve);
-            var tabHeight = Math.Min(GetVerticalTabHeight(iconAllowance, closeButtonAllowance), VerticalTabMaxHeight * ScaleFactor);
+            var verticalPadding = verticalInset * 2f;
+            var minHeight = (customMetrics.MinHeight ?? VerticalTabMinHeight) * ScaleFactor;
+            var maxHeight = Math.Max(minHeight, (customMetrics.MaxHeight ?? VerticalTabMaxHeight) * ScaleFactor);
 
             for (var pageIndex = 0; pageIndex < pageCount; pageIndex++)
             {
@@ -3354,7 +3911,15 @@ public class WindowPageControl : ElementBase
                 if (page == null)
                     continue;
 
-                _tabWidthBuffer.Add(tabHeight);
+                _tabWidthBuffer.Add(MeasureDesiredTabHeight(
+                    page,
+                    ShouldDrawTabIcons,
+                    verticalPadding,
+                    iconSize,
+                    iconSpacing,
+                    closeButtonSize,
+                    minHeight,
+                    maxHeight));
             }
 
             var totalTabHeight = 0f;
@@ -3370,10 +3935,17 @@ public class WindowPageControl : ElementBase
 
             _tabRects.Clear();
             var currentY = startY;
-            for (var i = 0; i < _tabWidthBuffer.Count; i++)
+            for (var pageIndex = 0; pageIndex < pageCount; pageIndex++)
             {
-                _tabRects.Add(SKRect.Create(headerRect.Left + axisPadding, currentY, tabWidth, _tabWidthBuffer[i]));
-                currentY += _tabWidthBuffer[i] + gap;
+                var page = GetPageAt(pageIndex);
+                if (page == null)
+                    continue;
+
+                var bufferIndex = _tabRects.Count;
+                var slotHeight = _tabWidthBuffer[bufferIndex];
+                var slotRect = SKRect.Create(headerRect.Left + axisPadding, currentY, tabWidth, slotHeight);
+                _tabRects.Add(slotRect);
+                currentY += slotHeight + gap;
             }
 
             if (_tabRects.Count > 0)
@@ -3407,15 +3979,15 @@ public class WindowPageControl : ElementBase
             if (page == null)
                 continue;
 
-            var width = WindowPageTabGeometry.MeasureDesiredTabWidth(page, _tabFont, horizontalPadding,
-                iconAllowance, closeButtonAllowance, minWidth, maxWidth,
-                ShouldDrawTabIcons, ShouldDrawTabCloseButtons);
+            var width = TabViewTabGeometry.MeasureDesiredTabWidth(page, _tabFont, horizontalPadding,
+                iconSize, iconSpacing, closeButtonAllowance, minWidth, maxWidth,
+                ShouldDrawTabIcons, ShouldDrawTabCloseButtons, ImageAlign);
             _tabWidthBuffer.Add(width);
         }
 
         var startX = ComputeTabStartX(headerRect, horizontalPadding, newTabReserve, contentWidth, gap);
 
-        WindowPageTabGeometry.LayoutTabs(_tabWidthBuffer,
+        TabViewTabGeometry.LayoutTabs(_tabWidthBuffer,
             startX,
             headerRect.Top + verticalInset,
             Math.Max(0f, headerRect.Height - (verticalInset * 2f)),
@@ -3445,14 +4017,33 @@ public class WindowPageControl : ElementBase
         }
     }
 
-    private float GetVerticalTabHeight(float iconAllowance, float closeButtonAllowance)
+    private float GetVerticalTabHeight(float iconSize, float iconSpacing, float closeButtonAllowance)
     {
-        var iconWidth = Math.Max(0f, iconAllowance - (TabIconSpacing * ScaleFactor));
-        var closeButtonWidth = Math.Max(0f, closeButtonAllowance - (TabCloseButtonSpacing * ScaleFactor));
-        var textHeight = Math.Max(1f, _tabFont.Metrics.Descent - _tabFont.Metrics.Ascent);
-        var contentHeight = Math.Max(textHeight, Math.Max(iconWidth, closeButtonWidth));
-        var minimumHeight = VerticalTabMinHeight * ScaleFactor;
-        return Math.Max(minimumHeight, MathF.Ceiling(contentHeight + (TabVerticalInset * ScaleFactor * 4f)));
+        var closeButtonW = Math.Max(0f, closeButtonAllowance - (TabCloseButtonSpacing * ScaleFactor));
+
+        var (_, blockH) = TabViewTabGeometry.MeasureContentBlockSize(
+            null, ShouldDrawTabIcons, _tabFont, iconSize, iconSpacing, ImageAlign);
+
+        var contentH = Math.Max(blockH, closeButtonW);
+        var customMinHeight = _customTabStyle.HasValue ? _customTabStyle.Value.Metrics.MinHeight : null;
+        return Math.Max((customMinHeight ?? VerticalTabMinHeight) * ScaleFactor, MathF.Ceiling(contentH + GetTabVerticalContentPadding() * 4f));
+    }
+
+    private float MeasureDesiredTabHeight(ElementBase page, bool includeIcon, float verticalPadding,
+        float iconSize, float iconSpacing, float trailingButtonSize, float minHeight, float maxHeight)
+    {
+        var hasIcon = includeIcon && page.Image != null;
+        return TabViewTabGeometry.MeasureDesiredTabHeight(
+            page.Text,
+            hasIcon,
+            _tabFont,
+            verticalPadding,
+            iconSize,
+            iconSpacing,
+            trailingButtonSize,
+            minHeight,
+            maxHeight,
+            ImageAlign);
     }
 
     private bool TryBeginTabStripResize(SKPoint point)
@@ -3463,7 +4054,7 @@ public class WindowPageControl : ElementBase
         _isResizingTabStrip = true;
         _hoveredTabStripResizer = true;
         _tabStripResizeOrigin = point.X;
-        _tabStripResizeStartHeight = _tabStripHeight;
+        _tabStripResizeStartHeight = _verticalTabStripWidth;
         _tabStripResizerAnimation.SetProgress(1d);
         Cursor = GetTabStripResizerCursor();
         GetParentWindow()?.UpdateCursor(this);
@@ -3477,7 +4068,7 @@ public class WindowPageControl : ElementBase
             return;
 
         var scale = Math.Max(ScaleFactor, 1f);
-        var pixelDelta = _tabLayoutMode == WindowPageTabLayoutMode.Right
+        var pixelDelta = _tabLayoutMode == TabViewLayoutMode.Right
             ? _tabStripResizeOrigin - point.X
             : point.X - _tabStripResizeOrigin;
         var logicalDelta = pixelDelta / scale;
@@ -3486,8 +4077,8 @@ public class WindowPageControl : ElementBase
             VerticalTabMinWidth,
             GetMaximumVerticalTabStripWidth());
 
-        if (Math.Abs(nextThickness - _tabStripHeight) >= 0.25f)
-            TabStripHeight = nextThickness;
+        if (Math.Abs(nextThickness - _verticalTabStripWidth) >= 0.25f)
+            SetVerticalTabStripWidth(nextThickness);
 
         Cursor = GetTabStripResizerCursor();
     }
@@ -3508,36 +4099,31 @@ public class WindowPageControl : ElementBase
             return;
         }
 
-        PrepareTabFont();
-
         var headerRect = GetTabHeaderRect();
         if (headerRect.Width <= 0f || headerRect.Height <= 0f)
             return;
 
         var gap = ResolvedTabGap * ScaleFactor;
         var axisPadding = Math.Max(4f * ScaleFactor, TabVerticalInset * ScaleFactor);
-        var iconAllowance = (TabIconSize + TabIconSpacing) * ScaleFactor;
-        var closeButtonAllowance = ShouldDrawTabCloseButtons
-            ? (TabCloseButtonSize + TabCloseButtonSpacing) * ScaleFactor
-            : 0f;
         var newTabReserve = ShouldDrawNewTabButton ? (NewTabButtonSize * ScaleFactor) + gap : 0f;
         var viewportHeight = Math.Max(0f, headerRect.Height - (axisPadding * 2f) - newTabReserve);
-        var tabHeight = Math.Min(GetVerticalTabHeight(iconAllowance, closeButtonAllowance), VerticalTabMaxHeight * ScaleFactor);
-        var totalTabHeight = (Count * tabHeight) + (Math.Max(0, Count - 1) * gap);
 
-        UpdateVerticalTabScrollMetrics(totalTabHeight, viewportHeight);
+        UpdateTabRects();
         if (_verticalTabScrollableExtent <= 0.01f)
             return;
 
-        var slotHeight = tabHeight + gap;
-        var selectedTop = _selectedIndex * slotHeight;
-        var selectedBottom = selectedTop + tabHeight;
+        if (_selectedIndex >= _tabRects.Count)
+            return;
+
+        var viewportTop = headerRect.Top + axisPadding;
+        var viewportBottom = viewportTop + viewportHeight;
+        var selectedRect = _tabRects[_selectedIndex];
         var nextOffset = _verticalTabScrollOffset;
 
-        if (selectedTop < nextOffset)
-            nextOffset = selectedTop;
-        else if (selectedBottom > nextOffset + viewportHeight)
-            nextOffset = selectedBottom - viewportHeight;
+        if (selectedRect.Top < viewportTop)
+            nextOffset -= viewportTop - selectedRect.Top;
+        else if (selectedRect.Bottom > viewportBottom)
+            nextOffset += selectedRect.Bottom - viewportBottom;
 
         _verticalTabScrollOffset = Math.Clamp(nextOffset, 0f, _verticalTabScrollableExtent);
     }
@@ -3584,8 +4170,8 @@ public class WindowPageControl : ElementBase
     {
         return _tabLayoutMode switch
         {
-            WindowPageTabLayoutMode.Left or WindowPageTabLayoutMode.Right => Cursors.SizeWE,
-            WindowPageTabLayoutMode.Bottom => Cursors.SizeNS,
+            TabViewLayoutMode.Left or TabViewLayoutMode.Right => Cursors.SizeWE,
+            TabViewLayoutMode.Bottom => Cursors.SizeNS,
             _ => Cursors.Default,
         };
     }
@@ -3600,9 +4186,241 @@ public class WindowPageControl : ElementBase
         Cursor = Cursors.Default;
     }
 
+    private (SKRect iconRect, SKRect textRect) ComputeTabContentRects(
+        SKRect tabRect, string? text, bool hasIcon,
+        float horizontalPadding, float verticalPadding,
+        float iconSize, float iconSpacing, float trailingReserve)
+    {
+        var availLeft   = tabRect.Left   + horizontalPadding;
+        var availRight  = Math.Max(tabRect.Left + horizontalPadding,
+                                   tabRect.Right - horizontalPadding - trailingReserve);
+        var availTop    = tabRect.Top    + verticalPadding;
+        var availBottom = Math.Max(tabRect.Top + verticalPadding,
+                                   tabRect.Bottom - verticalPadding);
+        var hasText = !string.IsNullOrEmpty(text);
+        var metrics = _tabFont.Metrics;
+        var textH = Math.Max(1f, metrics.Descent - metrics.Ascent);
+
+        if (!hasIcon)
+        {
+            if (!hasText)
+                return (SKRect.Empty, SKRect.Empty);
+
+            var textOnly = new SKRect(availLeft, availTop, availRight, availBottom);
+            return (SKRect.Empty, TabViewTabGeometry.EnsureEllipsisTextRect(textOnly));
+        }
+
+        if (!hasText)
+        {
+            var iconOnly = CreateAlignedRect(ImageAlign, availLeft, availRight, availTop, availBottom, iconSize, iconSize);
+            return (iconOnly, SKRect.Empty);
+        }
+
+        var imageHorizontalGroup = GetAlignmentHorizontalGroup(ImageAlign);
+        var textHorizontalGroup = GetAlignmentHorizontalGroup(TextAlign);
+        var imageVerticalGroup = GetAlignmentVerticalGroup(ImageAlign);
+        var textVerticalGroup = GetAlignmentVerticalGroup(TextAlign);
+
+        var splitVertically = imageVerticalGroup != textVerticalGroup
+            ? true
+            : imageHorizontalGroup != textHorizontalGroup
+                ? false
+                : ImageAlign is not (ContentAlignment.MiddleLeft or ContentAlignment.MiddleRight);
+
+        return splitVertically
+            ? ComputeVerticalTabContentRects(availLeft, availRight, availTop, availBottom, iconSize, iconSpacing,
+                textH, imageHorizontalGroup, imageVerticalGroup, textVerticalGroup)
+            : ComputeHorizontalTabContentRects(availLeft, availRight, availTop, availBottom, iconSize, iconSpacing,
+                imageHorizontalGroup, textHorizontalGroup);
+    }
+
+    private (SKRect iconRect, SKRect textRect) ComputeHorizontalTabContentRects(
+        float left, float right, float top, float bottom,
+        float iconSize, float iconSpacing,
+        int imageHorizontalGroup, int textHorizontalGroup)
+    {
+        var availableWidth = Math.Max(0f, right - left);
+        var iconWidth = Math.Min(iconSize, availableWidth);
+        var remainingWidth = Math.Max(0f, availableWidth - iconWidth);
+        var spacing = ResolveInterItemSpacing(remainingWidth, iconSpacing);
+        var textWidth = Math.Max(0f, remainingWidth - spacing);
+        var iconFirst = ResolvePrimaryOrder(imageHorizontalGroup, textHorizontalGroup);
+
+        float iconSlotLeft;
+        float iconSlotRight;
+        SKRect textRect;
+
+        if (iconFirst)
+        {
+            iconSlotLeft = left;
+            iconSlotRight = left + iconWidth;
+            textRect = new SKRect(
+                Math.Min(right, iconSlotRight + spacing),
+                top,
+                right,
+                bottom);
+        }
+        else
+        {
+            iconSlotLeft = Math.Max(left, right - iconWidth);
+            iconSlotRight = right;
+            textRect = new SKRect(
+                left,
+                top,
+                Math.Max(left, iconSlotLeft - spacing),
+                bottom);
+        }
+
+        var iconRect = CreateAlignedRect(ImageAlign, iconSlotLeft, iconSlotRight, top, bottom, iconSize, iconSize);
+        return (iconRect, TabViewTabGeometry.EnsureEllipsisTextRect(textRect));
+    }
+
+    private (SKRect iconRect, SKRect textRect) ComputeVerticalTabContentRects(
+        float left, float right, float top, float bottom,
+        float iconSize, float iconSpacing, float textHeight,
+        int imageHorizontalGroup, int imageVerticalGroup, int textVerticalGroup)
+    {
+        var availableHeight = Math.Max(0f, bottom - top);
+        var iconHeight = Math.Min(iconSize, availableHeight);
+        var remainingHeight = Math.Max(0f, availableHeight - iconHeight);
+        var spacing = ResolveInterItemSpacing(remainingHeight, iconSpacing);
+        var iconFirst = ResolvePrimaryOrder(imageVerticalGroup, textVerticalGroup);
+
+        float iconSlotTop;
+        float iconSlotBottom;
+        SKRect textRect;
+
+        if (iconFirst)
+        {
+            iconSlotTop = top;
+            iconSlotBottom = top + iconHeight;
+            textRect = new SKRect(
+                left,
+                Math.Min(bottom, iconSlotBottom + spacing),
+                right,
+                bottom);
+        }
+        else
+        {
+            iconSlotTop = Math.Max(top, bottom - iconHeight);
+            iconSlotBottom = bottom;
+            textRect = new SKRect(
+                left,
+                top,
+                right,
+                Math.Max(top, iconSlotTop - spacing));
+        }
+
+        if (textRect.Height < textHeight && availableHeight > iconHeight)
+        {
+            var adjustedSpacing = Math.Max(0f, availableHeight - iconHeight - textHeight);
+            if (iconFirst)
+            {
+                textRect = new SKRect(left, Math.Min(bottom, iconSlotBottom + adjustedSpacing), right, bottom);
+            }
+            else
+            {
+                textRect = new SKRect(left, top, right, Math.Max(top, iconSlotTop - adjustedSpacing));
+            }
+        }
+
+        var iconAlign = imageHorizontalGroup switch
+        {
+            < 0 when imageVerticalGroup < 0 => ContentAlignment.TopLeft,
+            < 0 when imageVerticalGroup > 0 => ContentAlignment.BottomLeft,
+            > 0 when imageVerticalGroup < 0 => ContentAlignment.TopRight,
+            > 0 when imageVerticalGroup > 0 => ContentAlignment.BottomRight,
+            < 0 => ContentAlignment.MiddleLeft,
+            > 0 => ContentAlignment.MiddleRight,
+            _ when imageVerticalGroup < 0 => ContentAlignment.TopCenter,
+            _ when imageVerticalGroup > 0 => ContentAlignment.BottomCenter,
+            _ => ContentAlignment.MiddleCenter,
+        };
+
+        var iconRect = CreateAlignedRect(iconAlign, left, right, iconSlotTop, iconSlotBottom, iconSize, iconSize);
+        return (iconRect, TabViewTabGeometry.EnsureEllipsisTextRect(textRect));
+    }
+
+    private static bool ResolvePrimaryOrder(int imageGroup, int textGroup)
+    {
+        if (imageGroup < textGroup)
+            return true;
+
+        if (imageGroup > textGroup)
+            return false;
+
+        return imageGroup != 1;
+    }
+
+    private static float ResolveInterItemSpacing(float remainingSpace, float desiredSpacing)
+    {
+        if (remainingSpace <= 1f)
+            return 0f;
+
+        return Math.Min(desiredSpacing, remainingSpace - 1f);
+    }
+
+    private static SKRect CreateAlignedRect(ContentAlignment align, float left, float right, float top, float bottom, float width, float height)
+    {
+        var availableWidth = Math.Max(0f, right - left);
+        var availableHeight = Math.Max(0f, bottom - top);
+        var clampedWidth = Math.Clamp(width, 0f, availableWidth);
+        var clampedHeight = Math.Clamp(height, 0f, availableHeight);
+        var alignedLeft = Math.Clamp(
+            AlignH(align, left, right, clampedWidth),
+            left,
+            Math.Max(left, right - clampedWidth));
+        var alignedTop = Math.Clamp(
+            AlignV(align, top, bottom, clampedHeight),
+            top,
+            Math.Max(top, bottom - clampedHeight));
+        return SKRect.Create(alignedLeft, alignedTop, clampedWidth, clampedHeight);
+    }
+
+    private static int GetAlignmentHorizontalGroup(ContentAlignment alignment)
+    {
+        return alignment switch
+        {
+            ContentAlignment.TopLeft or ContentAlignment.MiddleLeft or ContentAlignment.BottomLeft => -1,
+            ContentAlignment.TopRight or ContentAlignment.MiddleRight or ContentAlignment.BottomRight => 1,
+            _ => 0,
+        };
+    }
+
+    private static int GetAlignmentVerticalGroup(ContentAlignment alignment)
+    {
+        return alignment switch
+        {
+            ContentAlignment.TopLeft or ContentAlignment.TopCenter or ContentAlignment.TopRight => -1,
+            ContentAlignment.BottomLeft or ContentAlignment.BottomCenter or ContentAlignment.BottomRight => 1,
+            _ => 0,
+        };
+    }
+
+
+    private static float AlignH(ContentAlignment align, float left, float right, float contentW)
+    {
+        return align switch
+        {
+            ContentAlignment.TopLeft    or ContentAlignment.MiddleLeft    or ContentAlignment.BottomLeft    => left,
+            ContentAlignment.TopRight   or ContentAlignment.MiddleRight   or ContentAlignment.BottomRight   => right - contentW,
+            _ => left + (right - left - contentW) * 0.5f,
+        };
+    }
+
+    private static float AlignV(ContentAlignment align, float top, float bottom, float contentH)
+    {
+        return align switch
+        {
+            ContentAlignment.TopLeft    or ContentAlignment.TopCenter    or ContentAlignment.TopRight    => top,
+            ContentAlignment.BottomLeft or ContentAlignment.BottomCenter or ContentAlignment.BottomRight => bottom - contentH,
+            _ => top + (bottom - top - contentH) * 0.5f,
+        };
+    }
+
     private float ComputeTabStartX(SKRect headerRect, float horizontalPadding, float newTabReserve, float contentWidth, float gap)
     {
-        if (_tabAlignment == WindowPageTabAlignment.Start)
+        if (_tabAlignment == TabViewAlignment.Start)
             return headerRect.Left + horizontalPadding;
 
         var totalTabWidth = 0f;
@@ -3613,15 +4431,15 @@ public class WindowPageControl : ElementBase
 
         return _tabAlignment switch
         {
-            WindowPageTabAlignment.Center => headerRect.Left + horizontalPadding + (contentWidth - totalTabWidth) / 2f,
-            WindowPageTabAlignment.End    => headerRect.Left + horizontalPadding + (contentWidth - totalTabWidth),
+            TabViewAlignment.Center => headerRect.Left + horizontalPadding + (contentWidth - totalTabWidth) / 2f,
+            TabViewAlignment.End    => headerRect.Left + horizontalPadding + (contentWidth - totalTabWidth),
             _                             => headerRect.Left + horizontalPadding
         };
     }
 
     private float ComputeTabStartY(SKRect headerRect, float verticalPadding, float contentHeight, float gap)
     {
-        if (_tabAlignment == WindowPageTabAlignment.Start)
+        if (_tabAlignment == TabViewAlignment.Start)
             return headerRect.Top + verticalPadding;
 
         var totalTabHeight = 0f;
@@ -3632,8 +4450,8 @@ public class WindowPageControl : ElementBase
 
         return _tabAlignment switch
         {
-            WindowPageTabAlignment.Center => headerRect.Top + verticalPadding + (contentHeight - totalTabHeight) / 2f,
-            WindowPageTabAlignment.End    => headerRect.Top + verticalPadding + (contentHeight - totalTabHeight),
+            TabViewAlignment.Center => headerRect.Top + verticalPadding + (contentHeight - totalTabHeight) / 2f,
+            TabViewAlignment.End    => headerRect.Top + verticalPadding + (contentHeight - totalTabHeight),
             _                             => headerRect.Top + verticalPadding
         };
     }
@@ -3643,12 +4461,12 @@ public class WindowPageControl : ElementBase
         if (!ShouldDrawTabCloseButtons)
             return SKRect.Empty;
 
-        return WindowPageTabGeometry.CreateTrailingButtonRect(tabRect, preferredSize, horizontalPadding, 10f * ScaleFactor);
+        return TabViewTabGeometry.CreateTrailingButtonRect(tabRect, preferredSize, horizontalPadding, 10f * ScaleFactor);
     }
 
     private void StartTabSelectionAnimation(int previousSelectedIndex, int nextSelectedIndex)
     {
-        if (TabMode != WindowPageTabMode.Embedded || previousSelectedIndex < 0 || nextSelectedIndex < 0 || previousSelectedIndex == nextSelectedIndex)
+        if (TabMode != TabViewMode.Embedded || previousSelectedIndex < 0 || nextSelectedIndex < 0 || previousSelectedIndex == nextSelectedIndex)
         {
             _previousSelectedIndex = nextSelectedIndex;
             _tabSelectionAnimation.SetProgress(1);
@@ -3660,18 +4478,18 @@ public class WindowPageControl : ElementBase
         _tabSelectionAnimation.StartNewAnimation(AnimationDirection.In);
     }
 
-    private void StartWindowChromeSelectionAnimation(int previousSelectedIndex, int nextSelectedIndex)
+    private void StartTitleBarSelectionAnimation(int previousSelectedIndex, int nextSelectedIndex)
     {
-        if (TabMode != WindowPageTabMode.WindowChrome || previousSelectedIndex < 0 || nextSelectedIndex < 0 || previousSelectedIndex == nextSelectedIndex)
+        if (TabMode != TabViewMode.TitleBar || previousSelectedIndex < 0 || nextSelectedIndex < 0 || previousSelectedIndex == nextSelectedIndex)
         {
-            _windowChromePreviousSelectedIndex = nextSelectedIndex;
-            _windowChromeTabSelectionAnimation.SetProgress(1);
+            _titleBarPreviousSelectedIndex = nextSelectedIndex;
+            _titleBarTabSelectionAnimation.SetProgress(1);
             return;
         }
 
-        _windowChromePreviousSelectedIndex = previousSelectedIndex;
-        _windowChromeTabSelectionAnimation.SetProgress(0);
-        _windowChromeTabSelectionAnimation.StartNewAnimation(AnimationDirection.In);
+        _titleBarPreviousSelectedIndex = previousSelectedIndex;
+        _titleBarTabSelectionAnimation.SetProgress(0);
+        _titleBarTabSelectionAnimation.StartNewAnimation(AnimationDirection.In);
     }
 
     private void ResetTabSelectionAnimation()
@@ -3680,17 +4498,19 @@ public class WindowPageControl : ElementBase
         _tabSelectionAnimation.SetProgress(1);
     }
 
-    private void ResetWindowChromeState()
+    private void ResetTitleBarState()
     {
-        _windowChromePreviousSelectedIndex = _selectedIndex;
-        _windowChromeTabSelectionAnimation.SetProgress(1);
-        ResetWindowChromeHoverState();
-        InvalidateWindowChromeLayout();
+        _titleBarPreviousSelectedIndex = _selectedIndex;
+        _titleBarTabSelectionAnimation.SetProgress(1);
+        ResetTitleBarHoverState();
+        InvalidateTitleBarLayout();
     }
 
     private void InvalidateTabChrome()
     {
-        InvalidateWindowChromeLayout();
+        InvalidateTitleBarLayout();
+        if (GetParentWindow() is Window hostWindow)
+            hostWindow.RefreshTitleBarTabsHostLayout();
         InvalidateRenderTree();
         Invalidate();
     }
@@ -3705,6 +4525,9 @@ public class WindowPageControl : ElementBase
 
     private SKRect GetTransitionViewport()
     {
+        if (_transitionViewport.Width > 0f && _transitionViewport.Height > 0f)
+            return _transitionViewport;
+
         var selectedPage = GetPageAt(_selectedIndex) ?? GetPageAt(_transitionFromIndex) ?? GetPageAt(_transitionToIndex);
         if (selectedPage != null)
         {
@@ -3742,6 +4565,8 @@ public class WindowPageControl : ElementBase
             _transitionToSnapshot?.Dispose();
             _transitionToSnapshot = null;
         }
+
+        _transitionViewport = SKRect.Empty;
     }
 
     private void FinalizeCompletedTransitionIfPending()
@@ -3754,6 +4579,7 @@ public class WindowPageControl : ElementBase
         _transitionFromIndex = -1;
         _transitionToIndex = -1;
         _isTransitionDirty = false;
+        _transitionViewport = SKRect.Empty;
         InvalidateRenderTree();
     }
 

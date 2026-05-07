@@ -46,6 +46,7 @@ public class MenuStrip : ElementBase
     private bool _ownsShortcutTypeface;
     private int _shortcutSkFontDpi;
     private SKFont? _shortcutSkFontSource;
+    private SKColor _hostedTitleBarForeColorOverride = SKColor.Empty;
     private SKColor _hoverBackColor = SKColor.Empty;
     private SKPaint? _hoverBgPaint;
     private MenuItem? _hoveredItem;
@@ -70,10 +71,10 @@ public class MenuStrip : ElementBase
     private bool _showCheckMargin = true;
     private bool _showHoverEffect = true;
     private bool _showIcons = true;
-    private bool _showImageMargin = false;
     private bool _showBottomBorder = true;
     private bool _showShortcutKeys = true;
     private bool _showSubmenuArrow = true;
+    private bool _useHostedTitleBarForeColor = true;
     private bool _stretch;
     private SKColor _submenuBackColor = SKColor.Empty;
     private SKColor _submenuBorderColor = SKColor.Empty;
@@ -83,9 +84,9 @@ public class MenuStrip : ElementBase
     public MenuStrip()
     {
         Padding = new Thickness(
-            (int)Math.Round(6f * ScaleFactor),
+            (int)Math.Round(4f * ScaleFactor),
             (int)Math.Round(2f * ScaleFactor),
-            (int)Math.Round(6f * ScaleFactor),
+            (int)Math.Round(4f * ScaleFactor),
             (int)Math.Round(2f * ScaleFactor));
         _itemHeight = BaseItemHeight * ScaleFactor;
         _itemPadding = BaseItemPadding * ScaleFactor;
@@ -175,6 +176,19 @@ public class MenuStrip : ElementBase
         {
             if (_hoverForeColor == value) return;
             _hoverForeColor = value;
+            Invalidate();
+        }
+    }
+
+    [Category("Appearance")]
+    [DefaultValue(true)]
+    public bool UseHostedTitleBarForeColor
+    {
+        get => _useHostedTitleBarForeColor;
+        set
+        {
+            if (_useHostedTitleBarForeColor == value) return;
+            _useHostedTitleBarForeColor = value;
             Invalidate();
         }
     }
@@ -296,19 +310,6 @@ public class MenuStrip : ElementBase
         {
             if (_showCheckMargin == value) return;
             _showCheckMargin = value;
-            Invalidate();
-        }
-    }
-
-    [Category("Layout")]
-    [DefaultValue(true)]
-    public bool ShowImageMargin
-    {
-        get => _showImageMargin;
-        set
-        {
-            if (_showImageMargin == value) return;
-            _showImageMargin = value;
             Invalidate();
         }
     }
@@ -797,7 +798,7 @@ public class MenuStrip : ElementBase
                     StrokeCap = SKStrokeCap.Round,
                     StrokeJoin = SKStrokeJoin.Round
                 };
-                _checkPaint.Color = ForeColor;
+                _checkPaint.Color = GetResolvedForeColor();
 
                 _checkPath ??= new SKPath();
                 _checkPath.Reset();
@@ -815,7 +816,7 @@ public class MenuStrip : ElementBase
                     IsAntialias = true,
                     Style = SKPaintStyle.Fill
                 };
-                _checkPaint.Color = ForeColor.WithAlpha(128);
+                _checkPaint.Color = GetResolvedForeColor().WithAlpha(128);
 
                 var boxSize = 4f * scale;
                 var boxRect = new SkiaSharp.SKRect(
@@ -846,12 +847,13 @@ public class MenuStrip : ElementBase
         }
 
         // Text with high quality
-        var hoverFore = !HoverForeColor.IsEmpty()
-            ? HoverForeColor
+        var effectiveForeColor = GetResolvedForeColor();
+        var hoverFore = !_hoverForeColor.IsEmpty()
+            ? _hoverForeColor
             : HoverBackColor.IsEmpty()
-                ? ForeColor
+                ? effectiveForeColor
                 : HoverBackColor.Determine();
-        var textColor = BlendColors(ForeColor, hoverFore, prog);
+        var textColor = BlendColors(effectiveForeColor, hoverFore, prog);
         var shortcutText = GetShortcutText(item, vertical);
         var shouldDrawShortcut = shortcutText.Length > 0;
 
@@ -1256,7 +1258,6 @@ public class MenuStrip : ElementBase
         _activeDropDown.ShowSubmenuArrow = ShowSubmenuArrow;
         _activeDropDown.ShowIcons = ShowIcons;
         _activeDropDown.ShowCheckMargin = ShowCheckMargin;
-        _activeDropDown.ShowImageMargin = ShowImageMargin;
         _activeDropDown.ShowShortcutKeys = ShowShortcutKeys;
         _activeDropDown.Border = new Thickness(1);
         _activeDropDown.Invalidate();
@@ -1395,12 +1396,12 @@ public class MenuStrip : ElementBase
 
     private float GetHorizontalMenuInset()
     {
-        return Math.Max(4f * ScaleFactor, ItemPadding * 0.5f);
+        return Math.Max(2f * ScaleFactor, ItemPadding * 0.25f);
     }
 
     private float GetHorizontalItemGap()
     {
-        return Math.Max(4f * ScaleFactor, ItemPadding);
+        return Math.Max(1f * ScaleFactor, ItemPadding * 0.35f);
     }
 
     private void UpdateMenuStripHeight()
@@ -1481,7 +1482,7 @@ public class MenuStrip : ElementBase
         if (vertical)
             return Math.Max(6f * ScaleFactor, item.Padding.Left * ScaleFactor);
 
-        return Math.Max(10f * ScaleFactor, item.Padding.Left * ScaleFactor + 2f * ScaleFactor);
+        return Math.Max(6f * ScaleFactor, item.Padding.Left * ScaleFactor + 1f * ScaleFactor);
     }
 
     private float GetTrailingTextInset(MenuItem item, bool vertical)
@@ -1495,10 +1496,36 @@ public class MenuStrip : ElementBase
             return reserve;
         }
 
-        var trailing = Math.Max(10f * ScaleFactor, item.Padding.Right * ScaleFactor + 2f * ScaleFactor);
+        var trailing = Math.Max(6f * ScaleFactor, item.Padding.Right * ScaleFactor + 1f * ScaleFactor);
         if (ShowSubmenuArrow && item.HasDropDown)
             trailing += GetHorizontalArrowReserve();
         return trailing;
+    }
+
+    internal void SetHostedTitleBarForeColorOverride(SKColor color)
+    {
+        if (_hostedTitleBarForeColorOverride == color)
+            return;
+
+        _hostedTitleBarForeColorOverride = color;
+        Invalidate();
+    }
+
+    internal void ClearHostedTitleBarForeColorOverride()
+    {
+        if (_hostedTitleBarForeColorOverride == SKColor.Empty)
+            return;
+
+        _hostedTitleBarForeColorOverride = SKColor.Empty;
+        Invalidate();
+    }
+
+    private SKColor GetResolvedForeColor()
+    {
+        if (_useHostedTitleBarForeColor && _hostedTitleBarForeColorOverride != SKColor.Empty)
+            return _hostedTitleBarForeColorOverride;
+
+        return ForeColor;
     }
 
     protected override void Dispose(bool disposing)

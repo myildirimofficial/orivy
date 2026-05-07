@@ -12,7 +12,7 @@ internal static class TextTruncator
             return text;
 
         var fullWidth = font.MeasureText(text);
-        if (fullWidth <= maxWidth)
+        if (fullWidth <= maxWidth + 1.0f)
             return text;
 
         var ellipsisWidth = font.MeasureText(Ellipsis);

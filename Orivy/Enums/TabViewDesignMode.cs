@@ -1,6 +1,6 @@
 namespace Orivy;
 
-public enum WindowPageTabDesignMode
+public enum TabViewDesignMode
 {
     Rectangle,
     Rounded,
@@ -8,5 +8,7 @@ public enum WindowPageTabDesignMode
     RoundedCompact,
     Pill,
     Outlined,
-    Minimal
+    Minimal,
+    Fluent,
+    MacOS
 }

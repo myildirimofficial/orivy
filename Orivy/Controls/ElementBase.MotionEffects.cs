@@ -1,17 +1,27 @@
 using Orivy.Styling;
 using SkiaSharp;
 using System;
+using System.Buffers;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Threading;
 using System.Timers;
+using SharedTimer = System.Timers.Timer;
 
 namespace Orivy.Controls;
 
 public abstract partial class ElementBase
 {
+    private static readonly object s_motionEffectsSync = new();
+    private static readonly List<ElementBase> s_activeMotionEffectsElements = new();
+    private static SharedTimer? s_sharedMotionEffectsTimer;
+    private static int s_motionEffectsTickInProgress;
+
     private readonly Stopwatch _motionEffectsClock = Stopwatch.StartNew();
-    private readonly Timer _motionEffectsTimer = new(33) { AutoReset = true };
+    private readonly SKPaint _motionEffectsPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private bool _motionEffectsEnabled;
+    private bool _motionEffectsRegistered;
 
     [Browsable(false)]
     public ElementMotionScene MotionEffects { get; }
@@ -21,7 +31,6 @@ public abstract partial class ElementBase
 
     private void InitializeMotionEffectsSystem()
     {
-        _motionEffectsTimer.Elapsed += HandleMotionEffectsTick;
     }
 
     public ElementBase ConfigureMotionEffects(Action<ElementMotionSceneBuilder> configure, bool clearExisting = true)
@@ -57,19 +66,106 @@ public abstract partial class ElementBase
         {
             if (!_motionEffectsClock.IsRunning)
                 _motionEffectsClock.Start();
-
-            if (!_motionEffectsTimer.Enabled)
-                _motionEffectsTimer.Start();
         }
+
+        var shouldRegister = _motionEffectsEnabled && Visible && !IsDisposed && !Disposing;
+        if (shouldRegister)
+            RegisterWithSharedMotionEffectsTimer();
         else
+            UnregisterFromSharedMotionEffectsTimer();
+    }
+
+    private static void EnsureSharedMotionEffectsTimer()
+    {
+        if (s_sharedMotionEffectsTimer != null)
+            return;
+
+        s_sharedMotionEffectsTimer = new SharedTimer(33) { AutoReset = true };
+        s_sharedMotionEffectsTimer.Elapsed += HandleSharedMotionEffectsTick;
+    }
+
+    private static void HandleSharedMotionEffectsTick(object? sender, ElapsedEventArgs e)
+    {
+        if (Interlocked.Exchange(ref s_motionEffectsTickInProgress, 1) != 0)
+            return;
+
+        ElementBase[] buffer;
+        int count;
+
+        lock (s_motionEffectsSync)
         {
-            _motionEffectsTimer.Stop();
+            count = s_activeMotionEffectsElements.Count;
+            if (count == 0)
+            {
+                s_sharedMotionEffectsTimer?.Stop();
+                Interlocked.Exchange(ref s_motionEffectsTickInProgress, 0);
+                return;
+            }
+
+            buffer = ArrayPool<ElementBase>.Shared.Rent(count);
+            s_activeMotionEffectsElements.CopyTo(buffer, 0);
+        }
+
+        try
+        {
+            for (var i = 0; i < count; i++)
+                buffer[i].TickMotionEffectsCore();
+        }
+        finally
+        {
+            Array.Clear(buffer, 0, count);
+            ArrayPool<ElementBase>.Shared.Return(buffer);
+            Interlocked.Exchange(ref s_motionEffectsTickInProgress, 0);
         }
     }
 
-    private void HandleMotionEffectsTick(object? sender, ElapsedEventArgs e)
+    private void RegisterWithSharedMotionEffectsTimer()
     {
-        if (!_motionEffectsEnabled || !Visible || Width <= 0 || Height <= 0 || IsDisposed)
+        lock (s_motionEffectsSync)
+        {
+            EnsureSharedMotionEffectsTimer();
+
+            if (!_motionEffectsRegistered)
+            {
+                s_activeMotionEffectsElements.Add(this);
+                _motionEffectsRegistered = true;
+            }
+
+            if (s_sharedMotionEffectsTimer != null && !s_sharedMotionEffectsTimer.Enabled)
+                s_sharedMotionEffectsTimer.Start();
+        }
+    }
+
+    private void UnregisterFromSharedMotionEffectsTimer()
+    {
+        lock (s_motionEffectsSync)
+        {
+            if (_motionEffectsRegistered)
+            {
+                s_activeMotionEffectsElements.Remove(this);
+                _motionEffectsRegistered = false;
+            }
+
+            if (s_activeMotionEffectsElements.Count == 0 && s_sharedMotionEffectsTimer != null)
+                s_sharedMotionEffectsTimer.Stop();
+        }
+    }
+
+    private void TickMotionEffectsCore()
+    {
+        if (!_motionEffectsEnabled || IsDisposed || Disposing)
+        {
+            UnregisterFromSharedMotionEffectsTimer();
+            return;
+        }
+
+        if (!Visible)
+        {
+            UnregisterFromSharedMotionEffectsTimer();
+            return;
+        }
+
+        if (!IsVisibleInRenderTree() || Width <= 0 || Height <= 0)
             return;
 
         Invalidate();
@@ -112,12 +208,15 @@ public abstract partial class ElementBase
             var height = effect.Size.Height * scale;
             var color = effect.Color.WithAlpha((byte)Math.Clamp((int)Math.Round(effect.Color.Alpha * opacity), 0, 255));
 
-            using var paint = new SKPaint
-            {
-                IsAntialias = true,
-                Color = color,
-                Style = SKPaintStyle.Fill
-            };
+            var paint = _motionEffectsPaint;
+            paint.MaskFilter = null;
+            paint.Shader = null;
+            paint.ColorFilter = null;
+            paint.PathEffect = null;
+            paint.ImageFilter = null;
+            paint.IsAntialias = true;
+            paint.Style = SKPaintStyle.Fill;
+            paint.Color = color;
 
             if (effect.ShapeKind == ElementMotionShapeKind.Circle)
             {
@@ -198,8 +297,7 @@ public abstract partial class ElementBase
 
     private void DisposeMotionEffectsSystem()
     {
-        _motionEffectsTimer.Elapsed -= HandleMotionEffectsTick;
-        _motionEffectsTimer.Stop();
-        _motionEffectsTimer.Dispose();
+        UnregisterFromSharedMotionEffectsTimer();
+        _motionEffectsPaint.Dispose();
     }
 }
