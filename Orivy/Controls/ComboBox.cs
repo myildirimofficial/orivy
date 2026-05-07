@@ -600,8 +600,8 @@ public class ComboBox : ElementBase
 
     internal override void OnLostFocus(EventArgs e)
     {
-        if (DroppedDown && !IsDropDownDescendant(ParentWindow?.FocusedElement))
-            CloseDropDown();
+        //if (DroppedDown && !IsDropDownDescendant(ParentWindow?.FocusedElement))
+            //CloseDropDown();
 
         base.OnLostFocus(e);
     }
