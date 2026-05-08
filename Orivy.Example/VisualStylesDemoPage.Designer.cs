@@ -55,7 +55,6 @@ internal sealed partial class VisualStylesDemoPage
             Radius = new(16),
             Border = new(1),
             TextAlign = ContentAlignment.MiddleLeft,
-            Cursor = Cursors.Hand
         };
 
         visualStyleMotionHero = new()
@@ -83,7 +82,6 @@ internal sealed partial class VisualStylesDemoPage
             Radius = new(16),
             Border = new(1),
             TextAlign = ContentAlignment.MiddleLeft,
-            Cursor = Cursors.Hand,
             Tag = "normal"
         };
 
@@ -112,7 +110,6 @@ internal sealed partial class VisualStylesDemoPage
             Radius = new(14),
             Border = new(0),
             TextAlign = ContentAlignment.MiddleCenter,
-            Cursor = Cursors.Hand
         };
 
         visualStylePrimaryButton = new Button
@@ -197,7 +194,6 @@ internal sealed partial class VisualStylesDemoPage
             Border = new(1),
             BorderColor = ColorScheme.Outline,
             TextAlign = ContentAlignment.MiddleCenter,
-            Cursor = Cursors.Hand,
             Tag = "closed"
         };
 
@@ -226,7 +222,6 @@ internal sealed partial class VisualStylesDemoPage
             Radius = new(8),
             Border = new(0),
             TextAlign = ContentAlignment.MiddleLeft,
-            Cursor = Cursors.Hand,
             Tag = "active"
         };
 
@@ -241,7 +236,6 @@ internal sealed partial class VisualStylesDemoPage
             Radius = new(8),
             Border = new(0),
             TextAlign = ContentAlignment.MiddleLeft,
-            Cursor = Cursors.Hand,
         };
 
         var visualStyleSidebarDeploy = new Element
@@ -255,7 +249,6 @@ internal sealed partial class VisualStylesDemoPage
             Radius = new(8),
             Border = new(0),
             TextAlign = ContentAlignment.MiddleLeft,
-            Cursor = Cursors.Hand,
         };
         visualStyleScrollProbe = new()
         {

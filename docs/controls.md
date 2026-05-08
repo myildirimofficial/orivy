@@ -157,7 +157,6 @@ public class ToggleSwitch : ElementBase
 	public ToggleSwitch()
 	{
 		Size = new SKSize(48, 28);
-		Cursor = Cursors.Hand;
 		ConfigureVisualStyles(s => s
 			.Base(b => b.Background(ColorScheme.SurfaceVariant).Radius(14))
 			.OnChecked(c => c.Background(ColorScheme.Primary)));

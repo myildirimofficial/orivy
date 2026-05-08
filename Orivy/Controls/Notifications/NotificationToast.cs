@@ -474,7 +474,7 @@ public sealed class NotificationToast : ElementBase
 
 		_closeHovered = _closeRect.Contains(point);
 		_hoveredAction = HitTestAction(point);
-		Cursor = _closeHovered || _hoveredAction >= 0 ? Cursors.Hand : Cursors.Default;
+		//Cursor = _closeHovered || _hoveredAction >= 0 ? Cursors.Hand : Cursors.Default;
 
 		if (previousCloseHovered != _closeHovered || previousHoveredAction != _hoveredAction)
 			Invalidate();

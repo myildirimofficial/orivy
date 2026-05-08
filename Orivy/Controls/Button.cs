@@ -17,7 +17,6 @@ public class Button : ElementBase
         AutoSizeMode = AutoSizeMode.GrowOnly;
         AutoEllipsis = true;
         CanSelect = true;
-        Cursor = Cursors.Hand;
         MinimumSize = new SKSize(45, 24);
         Padding = new Thickness(8);
         Radius = new Radius(12);

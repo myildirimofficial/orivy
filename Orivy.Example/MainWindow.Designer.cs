@@ -60,14 +60,9 @@ internal partial class MainWindow
         
         // use extension helpers for concise syntax
         var fileMenu = this.menuStrip.AddMenuItem("File");
-        fileMenu.AddMenuItem("Open", (s, e) =>
-        {
-            NotificationToast.Show(
-                "Open",
-                "Ctrl+O captured the File > Open command.",
-                NotificationKind.Info,
-                2800);
-        }, Keys.Control | Keys.O);
+        fileMenu.AddMenuItem("Open", (_, _) => ShowOpenFileSelectionDialog(), Keys.Control | Keys.O);
+        fileMenu.AddMenuItem("Save As", (_, _) => ShowSaveFileSelectionDialog(), Keys.Control | Keys.S);
+        fileMenu.AddMenuItem("Open Folder", (_, _) => ShowOpenFolderSelectionDialog(), Keys.Control | Keys.Shift | Keys.O);
         fileMenu.AddSeparator();
         fileMenu.AddMenuItem("Exit", (s, e) => this.Close(), Keys.Control | Keys.X);
 
