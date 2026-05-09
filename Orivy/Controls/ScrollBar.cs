@@ -98,8 +98,11 @@ public class ScrollBar : ElementBase
     // =========================================================================
     public ScrollBar()
     {
+        CanSelect = false;
         Cursor = Cursors.Default;
         Radius = new(6);
+        Selectable = false;
+        TabStop = false;
         ApplyOrientationSize();
 
         // --- Visibility animation ---
