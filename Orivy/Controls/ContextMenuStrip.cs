@@ -105,6 +105,7 @@ public class ContextMenuStrip : MenuStrip
         AutoSize = false;
         TabStop = false;
         Orientation = Orientation.Vertical;
+        Cursor = Cursors.Default;
         BackColor = ColorScheme.Surface;
         AutoScroll = false;
         Border = new Thickness(1);
@@ -308,6 +309,7 @@ public class ContextMenuStrip : MenuStrip
         PositionDropDown(location);
         Visible = true;
         EnsureTopMostInOwner();
+        _ownerWindow.UpdateCursor(this);
 
         // WinForms z-order + Orivy'nin kendi ZOrder sistemini güncelle.
         BringToFront();
