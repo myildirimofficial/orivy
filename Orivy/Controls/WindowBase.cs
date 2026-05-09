@@ -1038,8 +1038,8 @@ public partial class WindowBase : ElementBase
                 }
             case WindowMessage.WM_CHAR:
                 {
-                    var keyCode = (Keys)wParam.ToInt32();
-                    var keyArgs = new KeyPressEventArgs(keyCode, ModifierKeys);
+                    var keyChar = (char)wParam.ToInt32();
+                    var keyArgs = new KeyPressEventArgs(keyChar, ModifierKeys);
 
                     // If KeyPreview is enabled, window gets first chance to handle
                     if (KeyPreview)
