@@ -11,7 +11,3 @@ public class Container : ElementBase
         BackColor = SkiaSharp.SKColors.Transparent;
     }
 }
-
-public class TextBox : ElementBase
-{
-}
