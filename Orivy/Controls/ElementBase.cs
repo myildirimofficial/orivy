@@ -43,6 +43,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     private readonly SKPaint _renderOpacityPaint = new() { IsAntialias = true, Color = SKColors.White };
     private readonly SKPaint _renderShadowPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _renderDebugBorderPaint = new() { Color = SKColors.Red, Style = SKPaintStyle.Stroke, StrokeWidth = 1f, IsAntialias = true };
+    private readonly SKPaint _renderFocusAdornerPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round };
     private readonly SKRoundRect _renderRoundRectScratch = new();
     private readonly SKPoint[] _renderRoundRectRadiiScratch = new SKPoint[4];
     private readonly SKPath _renderInsetShadowOuterPath = new();
@@ -2323,6 +2324,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             if (layerSaveCount >= 0)
                 targetCanvas.RestoreToCount(layerSaveCount);
 
+            RenderFocusAdorner(targetCanvas, hasRadius);
+
             targetCanvas.RestoreToCount(saved);
 
             if (ColorScheme.DrawDebugBorders)
@@ -2518,6 +2521,83 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         TextRenderer.DrawText(canvas, _text, displayRectangle, paint, GetDefaultTextRenderFont(), TextAlign, AutoEllipsis, UseMnemonic);
     }
 
+    private void EnsureFocusAdornerResources()
+    {
+        _renderFocusAdornerPaint.PathEffect = ColorScheme.GetFocusPathEffect(Math.Max(1f, ScaleFactor));
+    }
+
+    private void RenderFocusAdorner(SKCanvas canvas, bool hasRadius)
+    {
+        if (!ShouldRenderFocusAdorner())
+            return;
+
+        EnsureFocusAdornerResources();
+
+        var maxBorder = Math.Max(
+            Math.Max(_border.Left, _border.Top),
+            Math.Max(_border.Right, _border.Bottom));
+        var inset = Math.Max(2f * ScaleFactor, maxBorder + 1.5f * ScaleFactor);
+        var rect = new SKRect(
+            inset,
+            inset,
+            Math.Max(inset, Width - inset),
+            Math.Max(inset, Height - inset));
+
+        if (rect.Width <= 0f || rect.Height <= 0f)
+            return;
+
+        var paint = _renderFocusAdornerPaint;
+        paint.Color = Enabled ? ColorScheme.Primary.WithAlpha(204) : ColorScheme.Outline.WithAlpha(168);
+        paint.StrokeWidth = Math.Max(1f, ScaleFactor);
+
+        if (hasRadius)
+        {
+            var shrink = new Radius(inset, inset, inset, inset);
+            var radius = ShrinkRadiusForSpread(_radius, shrink);
+            var roundRect = GetScratchRoundRect(rect, radius);
+            canvas.DrawRoundRect(roundRect, paint);
+            return;
+        }
+
+        canvas.DrawRect(rect, paint);
+    }
+
+    private bool ShouldRenderFocusAdorner()
+    {
+        if (!ColorScheme.UseFocusPathEffect || !Focused || Width <= 4f || Height <= 4f || this is WindowBase)
+            return false;
+
+        return ReferenceEquals(GetActiveFocusLeaf(), this);
+    }
+
+    private ElementBase? GetActiveFocusLeaf()
+    {
+        var root = GetParentWindow() as ElementBase ?? GetFocusRoot();
+        if (root == null)
+            return Focused ? this : null;
+
+        var current = root;
+        for (var depth = 0; depth < 128; depth++)
+        {
+            var child = current.FocusedElement;
+            if (child == null || ReferenceEquals(child, current))
+                break;
+
+            current = child;
+        }
+
+        return current.Focused ? current : null;
+    }
+
+    private ElementBase? GetFocusRoot()
+    {
+        ElementBase? root = this;
+        while (root?.Parent is ElementBase parent)
+            root = parent;
+
+        return root;
+    }
+
     /// <summary>
     /// Scales corner radii outward when spread expands the shadow rect.
     /// CSS spec: outer shadow radius = max(0, borderRadius + spread).
@@ -2546,13 +2626,30 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     public virtual void Focus()
     {
+        if (!CanSelect || !Selectable || !Enabled || !Visible)
+            return;
+
+        var window = GetParentWindow();
+        if (window != null && !ReferenceEquals(window, this))
+        {
+            window.FocusManager.SetFocus(this);
+            window.Invalidate();
+            return;
+        }
+
         if (Parent == null)
             return;
 
         if (Parent.FocusedElement != this)
+        {
             Parent.FocusedElement = this;
-        else
+        }
+        else if (!Focused)
+        {
             Focused = true;
+            OnGotFocus(EventArgs.Empty);
+            OnEnter(EventArgs.Empty);
+        }
 
         Parent.Invalidate();
     }
@@ -3031,7 +3128,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         {
             control.OnMouseClick(childEventArgs);
 
-            if (FocusedElement != control && control.CanSelect && control.Selectable)
+            if (this is not WindowBase && FocusedElement != control && control.CanSelect && control.Selectable)
                 FocusedElement = control;
         }
     }
@@ -3614,6 +3711,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             _renderOpacityPaint.Dispose();
             _renderShadowPaint.Dispose();
             _renderDebugBorderPaint.Dispose();
+            _renderFocusAdornerPaint.Dispose();
             _renderInsetShadowOuterPath.Dispose();
             _renderInsetShadowHolePath.Dispose();
             _cachedPaintSurfaceEventArgs = null;

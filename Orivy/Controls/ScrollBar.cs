@@ -93,6 +93,8 @@ public class ScrollBar : ElementBase
         set { }
     }
 
+    protected override bool ParticipatesInParentLayout => false;
+
     // =========================================================================
     // Constructor
     // =========================================================================

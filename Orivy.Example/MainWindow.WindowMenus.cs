@@ -15,6 +15,8 @@ internal partial class MainWindow
 
     private readonly List<MenuItem> _embeddedTabStripResizerItems = new();
 
+    private readonly List<MenuItem> _focusPathEffectItems = new();
+
     private bool _windowThemeModePreset = ColorScheme.IsDarkMode;
 
     private void InitializeWindowThemeMenu(MenuItem rootItem)
@@ -76,6 +78,7 @@ internal partial class MainWindow
     {
         RefreshWindowThemeMenuChecks();
         RefreshWindowThemeModeMenuChecks();
+        RefreshFocusPathEffectChecks();
     }
 
     private void RefreshWindowThemeMenuChecks()
@@ -116,8 +119,28 @@ internal partial class MainWindow
         resizerMenuItem.CheckOnClick = false;
         _embeddedTabStripResizerItems.Add(resizerMenuItem);
 
+        var focusPathEffectMenuItem = rootItem.AddMenuItem(
+            "Use Focus Path Effect",
+            (_, _) => SetFocusPathEffectEnabled(!ColorScheme.UseFocusPathEffect));
+        focusPathEffectMenuItem.CheckOnClick = false;
+        _focusPathEffectItems.Add(focusPathEffectMenuItem);
+
         RefreshTitleBarMenuPlacementChecks();
         RefreshEmbeddedTabStripResizerChecks();
+        RefreshFocusPathEffectChecks();
+    }
+
+    private void SetFocusPathEffectEnabled(bool enabled)
+    {
+        ColorScheme.UseFocusPathEffect = enabled;
+        RefreshFocusPathEffectChecks();
+    }
+
+    private void RefreshFocusPathEffectChecks()
+    {
+        var isEnabled = ColorScheme.UseFocusPathEffect;
+        for (var i = 0; i < _focusPathEffectItems.Count; i++)
+            _focusPathEffectItems[i].Checked = isEnabled;
     }
 
     private void SetMenuStripEmbeddedInTitleBar(bool embedded)

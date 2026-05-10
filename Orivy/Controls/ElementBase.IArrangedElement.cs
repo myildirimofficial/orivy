@@ -10,6 +10,8 @@ public abstract partial class ElementBase
     PropertyStore IArrangedElement.Properties => _properties ??= new PropertyStore();
     private PropertyStore? _properties;
 
+    protected virtual bool ParticipatesInParentLayout => Visible;
+
     #region IArrangedElement Explicit Implementation
 
     /// <summary>
@@ -38,7 +40,7 @@ public abstract partial class ElementBase
     /// <summary>
     /// Determines whether this element participates in layout operations.
     /// </summary>
-    bool IArrangedElement.ParticipatesInLayout => Visible;
+    bool IArrangedElement.ParticipatesInLayout => ParticipatesInParentLayout;
 
     /// <summary>
     /// Returns the container (parent) of this element for layout purposes.

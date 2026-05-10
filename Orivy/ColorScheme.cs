@@ -15,10 +15,60 @@ public static class ColorScheme
 
     private static int _transitionId;
 
-    private static int _themeQueued;
+    private static bool _useFocusPathEffect = true;
+    private static float _focusPathEffectDashLength = 1f;
+    private static float _focusPathEffectGapLength = 2.5f;
+    private static SKPathEffect? _cachedFocusPathEffect;
+    private static float _cachedFocusPathEffectScale;
+    private static float _cachedFocusPathEffectDashLength;
+    private static float _cachedFocusPathEffectGapLength;
     public static bool DrawDebugBorders;
 
     public static event EventHandler? ThemeChanged;
+
+    public static bool UseFocusPathEffect
+    {
+        get => _useFocusPathEffect;
+        set
+        {
+            if (_useFocusPathEffect == value)
+                return;
+
+            _useFocusPathEffect = value;
+            InvalidateFocusPathEffectCache();
+            RaiseThemeChanged();
+        }
+    }
+
+    public static float FocusPathEffectDashLength
+    {
+        get => _focusPathEffectDashLength;
+        set
+        {
+            var next = Math.Max(0.5f, value);
+            if (Math.Abs(_focusPathEffectDashLength - next) < 0.001f)
+                return;
+
+            _focusPathEffectDashLength = next;
+            InvalidateFocusPathEffectCache();
+            RaiseThemeChanged();
+        }
+    }
+
+    public static float FocusPathEffectGapLength
+    {
+        get => _focusPathEffectGapLength;
+        set
+        {
+            var next = Math.Max(0.5f, value);
+            if (Math.Abs(_focusPathEffectGapLength - next) < 0.001f)
+                return;
+
+            _focusPathEffectGapLength = next;
+            InvalidateFocusPathEffectCache();
+            RaiseThemeChanged();
+        }
+    }
 
     public static bool IsDarkMode
     {
@@ -68,6 +118,40 @@ public static class ColorScheme
 
     public static SKColor ShadowColor
         => IsDarkMode ? SKColors.White.WithAlpha(20) : SKColors.Black.WithAlpha(20);
+
+    public static SKPathEffect? GetFocusPathEffect(float scale = 1f)
+    {
+        if (!UseFocusPathEffect)
+            return null;
+
+        var resolvedScale = Math.Max(0.5f, scale);
+        if (_cachedFocusPathEffect != null
+            && Math.Abs(_cachedFocusPathEffectScale - resolvedScale) < 0.001f
+            && Math.Abs(_cachedFocusPathEffectDashLength - FocusPathEffectDashLength) < 0.001f
+            && Math.Abs(_cachedFocusPathEffectGapLength - FocusPathEffectGapLength) < 0.001f)
+            return _cachedFocusPathEffect;
+
+        InvalidateFocusPathEffectCache();
+
+        var dashLength = FocusPathEffectDashLength * resolvedScale;
+        var gapLength = FocusPathEffectGapLength * resolvedScale;
+
+        _cachedFocusPathEffectScale = resolvedScale;
+        _cachedFocusPathEffectDashLength = FocusPathEffectDashLength;
+        _cachedFocusPathEffectGapLength = FocusPathEffectGapLength;
+        _cachedFocusPathEffect = SKPathEffect.CreateDash(new[] { dashLength, gapLength }, 0f);
+
+        return _cachedFocusPathEffect;
+    }
+
+    private static void InvalidateFocusPathEffectCache()
+    {
+        _cachedFocusPathEffect?.Dispose();
+        _cachedFocusPathEffect = null;
+        _cachedFocusPathEffectScale = 0f;
+        _cachedFocusPathEffectDashLength = 0f;
+        _cachedFocusPathEffectGapLength = 0f;
+    }
 
     public static void SetPrimarySeedColor(SKColor seed)
     {

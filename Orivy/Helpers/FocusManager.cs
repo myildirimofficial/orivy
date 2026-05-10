@@ -231,29 +231,6 @@ public class FocusManager
         }
     }
 
-    /// <summary>
-    ///     Draw focus indicator for the current element
-    /// </summary>
-    public void DrawFocusIndicator(SKCanvas canvas, SkiaSharp.SKRect bounds, float cornerRadius)
-    {
-        using var paint = new SKPaint
-        {
-            IsAntialias = true,
-            Color = ColorScheme.Primary,
-            IsStroke = true,
-            StrokeWidth = 2f,
-            PathEffect = SKPathEffect.CreateDash(new[] { 4f, 2f }, 0)
-        };
-
-        var rect = new SkiaSharp.SKRect(
-            bounds.Left - 2,
-            bounds.Top - 2,
-            bounds.Right + 2,
-            bounds.Bottom + 2
-        );
-
-        canvas.DrawRoundRect(rect, cornerRadius, cornerRadius, paint);
-    }
 }
 
 public class FocusChangedEventArgs : EventArgs
