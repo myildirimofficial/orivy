@@ -1,8 +1,6 @@
 ﻿namespace Orivy.Controls;
 
-public class Element : ElementBase
-{
-}
+public class Element : ElementBase;
 
 public class Container : ElementBase
 {

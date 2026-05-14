@@ -1,5 +1,6 @@
 using Orivy.Animation;
 using Orivy.Helpers;
+using Orivy.Layout;
 using SkiaSharp;
 using System;
 using System.ComponentModel;
@@ -14,8 +15,10 @@ public class Button : ElementBase
     public Button()
     {
         AutoSize = true;
+        CommonProperties.SetSelfAutoSizeInDefaultLayout(this, true);
         AutoSizeMode = AutoSizeMode.GrowOnly;
         AutoEllipsis = true;
+        WrapMode = TextWrap.None;
         CanSelect = true;
         MinimumSize = new SKSize(45, 24);
         Padding = new Thickness(8);

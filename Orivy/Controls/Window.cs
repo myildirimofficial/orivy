@@ -1225,7 +1225,7 @@ public partial class Window : WindowBase
         if (TryRouteMouseEventToOpenPopup(e, static (popup, localEvent) => popup.OnMouseDoubleClick(localEvent)))
             return;
 
-        // Title bar maximize gesture has priority — check before child hit-testing.
+        // Title bar maximize gesture has priority ï¿½ check before child hit-testing.
         var inTitleAreaDbl = ShowTitle && MaximizeBox && e.Y < Padding.Top;
         if (inTitleAreaDbl)
         {
@@ -1271,6 +1271,7 @@ public partial class Window : WindowBase
             return;
 
         // If an element captured the mouse, forward the mouse up to it and release capture if left button
+        var hadCapturedElement = _mouseCapturedElement != null;
         if (_mouseCapturedElement != null)
         {
             var captured = _mouseCapturedElement;
@@ -1280,7 +1281,15 @@ public partial class Window : WindowBase
             if (e.Button == MouseButtons.Left) ReleaseMouseCapture(captured);
         }
 
-        base.OnMouseUp(e);
+        if (hadCapturedElement)
+        {
+            RaiseMouseUp(e);
+            UpdatePressedState(false);
+        }
+        else
+        {
+            base.OnMouseUp(e);
+        }
 
         if (!IsDisposed && _formMoveMouseDown)
         {

@@ -1,3 +1,4 @@
+using Orivy.Layout;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -370,6 +371,7 @@ public sealed class ButtonGroup<TValue> : Container
 
             ApplySegmentedRadius(button, visibleIndex, visibleCount);
             button.Bounds = SKRect.Create(x, y, width, height);
+            DefaultLayout.SetAnchorInfo(button, null);
             x += width + spacing - overlap;
             visibleIndex++;
         }
@@ -417,6 +419,7 @@ public sealed class ButtonGroup<TValue> : Container
 
             ApplySegmentedRadius(button, visibleIndex, visibleCount);
             button.Bounds = SKRect.Create(x, y, width, height);
+            DefaultLayout.SetAnchorInfo(button, null);
             y += height + spacing - overlap;
             visibleIndex++;
         }

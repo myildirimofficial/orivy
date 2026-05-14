@@ -71,9 +71,13 @@ public class FocusManager
 
     private void CollectFromElement(ElementBase element)
     {
-        if (element.Visible && element.Enabled && element.TabStop && element.CanSelect) _focusableElements.Add(element);
+        if (!element.Visible || !element.Enabled)
+            return;
 
-        // Recursive for nested containers
+        if (element.TabStop && element.CanSelect)
+            _focusableElements.Add(element);
+
+        // Recursive for nested containers — only when this element itself is visible/enabled
         if (element is IElement uiElement)
             foreach (var child in uiElement.Controls.OfType<ElementBase>())
                 CollectFromElement(child);
@@ -134,8 +138,9 @@ public class FocusManager
             RefreshFocusableElements();
             if (_focusableElements.Count == 0) return false;
 
-            var currentIndex = _currentFocus != null
-                ? _focusableElements.IndexOf(_currentFocus)
+            var activeFocus = _window.FocusedElement ?? _currentFocus;
+            var currentIndex = activeFocus != null
+                ? _focusableElements.IndexOf(activeFocus)
                 : -1;
 
             int nextIndex;

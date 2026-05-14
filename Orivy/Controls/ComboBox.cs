@@ -752,6 +752,9 @@ public class ComboBox : ElementBase
     {
         // Fired after the close animation completes and the dropdown is fully hidden.
         // Re-evaluate once more to ensure the visual state reflects DroppedDown=false.
+        if (Enabled && Visible && CanFocus)
+            Focus();
+
         ReevaluateVisualStyles();
         Invalidate();
     }

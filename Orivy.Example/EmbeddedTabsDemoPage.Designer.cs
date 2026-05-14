@@ -44,8 +44,6 @@ internal sealed partial class EmbeddedTabsDemoPage
             Name                      = "embeddedTabView",
             Dock                      = DockStyle.Fill,
             Padding                   = new Thickness(0),
-            Radius                    = new Radius(14),
-            Border                    = new Thickness(1),
             TabMode                   = TabViewMode.Embedded,
             TabDesignMode             = TabViewDesignMode.RoundedCompact,
             TabAlignment              = TabViewAlignment.Start,
@@ -59,6 +57,7 @@ internal sealed partial class EmbeddedTabsDemoPage
             LockInputDuringTransition = true,
             TextAlign                   = ContentAlignment.MiddleCenter,
             MinimumSize = new SKSize(0, 300),
+            AutoSize = true
         };
         _embeddedTabView = embeddedTabView;
 
@@ -67,13 +66,9 @@ internal sealed partial class EmbeddedTabsDemoPage
         {
             Name       = "embeddedTabToolbar",
             Dock       = DockStyle.Top,
-            Height     = 640,
+            AutoSize = true,
             Margin     = new Thickness(0, 0, 0, 16),
             Padding    = new Thickness(16),
-            Radius     = new Radius(16),
-            Border     = new Thickness(1),
-            BorderColor = ColorScheme.Outline.WithAlpha(88),
-            BackColor  = ColorScheme.SurfaceContainerHigh,
         };
 
         // Status bar
@@ -100,8 +95,7 @@ internal sealed partial class EmbeddedTabsDemoPage
             BackColor = SKColors.Transparent,
             Border    = new Thickness(0),
             ForeColor = ColorScheme.ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)180 : (byte)160),
-            TextAlign = ContentAlignment.MiddleLeft,
-            Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
+            TextAlign = ContentAlignment.MiddleLeft
         };
 
         // Row 1: design mode buttons
@@ -109,12 +103,9 @@ internal sealed partial class EmbeddedTabsDemoPage
         {
             Name      = "embeddedModeButtons",
             Dock      = DockStyle.Top,
-            Height    = 36,
             Margin    = new Thickness(0, 0, 0, 12),
             Alignment = ContentAlignment.MiddleCenter,
-            BackColor = SKColors.Transparent,
-            Border    = new Thickness(0),
-            Orientation = Orientation.Vertical,
+            Orientation = Orientation.Horizontal,
             Gap = 0
         };
 
@@ -127,8 +118,7 @@ internal sealed partial class EmbeddedTabsDemoPage
             BackColor = SKColors.Transparent,
             Border    = new Thickness(0),
             ForeColor = ColorScheme.ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)180 : (byte)160),
-            TextAlign = ContentAlignment.MiddleLeft,
-            Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
+            TextAlign = ContentAlignment.MiddleLeft
         };
 
         var customStyleButtons = new ButtonGroup<EmbeddedTabCustomStyleAction>
@@ -154,7 +144,6 @@ internal sealed partial class EmbeddedTabsDemoPage
             Border    = new Thickness(0),
             ForeColor = ColorScheme.ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)180 : (byte)160),
             TextAlign = ContentAlignment.MiddleLeft,
-            Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
         };
 
         // Row 2: alignment buttons
@@ -166,7 +155,7 @@ internal sealed partial class EmbeddedTabsDemoPage
             Margin    = new Thickness(0, 0, 0, 10),
             Alignment = ContentAlignment.MiddleLeft,
             BackColor = SKColors.Transparent,
-            Border    = new Thickness(0),
+            Border    = new Thickness(0),   
         };
 
         var layoutLabel = new Element
@@ -179,7 +168,6 @@ internal sealed partial class EmbeddedTabsDemoPage
             Border    = new Thickness(0),
             ForeColor = ColorScheme.ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)180 : (byte)160),
             TextAlign = ContentAlignment.MiddleLeft,
-            Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
         };
 
         var embeddedLayoutButtons = new ButtonGroup<TabViewLayoutMode>
@@ -203,48 +191,16 @@ internal sealed partial class EmbeddedTabsDemoPage
             BackColor = SKColors.Transparent,
             Border    = new Thickness(0),
             ForeColor = ColorScheme.ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)180 : (byte)160),
-            TextAlign = ContentAlignment.MiddleLeft,
-            Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
+            TextAlign = ContentAlignment.MiddleLeft
         };
 
         // Row 4: text alignment buttons
         var embeddedTextAlignButtons = new ButtonGroup<ContentAlignment>
         {
             Name      = "embeddedTextAlignButtons",
-            Dock      = DockStyle.Top,
-            Height    = 124,
             Margin    = new Thickness(0, 0, 0, 10),
-            Alignment = ContentAlignment.MiddleLeft,
-            BackColor = SKColors.Transparent,
-            Border    = new Thickness(0),
-        };
-
-        var embeddedTextAlignTopButtons = new Container
-        {
-            Name      = "embeddedTextAlignTopButtons",
-            Dock      = DockStyle.Top,
-            Height    = 36,
-            Margin    = new Thickness(0, 0, 0, 8),
-            BackColor = SKColors.Transparent,
-            Border    = new Thickness(0),
-        };
-
-        var embeddedTextAlignMiddleButtons = new Container
-        {
-            Name      = "embeddedTextAlignMiddleButtons",
-            Dock      = DockStyle.Top,
-            Height    = 36,
-            Margin    = new Thickness(0, 0, 0, 8),
-            BackColor = SKColors.Transparent,
-            Border    = new Thickness(0),
-        };
-
-        var embeddedTextAlignBottomButtons = new Container
-        {
-            Name      = "embeddedTextAlignBottomButtons",
-            Dock      = DockStyle.Top,
-            Height    = 36,
-            BackColor = SKColors.Transparent,
+            Dock = DockStyle.Top,
+            Gap = 0,
             Border    = new Thickness(0),
         };
 
@@ -258,8 +214,7 @@ internal sealed partial class EmbeddedTabsDemoPage
             BackColor = SKColors.Transparent,
             Border    = new Thickness(0),
             ForeColor = ColorScheme.ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)180 : (byte)160),
-            TextAlign = ContentAlignment.MiddleLeft,
-            Font      = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 10f),
+            TextAlign = ContentAlignment.MiddleLeft
         };
 
         // Row 5: icon alignment buttons
@@ -272,35 +227,7 @@ internal sealed partial class EmbeddedTabsDemoPage
             Alignment = ContentAlignment.MiddleLeft,
             BackColor = SKColors.Transparent,
             Border    = new Thickness(0),
-        };
-
-        var embeddedIconAlignTopButtons = new Container
-        {
-            Name      = "embeddedIconAlignTopButtons",
-            Dock      = DockStyle.Top,
-            Height    = 36,
-            Margin    = new Thickness(0, 0, 0, 8),
-            BackColor = SKColors.Transparent,
-            Border    = new Thickness(0),
-        };
-
-        var embeddedIconAlignMiddleButtons = new Container
-        {
-            Name      = "embeddedIconAlignMiddleButtons",
-            Dock      = DockStyle.Top,
-            Height    = 36,
-            Margin    = new Thickness(0, 0, 0, 8),
-            BackColor = SKColors.Transparent,
-            Border    = new Thickness(0),
-        };
-
-        var embeddedIconAlignBottomButtons = new Container
-        {
-            Name      = "embeddedIconAlignBottomButtons",
-            Dock      = DockStyle.Top,
-            Height    = 36,
-            BackColor = SKColors.Transparent,
-            Border    = new Thickness(0),
+            Orientation = Orientation.Horizontal,
         };
 
         Button MakeToolButton(string name, string text, object value)
@@ -614,37 +541,30 @@ internal sealed partial class EmbeddedTabsDemoPage
         embeddedLayoutButtons.Controls.Add(rightLayoutButton);
         embeddedLayoutButtons.Controls.Add(bottomLayoutButton);
 
-        embeddedTextAlignTopButtons.Controls.Add(textAlignTopLeftButton);
-        embeddedTextAlignTopButtons.Controls.Add(textAlignTopCenterButton);
-        embeddedTextAlignTopButtons.Controls.Add(textAlignTopRightButton);
+        embeddedTextAlignButtons.Controls.Add(textAlignTopLeftButton);
+        embeddedTextAlignButtons.Controls.Add(textAlignTopCenterButton);
+        embeddedTextAlignButtons.Controls.Add(textAlignTopRightButton);
 
-        embeddedTextAlignMiddleButtons.Controls.Add(textAlignMiddleLeftButton);
-        embeddedTextAlignMiddleButtons.Controls.Add(textAlignMiddleCenterButton);
-        embeddedTextAlignMiddleButtons.Controls.Add(textAlignMiddleRightButton);
+        embeddedTextAlignButtons.Controls.Add(textAlignMiddleLeftButton);
+        embeddedTextAlignButtons.Controls.Add(textAlignMiddleCenterButton);
+        embeddedTextAlignButtons.Controls.Add(textAlignMiddleRightButton);
 
-        embeddedTextAlignBottomButtons.Controls.Add(textAlignBottomLeftButton);
-        embeddedTextAlignBottomButtons.Controls.Add(textAlignBottomCenterButton);
-        embeddedTextAlignBottomButtons.Controls.Add(textAlignBottomRightButton);
+        embeddedTextAlignButtons.Controls.Add(textAlignBottomLeftButton);
+        embeddedTextAlignButtons.Controls.Add(textAlignBottomCenterButton);
+        embeddedTextAlignButtons.Controls.Add(textAlignBottomRightButton);
 
-        embeddedTextAlignButtons.Controls.Add(embeddedTextAlignTopButtons);
-        embeddedTextAlignButtons.Controls.Add(embeddedTextAlignMiddleButtons);
-        embeddedTextAlignButtons.Controls.Add(embeddedTextAlignBottomButtons);
 
-        embeddedIconAlignTopButtons.Controls.Add(iconAlignTopLeftButton);
-        embeddedIconAlignTopButtons.Controls.Add(iconAlignTopCenterButton);
-        embeddedIconAlignTopButtons.Controls.Add(iconAlignTopRightButton);
+        embeddedIconAlignButtons.Controls.Add(iconAlignTopLeftButton);
+        embeddedIconAlignButtons.Controls.Add(iconAlignTopCenterButton);
+        embeddedIconAlignButtons.Controls.Add(iconAlignTopRightButton);
 
-        embeddedIconAlignMiddleButtons.Controls.Add(iconAlignMiddleLeftButton);
-        embeddedIconAlignMiddleButtons.Controls.Add(iconAlignMiddleCenterButton);
-        embeddedIconAlignMiddleButtons.Controls.Add(iconAlignMiddleRightButton);
+        embeddedIconAlignButtons.Controls.Add(iconAlignMiddleLeftButton);
+        embeddedIconAlignButtons.Controls.Add(iconAlignMiddleCenterButton);
+        embeddedIconAlignButtons.Controls.Add(iconAlignMiddleRightButton);
 
-        embeddedIconAlignBottomButtons.Controls.Add(iconAlignBottomLeftButton);
-        embeddedIconAlignBottomButtons.Controls.Add(iconAlignBottomCenterButton);
-        embeddedIconAlignBottomButtons.Controls.Add(iconAlignBottomRightButton);
-
-        embeddedIconAlignButtons.Controls.Add(embeddedIconAlignTopButtons);
-        embeddedIconAlignButtons.Controls.Add(embeddedIconAlignMiddleButtons);
-        embeddedIconAlignButtons.Controls.Add(embeddedIconAlignBottomButtons);
+        embeddedIconAlignButtons.Controls.Add(iconAlignBottomLeftButton);
+        embeddedIconAlignButtons.Controls.Add(iconAlignBottomCenterButton);
+        embeddedIconAlignButtons.Controls.Add(iconAlignBottomRightButton);
 
         embeddedToolbar.Controls.Add(embeddedModeStatus);
         embeddedToolbar.Controls.Add(embeddedIconAlignButtons);

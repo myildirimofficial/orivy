@@ -310,10 +310,12 @@ public sealed partial class ColorPicker : ElementBase
         _fillPaint.Color = HsvToColor(_hue, 1f, 1f, 255);
         canvas.DrawRect(rect, _fillPaint);
 
-        EnsureSvShaders(rect);
-        _fillPaint.Shader = _svSaturationShader;
+        using var saturationShader = CreateSvSaturationShader(rect);
+        _fillPaint.Shader = saturationShader;
         canvas.DrawRect(rect, _fillPaint);
-        _fillPaint.Shader = _svValueShader;
+
+        using var valueShader = CreateSvValueShader(rect);
+        _fillPaint.Shader = valueShader;
         canvas.DrawRect(rect, _fillPaint);
         _fillPaint.Shader = null;
 
@@ -327,8 +329,8 @@ public sealed partial class ColorPicker : ElementBase
 
         var save = canvas.Save();
         canvas.ClipRoundRect(new SKRoundRect(rect, radius), antialias: true);
-        EnsureHueShader(rect);
-        _fillPaint!.Shader = _hueShader;
+        using var hueShader = CreateHueShader(rect);
+        _fillPaint!.Shader = hueShader;
         canvas.DrawRect(rect, _fillPaint);
         _fillPaint.Shader = null;
         canvas.RestoreToCount(save);
@@ -344,8 +346,8 @@ public sealed partial class ColorPicker : ElementBase
         var save = canvas.Save();
         canvas.ClipRoundRect(new SKRoundRect(rect, radius), antialias: true);
         DrawCheckerboard(canvas, rect, Scale(7f, ScaleFactor, 6f));
-        EnsureAlphaShader(rect);
-        _fillPaint!.Shader = _alphaShader;
+        using var alphaShader = CreateAlphaShader(rect);
+        _fillPaint!.Shader = alphaShader;
         canvas.DrawRect(rect, _fillPaint);
         _fillPaint.Shader = null;
 
@@ -784,6 +786,24 @@ public sealed partial class ColorPicker : ElementBase
         _cachedSvRect = rect;
     }
 
+    private static SKShader CreateSvSaturationShader(SKRect rect)
+    {
+        return SKShader.CreateLinearGradient(
+            new SKPoint(rect.Left, rect.Top),
+            new SKPoint(rect.Right, rect.Top),
+            [SKColors.White, SKColors.White.WithAlpha(0)],
+            SKShaderTileMode.Clamp);
+    }
+
+    private static SKShader CreateSvValueShader(SKRect rect)
+    {
+        return SKShader.CreateLinearGradient(
+            new SKPoint(rect.Left, rect.Top),
+            new SKPoint(rect.Left, rect.Bottom),
+            [SKColors.Black.WithAlpha(0), SKColors.Black],
+            SKShaderTileMode.Clamp);
+    }
+
     private void EnsureHueShader(SKRect rect)
     {
         if (_hueShader is not null && _cachedHueRect == rect) return;
@@ -807,6 +827,24 @@ public sealed partial class ColorPicker : ElementBase
         _cachedHueRect = rect;
     }
 
+    private static SKShader CreateHueShader(SKRect rect)
+    {
+        return SKShader.CreateLinearGradient(
+            new SKPoint(rect.Left, rect.Bottom),
+            new SKPoint(rect.Left, rect.Top),
+            [
+                new SKColor(255, 0,   0),
+                new SKColor(255, 255, 0),
+                new SKColor(0,   255, 0),
+                new SKColor(0,   255, 255),
+                new SKColor(0,   0,   255),
+                new SKColor(255, 0,   255),
+                new SKColor(255, 0,   0)
+            ],
+            [0f, 0.17f, 0.33f, 0.5f, 0.67f, 0.83f, 1f],
+            SKShaderTileMode.Clamp);
+    }
+
     private void EnsureAlphaShader(SKRect rect)
     {
         var color = HsvToColor(_hue, _saturation, _value, 255);
@@ -820,6 +858,16 @@ public sealed partial class ColorPicker : ElementBase
 
         _cachedAlphaRect = rect;
         _cachedAlphaShaderColor = color;
+    }
+
+    private SKShader CreateAlphaShader(SKRect rect)
+    {
+        var color = HsvToColor(_hue, _saturation, _value, 255);
+        return SKShader.CreateLinearGradient(
+            new SKPoint(rect.Left, rect.Top),
+            new SKPoint(rect.Right, rect.Top),
+            [color.WithAlpha(0), color.WithAlpha(255)],
+            SKShaderTileMode.Clamp);
     }
 
     private void InvalidateShaderCaches()

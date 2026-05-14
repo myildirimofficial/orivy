@@ -65,6 +65,10 @@ public enum Keys
     D7 = 0x37,
     D8 = 0x38,
     D9 = 0x39,
+    Add = 0x6B,
+    Subtract = 0x6D,
     Home = 0x5B,
     End = 0x5C,
+    OemPlus = 0xBB,
+    OemMinus = 0xBD,
 }

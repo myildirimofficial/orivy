@@ -532,7 +532,8 @@ public partial class WindowBase : ElementBase
             // Tab navigation
             if (commandKeyData == Keys.Tab || commandKeyData == (Keys.Tab | Keys.Shift))
             {
-                var keyArgs = new KeyEventArgs(commandKeyData);
+                var modifierMask = Keys.Shift | Keys.Control | Keys.Alt;
+                var keyArgs = new KeyEventArgs(commandKeyData & ~modifierMask, commandKeyData & modifierMask);
                 if (FocusManager.ProcessKeyNavigation(keyArgs))
                     return true;
             }
@@ -882,6 +883,7 @@ public partial class WindowBase : ElementBase
             case WindowMessage.WM_MOUSELEAVE:
                 {
                     _mouseInClient = false;
+                    _currentCursor = Cursors.Default;
                     OnMouseLeave(EventArgs.Empty);
                     return IntPtr.Zero;
                 }

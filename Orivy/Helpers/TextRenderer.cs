@@ -60,7 +60,8 @@ public static class TextRenderer
         SKFont font,
         ContentAlignment alignment,
         bool autoEllipsis = false,
-        bool useMnemonic = false)
+        bool useMnemonic = false,
+        TextWrap wrap = TextWrap.None)
     {
         if (string.IsNullOrEmpty(text))
             return;
@@ -71,6 +72,7 @@ public static class TextRenderer
             Trimming = autoEllipsis ? TextTrimming.CharacterEllipsis : TextTrimming.None,
             MaxWidth = bounds.Width,
             MaxHeight = bounds.Height,
+            Wrap = wrap,
             Subpixel = font.Subpixel,
             Edging = font.Edging,
             Hinting = font.Hinting

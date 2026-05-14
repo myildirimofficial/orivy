@@ -99,7 +99,7 @@ public class GridList : ElementBase
     public GridList()
     {
         CanSelect = true;
-        TabStop = true;
+        TabStop = false;
         Cursor = Cursors.Default;
         BackColor = SKColors.Transparent;
         Border = new Thickness(1);

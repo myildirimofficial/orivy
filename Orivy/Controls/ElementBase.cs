@@ -7,7 +7,6 @@ using SkiaSharp;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Drawing;
 using System.Runtime.InteropServices;
 
 namespace Orivy.Controls;
@@ -911,6 +910,10 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         };
     }
 
+    protected virtual bool ProcessTextEscapeSequences => true;
+
+    protected virtual bool ShouldRenderDefaultText => true;
+
     private SKFont GetDefaultTextRenderFont()
     {
         var sourceFont = Font;
@@ -943,7 +946,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
             _text = string.IsNullOrEmpty(value)
                 ? string.Empty
-                : TextRenderer.ProcessEscapeSequences(value);
+                : ProcessTextEscapeSequences
+                    ? TextRenderer.ProcessEscapeSequences(value)
+                    : value;
 
             OnTextChanged(EventArgs.Empty);
             InvalidateMeasure();
@@ -990,7 +995,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
-    private bool _tabStop = true;
+    private bool _tabStop = false;
 
     public virtual bool TabStop
     {
@@ -1202,6 +1207,24 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         {
             if (_autoEllipsis == value) return;
             _autoEllipsis = value;
+            InvalidateMeasure();
+            Invalidate();
+        }
+    }
+
+    private TextWrap _wrapMode = TextWrap.WordWrap;
+
+    [Category("Appearance")]
+    [DefaultValue(typeof(TextWrap), nameof(TextWrap.WordWrap))]
+    public virtual TextWrap WrapMode
+    {
+        get => _wrapMode;
+        set
+        {
+            if (_wrapMode == value)
+                return;
+
+            _wrapMode = value;
             InvalidateMeasure();
             Invalidate();
         }
@@ -1972,6 +1995,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         {
             if (target.CanHandleMouseWheel(e))
             {
+                var consumesWheelByScrolling = target.HandlesMouseWheelScroll;
                 var targetBounds = GetWindowRelativeBounds(target);
                 var localEvent = new MouseEventArgs(
                     e.Button,
@@ -1982,7 +2006,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                     e.IsHorizontalWheel);
 
                 target.OnMouseWheel(localEvent);
-                return true;
+                if (localEvent.Handled || consumesWheelByScrolling)
+                    return true;
             }
 
             target = target.Parent as ElementBase;
@@ -2314,7 +2339,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                 }
             }
 
-            RenderDefaultText(targetCanvas);
+            if (ShouldRenderDefaultText)
+                RenderDefaultText(targetCanvas);
 
             // ── Children ──
             targetCanvas.ClipRect(elementRect);
@@ -2518,7 +2544,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         if (displayRectangle.Width <= 0f || displayRectangle.Height <= 0f)
             return;
 
-        TextRenderer.DrawText(canvas, _text, displayRectangle, paint, GetDefaultTextRenderFont(), TextAlign, AutoEllipsis, UseMnemonic);
+        TextRenderer.DrawText(canvas, _text, displayRectangle, paint, GetDefaultTextRenderFont(), TextAlign, AutoEllipsis, UseMnemonic, WrapMode);
     }
 
     private void EnsureFocusAdornerResources()
@@ -2661,26 +2687,27 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         if (!AutoSize)
             return;
 
-        var proposedSize = GetPreferredSize(SKSize.Empty);
+        var proposedSize = GetPreferredSize(GetAutoSizeMeasurementConstraints());
 
         if (AutoSizeMode == AutoSizeMode.GrowOnly)
-        {
-            proposedSize.Width = Math.Max(Size.Width, proposedSize.Width);
-            proposedSize.Height = Math.Max(Size.Height, proposedSize.Height);
-        }
+            proposedSize = LayoutUtils.UnionSizes(Size, proposedSize);
 
-        // MinimumSize ve MaximumSize kontrolü
-        proposedSize.Width = Math.Max(proposedSize.Width, MinimumSize.Width);
-        if (MinimumSize.Height > 0)
-            proposedSize.Height = Math.Max(proposedSize.Height, MinimumSize.Height);
-
-        if (MaximumSize.Width > 0)
-            proposedSize.Width = Math.Min(proposedSize.Width, MaximumSize.Width);
-        if (MaximumSize.Height > 0)
-            proposedSize.Height = Math.Min(proposedSize.Height, MaximumSize.Height);
+        proposedSize = ApplySizeConstraints(proposedSize);
 
         if (Size != proposedSize)
             Size = proposedSize;
+    }
+
+    protected virtual SKSize GetAutoSizeMeasurementConstraints()
+    {
+        var constraints = Size;
+
+        if (constraints.Width < 0f)
+            constraints.Width = 0f;
+        if (constraints.Height < 0f)
+            constraints.Height = 0f;
+
+        return NormalizePreferredSizeConstraints(constraints);
     }
 
     /// <summary>
@@ -2757,30 +2784,52 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             if (Parent is WindowBase parentWindow)
                 parentWindow.PerformLayout();
             else if (Parent is ElementBase parentElement) parentElement.PerformLayout();
+            else
+                PerformLayout();
         }
     }
 
     public virtual SKSize GetPreferredSize(SKSize proposedSize)
     {
+        var normalizedConstraints = NormalizePreferredSizeConstraints(proposedSize);
+        return ApplySizeConstraints(GetPreferredSizeCore(normalizedConstraints));
+    }
+
+    protected virtual SKSize GetPreferredSizeCore(SKSize proposedSize)
+    {
+        var desiredSize = GetIntrinsicPreferredSize(proposedSize);
+
+        if (Controls.Count > 0)
+        {
+            var childPreferredSize = DefaultLayout.Instance.GetPreferredSize(this, proposedSize);
+            if (childPreferredSize != SKSize.Empty)
+            {
+                childPreferredSize = new SKSize(
+                    childPreferredSize.Width + Padding.Left + Padding.Right + Border.Left + Border.Right,
+                    childPreferredSize.Height + Padding.Top + Padding.Bottom + Border.Top + Border.Bottom);
+            }
+
+            desiredSize = LayoutUtils.UnionSizes(desiredSize, childPreferredSize);
+        }
+
+        return desiredSize;
+    }
+
+    protected virtual SKSize GetIntrinsicPreferredSize(SKSize proposedSize)
+    {
         if (!string.IsNullOrEmpty(Text))
         {
             using var font = CreateRenderFont(Font);
-            var measurementConstraints = proposedSize;
-            if (measurementConstraints.Width <= 0)
-                measurementConstraints.Width = short.MaxValue;
-            if (measurementConstraints.Height <= 0)
-                measurementConstraints.Height = short.MaxValue;
-
             var textSize = TextRenderer.MeasureText(
                 Text,
                 font,
-                measurementConstraints,
+                proposedSize,
                 new TextRenderOptions
                 {
-                    MaxWidth = measurementConstraints.Width,
+                    MaxWidth = proposedSize.Width,
                     Trimming = AutoEllipsis ? TextTrimming.CharacterEllipsis : TextTrimming.None,
                     UseMnemonic = UseMnemonic,
-                    Wrap = TextWrap.None
+                    Wrap = WrapMode
                 });
 
             var desiredWidth = textSize.Width + Padding.Left + Padding.Right + Border.Left + Border.Right;
@@ -2789,7 +2838,29 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             return new SKSize((float)Math.Ceiling(desiredWidth), (float)Math.Ceiling(desiredHeight));
         }
 
-        return Size;
+        float fallbackWidth = Padding.Left + Padding.Right + Border.Left + Border.Right;
+        float fallbackHeight = Padding.Top + Padding.Bottom + Border.Top + Border.Bottom;
+
+        if (!AutoSize)
+        {
+            fallbackWidth = Math.Max(fallbackWidth, Size.Width);
+            fallbackHeight = Math.Max(fallbackHeight, Size.Height);
+        }
+
+        return new SKSize((float)Math.Ceiling(fallbackWidth), (float)Math.Ceiling(fallbackHeight));
+    }
+
+    private static SKSize NormalizePreferredSizeConstraints(SKSize proposedSize)
+    {
+        // DefaultLayout uses 1px as the unconstrained sentinel for the cross axis
+        // when measuring docked AutoSize elements.
+        if (proposedSize.Width <= 1f)
+            proposedSize.Width = LayoutUtils.s_maxSize.Width;
+
+        if (proposedSize.Height <= 1f)
+            proposedSize.Height = LayoutUtils.s_maxSize.Height;
+
+        return proposedSize;
     }
 
     #endregion
@@ -3020,6 +3091,16 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         MouseDown?.Invoke(this, e);
     }
 
+    protected void RaiseMouseUp(MouseEventArgs e)
+    {
+        MouseUp?.Invoke(this, e);
+    }
+
+    protected void RaiseMouseClick(MouseEventArgs e)
+    {
+        MouseClick?.Invoke(this, e);
+    }
+
     internal virtual void OnMouseDown(MouseEventArgs e)
     {
         MouseDown?.Invoke(this, e);
@@ -3205,6 +3286,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
         if (Visible)
         {
+            if (Controls.Count > 0 && !IsPerformingLayout)
+                ForceDescendantsLayout();
             Invalidate();
         }
         else
@@ -3415,7 +3498,18 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     {
         CursorChanged?.Invoke(this, e);
         var parentWindow = GetParentWindow();
-        if (parentWindow != null)
+        if (parentWindow == null)
+            return;
+
+        // Only push the new cursor to the window when this element is currently
+        // in the hover chain.  Changing Cursor on a non-hovered element (e.g.
+        // clearing a resize cursor in OnMouseLeave) must not corrupt the cursor
+        // that was established by the element actually under the mouse pointer.
+        ElementBase cursor = parentWindow;
+        while (cursor.LastHoveredElement != null)
+            cursor = cursor.LastHoveredElement;
+
+        if (ReferenceEquals(cursor, this))
             parentWindow.UpdateCursor(this);
     }
 
@@ -3438,6 +3532,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         {
             var deltaValue = GetMouseWheelDelta(e, _hScrollBar);
             _hScrollBar.ApplyWheelDelta(e.IsHorizontalWheel ? deltaValue : -deltaValue);
+            e.Handled = true;
             return;
         }
 
@@ -3445,6 +3540,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         {
             var deltaValue = GetMouseWheelDelta(e, _vScrollBar);
             _vScrollBar.ApplyWheelDelta(-deltaValue);
+            e.Handled = true;
             return;
         }
 
@@ -3453,6 +3549,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         {
             var deltaValue = GetMouseWheelDelta(e, _hScrollBar);
             _hScrollBar.ApplyWheelDelta(-deltaValue);
+            e.Handled = true;
             return;
         }
 
@@ -3799,6 +3896,16 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
+    private void ForceDescendantsLayout()
+    {
+        PerformLayout();
+        for (int i = 0; i < Controls.Count; i++)
+        {
+            if (Controls[i] is ElementBase child && child.Controls.Count > 0 && !child.IsPerformingLayout)
+                child.ForceDescendantsLayout();
+        }
+    }
+
     public virtual void PerformLayout(ElementBase affectedElement, string? propertyName)
     {
         var args = new LayoutEventArgs(affectedElement, propertyName);
@@ -3828,6 +3935,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     {
         Layout?.Invoke(this, e);
         Orivy.Layout.DefaultLayout.Instance.Layout(this, e);
+
+        if (AutoSize && Parent == null)
+            AdjustSize();
 
         UpdateScrollBars();
     }
