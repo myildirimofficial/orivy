@@ -113,6 +113,10 @@ internal partial class MainWindow
         tabView.Controls.Add(notificationsPage);
         _embeddedTabsPage = new EmbeddedTabsDemoPage(tabView);
         tabView.Controls.Add(_embeddedTabsPage);
+        var buttonGroupPage = new ButtonGroupDemoPage();
+        var buttonGroupTabIcon = CreateExampleIcon(new SKColor(0x22, 0xC5, 0x5E), ExampleIconKind.Healthy);
+        buttonGroupPage.Image = buttonGroupTabIcon;
+        tabView.Controls.Add(buttonGroupPage);
 
 
 

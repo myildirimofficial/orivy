@@ -1,3 +1,4 @@
+using Orivy.Collections;
 using Orivy.Layout;
 using System;
 using System.Collections.Generic;
@@ -9,20 +10,85 @@ namespace Orivy.Controls;
 public sealed class ButtonGroup<TValue> : Container
 {
     private bool _suppressCheckedChanged;
+    private bool _scrollable;
     private Button? _selectedButton;
     private readonly Dictionary<Button, Radius> _buttonOriginalRadii = new();
+    private readonly List<Button> _autoButtons = new();
+    private Action<Button, TValue>? _configureButton;
+    private Func<TValue, string>? _labelSelector;
+    private readonly ItemCollection<TValue> _items;
     private ContentAlignment _alignment = ContentAlignment.MiddleLeft;
     private Orientation _orientation = Orientation.Horizontal;
     private int _gap = 8;
 
     public ButtonGroup()
     {
-        AutoSize = true;
+        _items = new ItemCollection<TValue>(SyncButtonsToItems);
         BackColor = SkiaSharp.SKColors.Transparent;
         Border = new Thickness(0);
+        Scrollable = true;
+        AutoSize = true;
+        MouseWheel += OnHorizontalMouseWheel;
+
+        if (typeof(TValue).IsEnum)
+            _items.AddRange((TValue[])Enum.GetValues(typeof(TValue)));
     }
 
     public bool AllowEmptySelection { get; set; }
+
+    public ItemCollection<TValue> Items => _items;
+
+    public Func<TValue, string>? LabelSelector
+    {
+        get => _labelSelector;
+        set
+        {
+            _labelSelector = value;
+            SyncButtonsToItems();
+        }
+    }
+
+    public Action<Button, TValue>? ConfigureButton
+    {
+        get => _configureButton;
+        set
+        {
+            _configureButton = value;
+            for (var i = 0; i < _autoButtons.Count; i++)
+            {
+                if (TryGetButtonValue(_autoButtons[i], out var itemValue))
+                    value?.Invoke(_autoButtons[i], itemValue);
+            }
+            PerformLayout();
+            Invalidate();
+        }
+    }
+
+    public void SetItems(IEnumerable<TValue> items, Func<TValue, string>? labelSelector = null)
+    {
+        _labelSelector = labelSelector;
+        _items.ReplaceAll(items);
+    }
+
+    public void SetItems(Func<TValue, string> labelSelector, params TValue[] items)
+        => SetItems(items, labelSelector);
+
+    private void SyncButtonsToItems()
+    {
+        foreach (var btn in _autoButtons)
+            Controls.Remove(btn);
+        _autoButtons.Clear();
+
+        for (var i = 0; i < _items.Count; i++)
+        {
+            var item = _items[i];
+            var text = _labelSelector != null ? _labelSelector(item) : item?.ToString() ?? string.Empty;
+            var button = new Button { Text = text, Tag = item! };
+            _configureButton?.Invoke(button, item);
+            _autoButtons.Add(button);
+            Controls.Add(button);
+        }
+    }
 
     public Orientation Orientation
     {
@@ -75,6 +141,37 @@ public sealed class ButtonGroup<TValue> : Container
         set => Gap = value;
     }
 
+    public bool Scrollable
+    {
+        get => _scrollable;
+        set
+        {
+            if (_scrollable == value)
+                return;
+
+            _scrollable = value;
+            AutoSize = !value;
+            AutoScroll = value;
+            InvalidateMeasure();
+            PerformLayout();
+            Invalidate();
+        }
+    }
+
+    protected override bool HandlesMouseWheelScroll => false;
+
+    private void OnHorizontalMouseWheel(object? sender, MouseEventArgs e)
+    {
+        if (!_scrollable || _hScrollBar == null || !_hScrollBar.Visible)
+            return;
+
+        if (!WantsHorizontalMouseWheel(e))
+            return;
+
+        _hScrollBar.ApplyWheelDelta(-GetMouseWheelDelta(e, _hScrollBar));
+        e.Handled = true;
+    }
+
     public Button? SelectedButton => _selectedButton;
 
     public bool HasSelection => _selectedButton != null;
@@ -118,6 +215,9 @@ public sealed class ButtonGroup<TValue> : Container
 
     internal override void OnControlAdded(ElementEventArgs e)
     {
+        if (e.Element is Button button && !_autoButtons.Contains(button))
+            throw new InvalidOperationException("Use SetItems() or ConfigureButton to manage ButtonGroup contents.");
+
         base.OnControlAdded(e);
         RegisterElement(e.Element as ElementBase);
         InvalidateMeasure();
@@ -165,6 +265,8 @@ public sealed class ButtonGroup<TValue> : Container
     {
         base.OnLayout(e);
         ArrangeButtonRows(this);
+        if (_scrollable)
+            UpdateScrollBars();
     }
 
     private void RegisterElement(ElementBase? element)
@@ -335,10 +437,12 @@ public sealed class ButtonGroup<TValue> : Container
 
     private void ArrangeButtonRow(List<Button> buttons, SKRect bounds)
     {
+        var availableBounds = bounds;
         var spacing = Gap;
         var overlap = spacing == 0 ? 1f : 0f;
         var visibleCount = 0;
         var totalWidth = 0f;
+        var rowHeight = 0f;
 
         for (var i = 0; i < buttons.Count; i++)
         {
@@ -346,8 +450,10 @@ public sealed class ButtonGroup<TValue> : Container
             if (!button.Visible)
                 continue;
 
+            var buttonSize = GetButtonLayoutSize(button);
             visibleCount++;
-            totalWidth += GetButtonLayoutSize(button).Width;
+            totalWidth += buttonSize.Width;
+            rowHeight = Math.Max(rowHeight, buttonSize.Height);
         }
 
         if (visibleCount == 0)
@@ -355,7 +461,7 @@ public sealed class ButtonGroup<TValue> : Container
 
         totalWidth += (spacing - overlap) * Math.Max(0, visibleCount - 1);
 
-        var x = GetAlignedX(bounds, totalWidth);
+        var x = _scrollable ? availableBounds.Left : GetAlignedX(availableBounds, totalWidth);
         var visibleIndex = 0;
 
         for (var i = 0; i < buttons.Count; i++)
@@ -366,8 +472,8 @@ public sealed class ButtonGroup<TValue> : Container
 
             var buttonSize = GetButtonLayoutSize(button);
             var width = buttonSize.Width;
-            var height = Math.Min(buttonSize.Height, bounds.Height);
-            var y = GetAlignedY(bounds, height);
+            var height = Math.Min(rowHeight, availableBounds.Height);
+            var y = GetAlignedY(availableBounds, height);
 
             ApplySegmentedRadius(button, visibleIndex, visibleCount);
             button.Bounds = SKRect.Create(x, y, width, height);
@@ -379,11 +485,13 @@ public sealed class ButtonGroup<TValue> : Container
 
     private void ArrangeButtonColumn(ElementBase parent, List<Button> buttons, SKRect bounds)
     {
+        var availableBounds = bounds;
         var spacing = Gap;
         var overlap = spacing == 0 ? 1f : 0f;
         var visibleCount = 0;
         var totalHeight = 0f;
         var maxWidth = 0f;
+        var itemHeight = 0f;
 
         for (var i = 0; i < buttons.Count; i++)
         {
@@ -393,18 +501,18 @@ public sealed class ButtonGroup<TValue> : Container
 
             var buttonSize = GetButtonLayoutSize(button);
             visibleCount++;
-            totalHeight += buttonSize.Height;
             maxWidth = Math.Max(maxWidth, buttonSize.Width);
+            itemHeight = Math.Max(itemHeight, buttonSize.Height);
         }
 
         if (visibleCount == 0)
             return;
 
-        totalHeight += (spacing - overlap) * Math.Max(0, visibleCount - 1);
+        totalHeight = (itemHeight * visibleCount) + ((spacing - overlap) * Math.Max(0, visibleCount - 1));
 
         var columnWidth = Math.Min(maxWidth, bounds.Width);
-        var y = GetAlignedY(bounds, totalHeight);
-        var x = GetAlignedX(bounds, columnWidth);
+        var y = _scrollable ? availableBounds.Top : GetAlignedY(availableBounds, totalHeight);
+        var x = GetAlignedX(availableBounds, columnWidth);
         var visibleIndex = 0;
 
         for (var i = 0; i < buttons.Count; i++)
@@ -413,9 +521,8 @@ public sealed class ButtonGroup<TValue> : Container
             if (!button.Visible)
                 continue;
 
-            var buttonSize = GetButtonLayoutSize(button);
             var width = columnWidth;
-            var height = buttonSize.Height;
+            var height = itemHeight;
 
             ApplySegmentedRadius(button, visibleIndex, visibleCount);
             button.Bounds = SKRect.Create(x, y, width, height);
