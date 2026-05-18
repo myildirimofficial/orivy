@@ -552,6 +552,9 @@ public partial class WindowBase : ElementBase
             if (element is MenuStrip menuStrip && menuStrip.TryHandleShortcut(keyData))
                 return true;
 
+            if (element is Button { DropDownMenu: { } dropDownMenu } && dropDownMenu.TryHandleShortcut(keyData))
+                return true;
+
             if (TryHandleMenuShortcut(element.Controls, keyData))
                 return true;
         }
@@ -1433,6 +1436,32 @@ public partial class WindowBase : ElementBase
                 ReleaseCapture();
             }
         }
+    }
+
+    internal override void OnMouseMove(MouseEventArgs e)
+    {
+        if (TryDispatchCapturedMouseEvent(e, static (element, args) => element.OnMouseMove(args)))
+            return;
+
+        base.OnMouseMove(e);
+    }
+
+    internal override void OnMouseUp(MouseEventArgs e)
+    {
+        if (TryDispatchCapturedMouseEvent(e, static (element, args) => element.OnMouseUp(args)))
+            return;
+
+        base.OnMouseUp(e);
+    }
+
+    private bool TryDispatchCapturedMouseEvent(MouseEventArgs e, Action<ElementBase, MouseEventArgs> dispatch)
+    {
+        var capturedElement = _mouseCapturedElement;
+        if (capturedElement == null)
+            return false;
+
+        dispatch(capturedElement, CreateChildMouseEvent(e, capturedElement));
+        return true;
     }
 
     /// <summary>

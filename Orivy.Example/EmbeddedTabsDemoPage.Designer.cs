@@ -130,7 +130,6 @@ internal sealed partial class EmbeddedTabsDemoPage
             Name                = "customStyleButtons",
             Dock                = DockStyle.Top,
             Margin              = new Thickness(0, 0, 0, 12),
-            BackColor = SKColors.Tomato,
             Alignment           = ContentAlignment.MiddleLeft,
             AllowEmptySelection = true,
             Gap = 0,

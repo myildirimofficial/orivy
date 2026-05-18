@@ -3010,6 +3010,11 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             if (_vScrollBar.Value > _vScrollBar.Maximum)
                 _vScrollBar.Value = _vScrollBar.Maximum;
         }
+        else
+        {
+            _vScrollBar.Maximum = 0;
+            _vScrollBar.Value = 0;
+        }
 
         if (needsHScroll)
         {
@@ -3018,6 +3023,11 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             _hScrollBar.LargeChange = Math.Max(1, Width / 2);
             if (_hScrollBar.Value > _hScrollBar.Maximum)
                 _hScrollBar.Value = _hScrollBar.Maximum;
+        }
+        else
+        {
+            _hScrollBar.Maximum = 0;
+            _hScrollBar.Value = 0;
         }
     }
 

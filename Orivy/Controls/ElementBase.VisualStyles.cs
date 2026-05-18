@@ -33,6 +33,9 @@ public abstract partial class ElementBase
     public bool IsPointerOver => _isPointerOver;
 
     [Browsable(false)]
+    internal bool UseDefaultPointerVisualStates { get; set; } = true;
+
+    [Browsable(false)]
     public ElementVisualStateContext VisualState => CreateVisualStateContext();
 
     [Browsable(false)]
@@ -490,6 +493,9 @@ public abstract partial class ElementBase
 
     private void UpdatePointerOverState(bool isPointerOver)
     {
+        if (!UseDefaultPointerVisualStates)
+            isPointerOver = false;
+
         if (_isPointerOver == isPointerOver)
             return;
 
@@ -502,6 +508,9 @@ public abstract partial class ElementBase
 
     protected void UpdatePressedState(bool isPressed)
     {
+        if (!UseDefaultPointerVisualStates)
+            isPressed = false;
+
         if (_isPressed == isPressed)
             return;
 

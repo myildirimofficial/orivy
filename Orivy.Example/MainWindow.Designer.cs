@@ -117,6 +117,14 @@ internal partial class MainWindow
         var buttonGroupTabIcon = CreateExampleIcon(new SKColor(0x22, 0xC5, 0x5E), ExampleIconKind.Healthy);
         buttonGroupPage.Image = buttonGroupTabIcon;
         tabView.Controls.Add(buttonGroupPage);
+        var modernControlsPage = new ModernControlsDemoPage();
+        var modernControlsTabIcon = CreateExampleIcon(new SKColor(0x06, 0xB6, 0xD4), ExampleIconKind.Pulse);
+        modernControlsPage.Image = modernControlsTabIcon;
+        tabView.Controls.Add(modernControlsPage);
+        var layoutControlsPage = new LayoutControlsDemoPage();
+        var layoutControlsTabIcon = CreateExampleIcon(new SKColor(0xA3, 0xA3, 0xA3), ExampleIconKind.Warning);
+        layoutControlsPage.Image = layoutControlsTabIcon;
+        tabView.Controls.Add(layoutControlsPage);
 
 
 

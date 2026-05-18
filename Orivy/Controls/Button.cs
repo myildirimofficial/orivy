@@ -11,6 +11,10 @@ public class Button : ElementBase
 {
     private bool _checked;
     private bool _keyboardPressArmed;
+    private readonly AnimationManager _dropDownChevronAnimation;
+    private readonly SKPaint _dropDownTextPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _dropDownChevronPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round };
+    private readonly SKPath _dropDownChevronPath = new();
 
     public Button()
     {
@@ -26,6 +30,16 @@ public class Button : ElementBase
         Size = new SKSize(45, 24);
         TabStop = true;
         TextAlign = ContentAlignment.MiddleCenter;
+
+        _dropDownChevronAnimation = new AnimationManager(true)
+        {
+            AnimationType = AnimationType.CubicEaseOut,
+            InterruptAnimation = true,
+            Increment = 16d / 120d,
+            SecondaryIncrement = 16d / 100d
+        };
+        _dropDownChevronAnimation.OnAnimationProgress += HandleDropDownChevronAnimationProgress;
+        _dropDownChevronAnimation.OnAnimationFinished += HandleDropDownChevronAnimationFinished;
 
         ConfigureVisualStyles(styles =>
         {
@@ -85,12 +99,27 @@ public class Button : ElementBase
 
     public event EventHandler? CheckedChanged;
 
+    public event EventHandler? DropDownOpening;
+
+    [DefaultValue(false)]
+    public bool ShowDropDownArrow { get; set; }
+
+    [DefaultValue(true)]
+    public bool OpenDropDownOnClick { get; set; } = true;
+
+    public ContextMenuStrip? DropDownMenu { get; set; }
+
+    protected override bool ShouldRenderDefaultText => !ShouldDrawDropDownGlyph;
+
     public override void OnClick(EventArgs e)
     {
         if (CheckOnClick)
             Checked = !Checked;
 
         base.OnClick(e);
+
+        if (OpenDropDownOnClick)
+            ShowDropDown();
     }
 
     protected virtual void OnCheckedChanged(EventArgs e)
@@ -99,6 +128,23 @@ public class Button : ElementBase
     }
 
     protected override bool GetVisualCheckedState() => Checked;
+
+    public void ShowDropDown()
+    {
+        if (DropDownMenu == null || !Enabled || !Visible)
+            return;
+
+        if (DropDownMenu.IsOpen)
+        {
+            DropDownMenu.Hide();
+            StartDropDownChevronAnimation();
+            return;
+        }
+
+        DropDownOpening?.Invoke(this, EventArgs.Empty);
+        StartDropDownChevronAnimation();
+        DropDownMenu.ShowAnchoredBelow(this, ClientRectangle);
+    }
 
     public override SKSize GetPreferredSize(SKSize proposedSize)
     {
@@ -121,7 +167,7 @@ public class Button : ElementBase
                 Wrap = TextWrap.None
             });
 
-        var desiredWidth = textSize.Width + Padding.Left + Padding.Right + Border.Left + Border.Right;
+        var desiredWidth = textSize.Width + Padding.Left + Padding.Right + Border.Left + Border.Right + GetDropDownGlyphWidth();
         var desiredHeight = textSize.Height + Padding.Top + Padding.Bottom + Border.Top + Border.Bottom;
 
         if (AutoSizeMode == AutoSizeMode.GrowOnly)
@@ -141,6 +187,30 @@ public class Button : ElementBase
             desiredHeight = Math.Min(desiredHeight, MaximumSize.Height);
 
         return new SKSize((float)Math.Ceiling(desiredWidth), (float)Math.Ceiling(desiredHeight));
+    }
+
+    public override void OnPaint(SKCanvas canvas)
+    {
+        base.OnPaint(canvas);
+
+        if (!ShouldDrawDropDownGlyph)
+            return;
+
+        var content = DisplayRectangle;
+        var chevronWidth = GetDropDownGlyphWidth();
+        var chevronRect = new SKRect(
+            Math.Max(content.Left, content.Right - chevronWidth),
+            content.Top,
+            content.Right,
+            content.Bottom);
+        var textRect = new SKRect(
+            content.Left,
+            content.Top,
+            Math.Max(content.Left, chevronRect.Left - 2f * ScaleFactor),
+            content.Bottom);
+
+        DrawDropDownButtonText(canvas, textRect);
+        DrawDropDownChevron(canvas, chevronRect);
     }
 
     internal override void OnKeyDown(KeyEventArgs e)
@@ -178,5 +248,80 @@ public class Button : ElementBase
     {
         _keyboardPressArmed = false;
         base.OnLostFocus(e);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _dropDownChevronAnimation.OnAnimationProgress -= HandleDropDownChevronAnimationProgress;
+            _dropDownChevronAnimation.OnAnimationFinished -= HandleDropDownChevronAnimationFinished;
+            _dropDownChevronAnimation.Dispose();
+            _dropDownTextPaint.Dispose();
+            _dropDownChevronPaint.Dispose();
+            _dropDownChevronPath.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+
+    private bool ShouldDrawDropDownGlyph => ShowDropDownArrow || DropDownMenu != null;
+
+    private float GetDropDownGlyphWidth() => ShouldDrawDropDownGlyph ? Math.Max(18f, 22f * ScaleFactor) : 0f;
+
+    private void DrawDropDownButtonText(SKCanvas canvas, SKRect textRect)
+    {
+        if (string.IsNullOrEmpty(Text) || textRect.Width <= 0f || textRect.Height <= 0f)
+            return;
+
+        using var font = CreateRenderFont(Font);
+        _dropDownTextPaint.Color = ForeColor;
+        TextRenderer.DrawText(canvas, Text, textRect, _dropDownTextPaint, font, TextAlign, AutoEllipsis, UseMnemonic, WrapMode);
+    }
+
+    private void DrawDropDownChevron(SKCanvas canvas, SKRect rect)
+    {
+        if (rect.Width <= 0f || rect.Height <= 0f)
+            return;
+
+        var progress = Math.Clamp((float)_dropDownChevronAnimation.GetProgress(), 0f, 1f);
+        var size = Math.Max(4f, 4.5f * ScaleFactor);
+        var centerX = rect.MidX;
+        var centerY = rect.MidY + progress * 1.5f * ScaleFactor;
+        var rotation = progress * 180f;
+
+        _dropDownChevronPaint.Color = ForeColor.WithAlpha((byte)Math.Clamp(ForeColor.Alpha * 0.86f, 0f, 255f));
+        _dropDownChevronPaint.StrokeWidth = Math.Max(1.4f, 1.5f * ScaleFactor);
+        _dropDownChevronPath.Reset();
+        _dropDownChevronPath.MoveTo(centerX - size, centerY - size * 0.35f);
+        _dropDownChevronPath.LineTo(centerX, centerY + size * 0.55f);
+        _dropDownChevronPath.LineTo(centerX + size, centerY - size * 0.35f);
+
+        var save = canvas.Save();
+        canvas.RotateDegrees(rotation, centerX, centerY);
+        canvas.DrawPath(_dropDownChevronPath, _dropDownChevronPaint);
+        canvas.RestoreToCount(save);
+    }
+
+    private void StartDropDownChevronAnimation()
+    {
+        _dropDownChevronAnimation.SetProgress(0d);
+        _dropDownChevronAnimation.StartNewAnimation(AnimationDirection.In);
+    }
+
+    private void HandleDropDownChevronAnimationProgress(object _)
+    {
+        Invalidate();
+    }
+
+    private void HandleDropDownChevronAnimationFinished(object _)
+    {
+        if (_dropDownChevronAnimation.Direction == AnimationDirection.In)
+        {
+            _dropDownChevronAnimation.StartNewAnimation(AnimationDirection.Out);
+            return;
+        }
+
+        Invalidate();
     }
 }

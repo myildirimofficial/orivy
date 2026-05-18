@@ -21,6 +21,7 @@ public enum OpeningEffectType
 
 public class ContextMenuStrip : MenuStrip
 {
+    private const Keys ShortcutModifierMask = Keys.Shift | Keys.Control | Keys.Alt;
     private enum PopupAnchorPlacement
     {
         Point,
@@ -1144,11 +1145,53 @@ public class ContextMenuStrip : MenuStrip
     private void OnOwnerKeyDown(object? sender, KeyEventArgs e)
     {
         if (!IsOpen || !AutoClose) return;
+
+        if (TryHandleShortcut(Items, NormalizeShortcutKeyData(e.KeyCode | e.Modifiers)))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (e.KeyCode == Keys.Escape)
         {
             Hide();
             e.Handled = true;
         }
+    }
+
+    private bool TryHandleShortcut(IReadOnlyList<MenuItem> items, Keys keyData)
+    {
+        for (var i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+            if (!item.Visible || !item.Enabled)
+                continue;
+
+            if (NormalizeShortcutKeyData(item.ShortcutKeys) == keyData)
+            {
+                if (item.HasDropDown)
+                    OnItemClicked(item);
+                else
+                {
+                    item.OnClick();
+                    ClosePopupChain();
+                }
+
+                return true;
+            }
+
+            if (item.HasDropDown && TryHandleShortcut(item.DropDownItems, keyData))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static Keys NormalizeShortcutKeyData(Keys keyData)
+    {
+        var modifiers = keyData & ShortcutModifierMask;
+        var keyCode = keyData & ~ShortcutModifierMask;
+        return keyCode | modifiers;
     }
 
     private float GetCollapsedAccordionContentHeight(IReadOnlyList<MenuItem> items)
@@ -1534,7 +1577,7 @@ public class ContextMenuStrip : MenuStrip
             {
                 if (item.Checked)
                 {
-                    var cx = itemRect.Left + 12 * scale + CheckMarginWidth / 2f;
+                    var cx = itemRect.Left + (10f + CheckMarginWidth * 0.5f) * scale;
                     var cy = itemRect.MidY;
                     var s = Math.Min(8f * scale, ItemHeight / 3f);
                     var checkPaint = _checkPaint;
@@ -1542,7 +1585,10 @@ public class ContextMenuStrip : MenuStrip
                     if (checkPaint != null && checkPath != null)
                     {
                         checkPaint.StrokeWidth = 1.8f * scale;
-                        checkPaint.Color = ForeColor.WithAlpha((byte)(fadeAlpha * contentAlphaScale));
+                        var checkColor = item.ForeColor.IsEmpty()
+                            ? ForeColor.IsEmpty() ? ColorScheme.ForeColor : ForeColor
+                            : item.ForeColor;
+                        checkPaint.Color = checkColor.WithAlpha((byte)(fadeAlpha * contentAlphaScale));
                         checkPath.Reset();
                         checkPath.MoveTo(cx - s * 0.4f, cy - s * 0.15f);
                         checkPath.LineTo(cx, cy + s * 0.35f);
