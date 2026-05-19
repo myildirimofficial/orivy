@@ -88,6 +88,12 @@ public class FocusManager
     /// </summary>
     public bool SetFocus(ElementBase? element)
     {
+        if (ReferenceEquals(_window.FocusedElement, element) || ReferenceEquals(_currentFocus, element))
+        {
+            _currentFocus = element;
+            return true;
+        }
+
         // Ensure the host window gets WinForms focus so key events flow.
         if (_window.CanFocus)
             _window.Focus();

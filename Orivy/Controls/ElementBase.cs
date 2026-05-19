@@ -3132,7 +3132,11 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
             if (window is WindowBase uiWindowAfter)
             {
-                if (uiWindowAfter.FocusedElement == prevWindowFocus && control.CanSelect && control.Selectable)
+                if (!ReferenceEquals(prevWindowFocus, control)
+                    && !ContainsFocusCandidate(control, prevWindowFocus)
+                    && ReferenceEquals(uiWindowAfter.FocusedElement, prevWindowFocus)
+                    && control.CanSelect
+                    && control.Selectable)
                     uiWindowAfter.FocusedElement = control;
             }
             else if (window != null)
@@ -3179,6 +3183,20 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                 }
             }
         }
+    }
+
+    private static bool ContainsFocusCandidate(ElementBase root, ElementBase? candidate)
+    {
+        var current = candidate;
+        while (current != null)
+        {
+            if (ReferenceEquals(current, root))
+                return true;
+
+            current = current.Parent as ElementBase;
+        }
+
+        return false;
     }
 
     /// <summary>

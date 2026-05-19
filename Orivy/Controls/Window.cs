@@ -1165,7 +1165,8 @@ public partial class Window : WindowBase
     internal override void OnMouseDown(MouseEventArgs e)
     {
         // Make sure this Form receives keyboard input.
-        if (CanFocus)
+        var hitElement = FindHitTestElement(e.Location, requireEnabled: true);
+        if (CanFocus && !IsFocusWithinHitElement(FocusedElement, hitElement))
             Focus();
 
         if (TryRouteMouseEventToOpenPopup(e, static (popup, localEvent) => popup.OnMouseDown(localEvent)))
@@ -1209,15 +1210,31 @@ public partial class Window : WindowBase
 
         base.OnMouseDown(e);
 
-        var element = FindHitTestElement(e.Location, requireEnabled: true);
-        if (element != null)
+        if (hitElement != null)
         {
-            BringToFront(element);
+            BringToFront(hitElement);
         }
 
         // NOTE: Window context menus should open on MouseUp (standard behavior).
         // Showing on MouseDown can lead to double menus when the mouse moves slightly
         // and an element handles right-click on MouseUp.
+    }
+
+    private static bool IsFocusWithinHitElement(ElementBase? focusedElement, ElementBase? hitElement)
+    {
+        if (focusedElement == null || hitElement == null)
+            return false;
+
+        var current = focusedElement;
+        while (current != null)
+        {
+            if (ReferenceEquals(current, hitElement))
+                return true;
+
+            current = current.Parent as ElementBase;
+        }
+
+        return false;
     }
 
     internal override void OnMouseDoubleClick(MouseEventArgs e)
