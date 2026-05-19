@@ -148,7 +148,9 @@ internal sealed partial class ModernControlsDemoPage
             Dock = DockStyle.Top,
             Height = 18,
             Margin = new(0, 0, 0, 14),
-            Mode = ProgressBarMode.CrossHatch,
+            Mode = ProgressBarMode.Gradient,
+            UseHatchFill = true,
+            HatchStyle = HatchStyle.DiagonalCross,
             Value = 48,
             TextMode = ProgressBarTextMode.PercentWhenWide
         };
@@ -362,6 +364,7 @@ internal sealed partial class ModernControlsDemoPage
             Border = new(1),
             BorderColor = ColorScheme.Outline.WithAlpha(90),
             TextAlign = ContentAlignment.MiddleLeft,
+            Tag = "theme-card"
         };
 
         var body = new Element
@@ -374,7 +377,8 @@ internal sealed partial class ModernControlsDemoPage
             BackColor = SKColors.Transparent,
             ForeColor = ColorScheme.ForeColor,
             Border = new(0),
-            TextAlign = ContentAlignment.MiddleLeft
+            TextAlign = ContentAlignment.MiddleLeft,
+            Tag = "theme-card-header"
         };
         card.Controls.Add(body);
         return card;

@@ -161,7 +161,8 @@ internal sealed partial class LayoutControlsDemoPage
             ForeColor = ColorScheme.ForeColor,
             Radius = new(12),
             Border = new(1),
-            BorderColor = ColorScheme.Outline.WithAlpha(90)
+            BorderColor = ColorScheme.Outline.WithAlpha(90),
+            Tag = "theme-card"
         };
 
         card.Controls.Add(new Element
@@ -173,7 +174,8 @@ internal sealed partial class LayoutControlsDemoPage
             Border = new(0),
             BackColor = SKColors.Transparent,
             ForeColor = ColorScheme.ForeColor,
-            TextAlign = ContentAlignment.MiddleLeft
+            TextAlign = ContentAlignment.MiddleLeft,
+            Tag = "theme-card-header"
         });
         return card;
     }

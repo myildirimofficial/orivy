@@ -31,6 +31,10 @@ public class NumericUpDown : ElementBase
     private int _direction = 1;
     private ButtonPart _pressedPart;
     private ButtonPart _hoverPart;
+    private ElementBase? _focusBeforeStepper;
+    private bool _restoreFocusAfterStepper;
+    private bool _stepperMouseDown;
+    private bool _suppressNextStepperClick;
     private NumericUpDownAnimationMode _animationMode = NumericUpDownAnimationMode.Slide;
 
     public NumericUpDown()
@@ -178,16 +182,25 @@ public class NumericUpDown : ElementBase
 
     internal override void OnMouseDown(MouseEventArgs e)
     {
-        base.OnMouseDown(e);
         if (!Enabled || e.Button != MouseButtons.Left)
+        {
+            base.OnMouseDown(e);
             return;
+        }
 
         _pressedPart = HitTest(e.Location);
-        if (_pressedPart != ButtonPart.None)
+        if (_pressedPart == ButtonPart.None)
         {
-            Focus();
-            GetParentWindow()?.SetMouseCapture(this);
+            base.OnMouseDown(e);
+            return;
         }
+
+        _stepperMouseDown = true;
+        _suppressNextStepperClick = true;
+        _restoreFocusAfterStepper = true;
+        _focusBeforeStepper = GetParentWindow()?.FocusedElement;
+        RaiseMouseDown(e);
+        GetParentWindow()?.SetMouseCapture(this);
 
         if (_pressedPart == ButtonPart.Up)
             Value += Increment;
@@ -210,14 +223,20 @@ public class NumericUpDown : ElementBase
 
     internal override void OnMouseUp(MouseEventArgs e)
     {
-        base.OnMouseUp(e);
+        if (!_stepperMouseDown)
+            base.OnMouseUp(e);
+        else
+            RaiseMouseUp(e);
+
         if (e.Button != MouseButtons.Left)
             return;
 
+        _stepperMouseDown = false;
         _pressedPart = ButtonPart.None;
         GetParentWindow()?.ReleaseMouseCapture(this);
-        if (Enabled && Visible)
-            Focus();
+        RestoreStepperFocus();
+        _focusBeforeStepper = null;
+        _restoreFocusAfterStepper = false;
         Invalidate();
     }
 
@@ -225,9 +244,22 @@ public class NumericUpDown : ElementBase
     {
         _hoverPart = ButtonPart.None;
         _pressedPart = ButtonPart.None;
+        _stepperMouseDown = false;
         GetParentWindow()?.ReleaseMouseCapture(this);
         base.OnMouseLeave(e);
         Invalidate();
+    }
+
+    protected internal override void OnMouseClick(MouseEventArgs e)
+    {
+        if (_suppressNextStepperClick)
+        {
+            _suppressNextStepperClick = false;
+            RaiseMouseClick(e);
+            return;
+        }
+
+        base.OnMouseClick(e);
     }
 
     internal override void OnMouseWheel(MouseEventArgs e)
@@ -430,6 +462,16 @@ public class NumericUpDown : ElementBase
     private decimal Clamp(decimal value) => Math.Min(Math.Max(value, Minimum), Maximum);
 
     private string FormatValue(decimal value) => value.ToString(Format);
+
+    private void RestoreStepperFocus()
+    {
+        if (!_restoreFocusAfterStepper)
+            return;
+
+        var window = GetParentWindow();
+        if (window != null)
+            window.FocusManager.SetFocus(_focusBeforeStepper);
+    }
 
     private void HandleTextAnimationProgress(object _)
     {

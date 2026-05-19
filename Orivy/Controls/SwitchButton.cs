@@ -39,10 +39,13 @@ public class SwitchButton : ElementBase
 
     private bool _checked;
     private bool _keyboardPressArmed;
+    private bool _pointerPressActive;
+    private bool _pointerPressCheckedState;
+    private bool _suppressNextPointerClick;
     private bool _toggleArmedByPointer = true;
     private bool _toggleRequestedByKeyboard;
-    private SwitchButtonTransitionMode _transitionMode = SwitchButtonTransitionMode.SoftElastic;
-    private TimeSpan _transitionDuration = TimeSpan.FromMilliseconds(210);
+    private SwitchButtonTransitionMode _transitionMode = SwitchButtonTransitionMode.Stretch;
+    private TimeSpan _transitionDuration = TimeSpan.FromMilliseconds(180);
 
     public SwitchButton()
     {
@@ -67,8 +70,8 @@ public class SwitchButton : ElementBase
         {
             AnimationType = AnimationType.Linear,
             InterruptAnimation = true,
-            Increment = 16d / 210d,
-            SecondaryIncrement = 16d / 180d
+            Increment = 16d / 180d,
+            SecondaryIncrement = 16d / 170d
         };
         _thumbAnimation.OnAnimationProgress += HandleThumbAnimationProgress;
         _thumbAnimation.OnAnimationFinished += HandleThumbAnimationFinished;
@@ -77,8 +80,8 @@ public class SwitchButton : ElementBase
         {
             AnimationType = AnimationType.CubicEaseOut,
             InterruptAnimation = true,
-            Increment = 16d / 95d,
-            SecondaryIncrement = 16d / 135d
+            Increment = 16d / 85d,
+            SecondaryIncrement = 16d / 170d
         };
         _pressAnimation.OnAnimationProgress += HandleThumbAnimationProgress;
         _pressAnimation.OnAnimationFinished += HandleThumbAnimationFinished;
@@ -135,7 +138,7 @@ public class SwitchButton : ElementBase
 
     public SKColor ThumbCheckedColor { get; set; } = SKColors.White;
 
-    [DefaultValue(SwitchButtonTransitionMode.SoftElastic)]
+    [DefaultValue(SwitchButtonTransitionMode.Stretch)]
     public SwitchButtonTransitionMode TransitionMode
     {
         get => _transitionMode;
@@ -150,7 +153,7 @@ public class SwitchButton : ElementBase
         }
     }
 
-    [DefaultValue(typeof(TimeSpan), "00:00:00.2100000")]
+    [DefaultValue(typeof(TimeSpan), "00:00:00.1800000")]
     public TimeSpan TransitionDuration
     {
         get => _transitionDuration;
@@ -176,7 +179,14 @@ public class SwitchButton : ElementBase
 
     public override void OnClick(EventArgs e)
     {
-        if (_toggleRequestedByKeyboard || _toggleArmedByPointer)
+        if (_suppressNextPointerClick)
+        {
+            _suppressNextPointerClick = false;
+            base.OnClick(e);
+            return;
+        }
+
+        if (_toggleRequestedByKeyboard)
             Checked = !Checked;
 
         _toggleRequestedByKeyboard = false;
@@ -242,7 +252,13 @@ public class SwitchButton : ElementBase
     {
         _toggleArmedByPointer = IsPointInToggleArea(e.Location);
         if (_toggleArmedByPointer && e.Button == MouseButtons.Left)
+        {
+            _pointerPressActive = true;
+            _pointerPressCheckedState = Checked;
             _pressAnimation.StartNewAnimation(AnimationDirection.In);
+            GetParentWindow()?.SetMouseCapture(this);
+            Invalidate();
+        }
 
         base.OnMouseDown(e);
     }
@@ -250,14 +266,28 @@ public class SwitchButton : ElementBase
     internal override void OnMouseUp(MouseEventArgs e)
     {
         if (e.Button == MouseButtons.Left)
+        {
+            var shouldToggle = _pointerPressActive && _toggleArmedByPointer && IsPointInToggleArea(e.Location);
+            if (shouldToggle)
+            {
+                _suppressNextPointerClick = true;
+                Checked = !Checked;
+            }
+
             _pressAnimation.StartNewAnimation(AnimationDirection.Out);
+            _pointerPressActive = false;
+            GetParentWindow()?.ReleaseMouseCapture(this);
+            Invalidate();
+        }
 
         base.OnMouseUp(e);
     }
 
     internal override void OnMouseLeave(EventArgs e)
     {
-        _pressAnimation.StartNewAnimation(AnimationDirection.Out);
+        if (!_pointerPressActive)
+            _pressAnimation.StartNewAnimation(AnimationDirection.Out);
+
         base.OnMouseLeave(e);
     }
 
@@ -298,6 +328,8 @@ public class SwitchButton : ElementBase
     internal override void OnLostFocus(EventArgs e)
     {
         _keyboardPressArmed = false;
+        _pointerPressActive = false;
+        GetParentWindow()?.ReleaseMouseCapture(this);
         _pressAnimation.StartNewAnimation(AnimationDirection.Out);
         base.OnLostFocus(e);
     }
@@ -379,41 +411,38 @@ public class SwitchButton : ElementBase
         var visualProgress = GetElasticVisualProgress(rawProgress);
         var clamped = Math.Clamp(visualProgress, 0f, 1f);
         var phase = GetAnimationPhase(rawProgress);
-        var progress = Math.Clamp(visualProgress, -0.22f, 1.22f);
+        var progress = clamped;
         var padding = 3f * ScaleFactor;
         var diameter = Math.Max(10f, rect.Height - padding * 2f);
         var travel = Math.Max(0f, rect.Width - diameter - padding * 2f);
         var centerX = rect.Left + padding + diameter * 0.5f + travel * progress;
         var centerY = rect.MidY;
-        var overshoot = Math.Abs(visualProgress - clamped);
-        var settle = _thumbAnimation.Running && IsElasticTransition()
-            ? MathF.Abs(MathF.Sin(phase * MathF.PI * (TransitionMode == SwitchButtonTransitionMode.Bounce ? 5.6f : 4.2f))) * MathF.Pow(Math.Clamp(1f - phase, 0f, 1f), 0.55f)
+        var overshoot = TransitionMode == SwitchButtonTransitionMode.Bounce
+            ? Math.Abs(visualProgress - clamped)
+            : 0f;
+        var settle = _thumbAnimation.Running && TransitionMode == SwitchButtonTransitionMode.Bounce
+            ? MathF.Abs(MathF.Sin(phase * MathF.PI * 4.2f)) * MathF.Pow(Math.Clamp(1f - phase, 0f, 1f), 0.7f)
             : 0f;
         var stretch = TransitionMode == SwitchButtonTransitionMode.Fade
             ? 0f
-            : Math.Min(6.5f * ScaleFactor, (overshoot * 24f + settle * 3.3f) * ScaleFactor);
+            : Math.Min(3.2f * ScaleFactor, (overshoot * 14f + settle * 1.8f) * ScaleFactor);
         var squash = TransitionMode == SwitchButtonTransitionMode.Fade
             ? 0f
-            : Math.Min(2.4f * ScaleFactor, (overshoot * 11f + settle * 1.2f) * ScaleFactor);
-        var pressProgress = Math.Clamp((float)_pressAnimation.GetProgress(), 0f, 1f);
-        if (pressProgress > 0.001f)
-        {
-            var pressStretch = TransitionMode == SwitchButtonTransitionMode.Stretch ? 8.8f : 6.2f;
-            stretch += pressStretch * pressProgress * ScaleFactor;
-            squash += 1.45f * pressProgress * ScaleFactor;
-        }
-
+            : Math.Min(1.2f * ScaleFactor, (overshoot * 6f + settle * 0.7f) * ScaleFactor);
         var thumbRect = new SKRect(
             centerX - diameter * 0.5f - stretch,
             centerY - diameter * 0.5f + squash,
             centerX + diameter * 0.5f + stretch,
             centerY + diameter * 0.5f - squash);
 
+        thumbRect = ApplyPressedThumbStretch(thumbRect, rect, padding);
+        thumbRect = ClampThumbRectToTrack(thumbRect, rect, padding);
+
         _thumbPaint.Color = (Enabled ? ThumbColor : ColorScheme.Surface).InterpolateColor(
             Enabled ? ThumbCheckedColor : ColorScheme.SurfaceVariant,
             GetClampedVisualProgress());
 
-        if (_thumbAnimation.Running && IsElasticTransition())
+        if (_thumbAnimation.Running && TransitionMode == SwitchButtonTransitionMode.Bounce)
         {
             var pulseAlpha = (byte)Math.Clamp(22f * (1f - phase), 0f, 22f);
             _trackPaint.Color = OnColor.WithAlpha(pulseAlpha);
@@ -462,13 +491,16 @@ public class SwitchButton : ElementBase
         if (TransitionMode == SwitchButtonTransitionMode.Fade)
             return Checked ? 1f : 0f;
 
+        if (TransitionMode == SwitchButtonTransitionMode.Stretch)
+            return rawProgress;
+
         if (!IsElasticTransition())
             return rawProgress;
 
         var phase = GetAnimationPhase(rawProgress);
-        var decay = MathF.Pow(Math.Clamp(1f - phase, 0f, 1f), TransitionMode == SwitchButtonTransitionMode.Bounce ? 1.08f : 1.35f);
-        var wave = TransitionMode == SwitchButtonTransitionMode.Bounce ? 5.4f : 3.6f;
-        var amount = TransitionMode == SwitchButtonTransitionMode.Stretch ? 0.045f : TransitionMode == SwitchButtonTransitionMode.Bounce ? 0.09f : 0.07f;
+        var decay = MathF.Pow(Math.Clamp(1f - phase, 0f, 1f), TransitionMode == SwitchButtonTransitionMode.Bounce ? 1.25f : 1.7f);
+        var wave = TransitionMode == SwitchButtonTransitionMode.Bounce ? 3.8f : 2.8f;
+        var amount = TransitionMode == SwitchButtonTransitionMode.Bounce ? 0.035f : 0.018f;
         var spring = MathF.Sin(phase * MathF.PI * wave) * decay * amount;
         return rawProgress + (Checked ? spring : -spring);
     }
@@ -478,6 +510,29 @@ public class SwitchButton : ElementBase
         return TransitionMode == SwitchButtonTransitionMode.SoftElastic
             || TransitionMode == SwitchButtonTransitionMode.Bounce
             || TransitionMode == SwitchButtonTransitionMode.Stretch;
+    }
+
+    private SKRect ApplyPressedThumbStretch(SKRect thumbRect, SKRect trackRect, float padding)
+    {
+        var pressProgress = Math.Clamp((float)_pressAnimation.GetProgress(), 0f, 1f);
+        if (_pointerPressActive)
+            pressProgress = Math.Max(pressProgress, 0.72f);
+
+        if (pressProgress <= 0.001f || TransitionMode == SwitchButtonTransitionMode.Fade)
+            return thumbRect;
+
+        var amount = 8.5f * ScaleFactor * pressProgress;
+        var maxWidth = Math.Max(thumbRect.Width, trackRect.Width - padding * 2f);
+        var targetWidth = Math.Min(thumbRect.Width + amount, maxWidth);
+
+        if (_pointerPressActive ? _pointerPressCheckedState : Checked)
+        {
+            thumbRect.Left = thumbRect.Right - targetWidth;
+            return thumbRect;
+        }
+
+        thumbRect.Right = thumbRect.Left + targetWidth;
+        return thumbRect;
     }
 
     private bool IsPointInToggleArea(SKPoint point)
@@ -517,6 +572,20 @@ public class SwitchButton : ElementBase
         };
         _thumbAnimation.Increment = 16d / milliseconds;
         _thumbAnimation.SecondaryIncrement = 16d / Math.Max(1d, milliseconds * 0.86d);
+    }
+
+    private static SKRect ClampThumbRectToTrack(SKRect thumbRect, SKRect trackRect, float padding)
+    {
+        var minLeft = trackRect.Left + padding;
+        var maxRight = trackRect.Right - padding;
+
+        if (thumbRect.Left < minLeft)
+            thumbRect.Offset(minLeft - thumbRect.Left, 0f);
+
+        if (thumbRect.Right > maxRight)
+            thumbRect.Offset(maxRight - thumbRect.Right, 0f);
+
+        return thumbRect;
     }
 
     private static SKRect InflateRect(SKRect rect, float amount)
