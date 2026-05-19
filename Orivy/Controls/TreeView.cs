@@ -402,8 +402,8 @@ public class TreeView : ElementBase
 
         if (AutoScrollMinSize != size)
             AutoScrollMinSize = size;
-        else
-            UpdateScrollBars();
+
+        UpdateScrollBars();
     }
 
     private float MeasureVisibleHeight(IReadOnlyList<TreeNode> nodes, float parentReveal)
