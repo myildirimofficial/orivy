@@ -67,9 +67,15 @@ internal sealed partial class ModernControlsDemoPage
         var slideRadio = CreateRadioButton("Slide", true, 0, "numericMode");
         var fadeRadio = CreateRadioButton("Fade", false, 104, "numericMode");
         var scaleRadio = CreateRadioButton("Scale", false, 208, "numericMode");
+        var odometerRadio = CreateRadioButton("Odometer", false, 312, "numericMode");
+        var noneRadio = CreateRadioButton("None", false, 436, "numericMode");
         slideRadio.CheckedChanged += (_, _) => progressNumeric.AnimationMode = NumericUpDownAnimationMode.Slide;
         fadeRadio.CheckedChanged += (_, _) => progressNumeric.AnimationMode = NumericUpDownAnimationMode.Fade;
         scaleRadio.CheckedChanged += (_, _) => progressNumeric.AnimationMode = NumericUpDownAnimationMode.Scale;
+        odometerRadio.CheckedChanged += (_, _) => progressNumeric.AnimationMode = NumericUpDownAnimationMode.Odometer;
+        noneRadio.CheckedChanged += (_, _) => progressNumeric.AnimationMode = NumericUpDownAnimationMode.None;
+        radioRow.Controls.Add(noneRadio);
+        radioRow.Controls.Add(odometerRadio);
         radioRow.Controls.Add(scaleRadio);
         radioRow.Controls.Add(fadeRadio);
         radioRow.Controls.Add(slideRadio);
@@ -214,7 +220,7 @@ internal sealed partial class ModernControlsDemoPage
         AddCardContent(progressCard, segmentedProgress);
         AddCardContent(progressCard, linearProgress);
 
-        var inputCard = CreateCard("TrackBar and NumericUpDown", "TrackBar has a Tailwind-like pill track. NumericUpDown animates value changes with slide, fade and scale modes.");
+        var inputCard = CreateCard("TrackBar and NumericUpDown", "NumericUpDown supports prefix/suffix formatting, wrapping, button visibility and animated value changes.");
         progressTrack = new TrackBar
         {
             Name = "modernProgressTrack",
@@ -228,40 +234,101 @@ internal sealed partial class ModernControlsDemoPage
         {
             Name = "modernProgressNumeric",
             Location = new SKPoint(0, 0),
-            Size = new SKSize(138, 38),
+            Size = new SKSize(126, 38),
             Minimum = 0,
             Maximum = 100,
             Value = 62,
-            Format = "0",
+            Suffix = "%",
+            MouseWheelEnabled = true,
             AnimationMode = NumericUpDownAnimationMode.Slide
+        };
+        var currencyNumeric = new NumericUpDown
+        {
+            Name = "modernCurrencyNumeric",
+            Location = new SKPoint(140, 0),
+            Size = new SKSize(156, 38),
+            Minimum = 0,
+            Maximum = 250000,
+            Increment = 250m,
+            Value = 12500m,
+            Prefix = "₺",
+            DecimalPlaces = 2,
+            ThousandsSeparator = true,
+            AnimationMode = NumericUpDownAnimationMode.Odometer
+        };
+        var pixelsNumeric = new NumericUpDown
+        {
+            Name = "modernPixelsNumeric",
+            Location = new SKPoint(310, 0),
+            Size = new SKSize(132, 38),
+            Minimum = 0,
+            Maximum = 240,
+            Increment = 4m,
+            Value = 32m,
+            Suffix = " px",
+            MouseWheelEnabled = true,
+            ButtonVisibility = NumericUpDownButtonVisibility.HoverOrFocused
         };
         var advanceButton = new Button
         {
             Name = "modernAdvanceProgressButton",
             Text = "Advance",
-            Location = new SKPoint(152, 0),
+            Location = new SKPoint(292, 0),
             Size = new SKSize(108, 38)
         };
         var decimalNumeric = new NumericUpDown
         {
             Name = "modernDecimalNumeric",
-            Location = new SKPoint(276, 0),
+            Location = new SKPoint(0, 0),
             Size = new SKSize(138, 38),
             Minimum = -10,
             Maximum = 10,
             Increment = 0.25m,
             Value = 2.5m,
-            Format = "0.00",
+            DecimalPlaces = 2,
+            MouseWheelEnabled = true,
             AnimationMode = NumericUpDownAnimationMode.Slide
         };
-        var inputRow = CreateRow(44);
-        inputRow.Controls.Add(decimalNumeric);
-        inputRow.Controls.Add(advanceButton);
+        var wrapNumeric = new NumericUpDown
+        {
+            Name = "modernWrapNumeric",
+            Location = new SKPoint(152, 0),
+            Size = new SKSize(126, 38),
+            Minimum = 1,
+            Maximum = 5,
+            Value = 5,
+            WrapValue = true,
+            RepeatButtonEnabled = true,
+            RepeatAcceleration = true
+        };
+        var editableNumeric = new NumericUpDown
+        {
+            Name = "modernEditableNumeric",
+            Location = new SKPoint(0, 0),
+            Size = new SKSize(150, 38),
+            Minimum = -1000,
+            Maximum = 1000,
+            Increment = 5,
+            Value = 128,
+            TextBoxMode = true,
+            ButtonVisibility = NumericUpDownButtonVisibility.HoverOrFocused
+        };
+        var inputRow = CreateRow(48);
+        inputRow.Controls.Add(pixelsNumeric);
+        inputRow.Controls.Add(currencyNumeric);
         inputRow.Controls.Add(progressNumeric);
+        var advancedInputRow = CreateRow(48);
+        advancedInputRow.Controls.Add(advanceButton);
+        advancedInputRow.Controls.Add(wrapNumeric);
+        advancedInputRow.Controls.Add(decimalNumeric);
+        var editInputRow = CreateRow(48);
+        editInputRow.Controls.Add(editableNumeric);
         progressTrack.ValueChanged += (_, _) => SetProgress(progressTrack.Value);
         progressNumeric.ValueChanged += (_, _) => SetProgress((float)progressNumeric.Value);
         advanceButton.Click += (_, _) => AdvanceProgress(17f);
 
+        AddCardContent(inputCard, editInputRow);
+        AddCardContent(inputCard, advancedInputRow);
         AddCardContent(inputCard, inputRow);
         AddCardContent(inputCard, progressTrack);
 

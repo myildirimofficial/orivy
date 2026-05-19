@@ -1723,6 +1723,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
     protected virtual bool HandlesMouseWheelScroll => AutoScroll;
+
+    protected virtual bool HandlesMouseWheelInput => false;
+
     protected virtual float MouseWheelScrollLines => 3f;
 
     protected virtual float GetMouseWheelScrollStep(ScrollBar scrollBar)
@@ -2078,7 +2081,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                 return !wantsHorizontal || canScrollHorizontal;
         }
 
-        return MouseWheel != null;
+        return HandlesMouseWheelInput || MouseWheel != null;
     }
 
     protected virtual bool ShouldIncludeHitTestElement(ElementBase element, bool requireEnabled)
