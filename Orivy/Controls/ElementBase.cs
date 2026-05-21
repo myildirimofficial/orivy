@@ -104,6 +104,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         InitializeVisualStyleSystem();
         InitializeMotionEffectsSystem();
         InitializeBackgroundImageTransitionSystem();
+        InitializeRemoteImageLoadingSystem();
 
         ColorScheme.ThemeChanged += OnColorSchemeChanged;
     }
@@ -3458,8 +3459,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             maxRight = Math.Max(maxRight, control.Location.X + control.Width);
         }
 
-        var contentWidth = Math.Max(maxRight, AutoScrollMinSize.Width) + AutoScrollMargin.Width;
-        var contentHeight = Math.Max(maxBottom, AutoScrollMinSize.Height) + AutoScrollMargin.Height;
+        var contentWidth = Math.Max(maxRight + Padding.Right, AutoScrollMinSize.Width) + AutoScrollMargin.Width;
+        var contentHeight = Math.Max(maxBottom + Padding.Bottom, AutoScrollMinSize.Height) + AutoScrollMargin.Height;
 
         var needsVScroll = contentHeight > Height;
         var needsHScroll = contentWidth > Width;
@@ -4408,6 +4409,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
             DisposeMotionEffectsSystem();
             DisposeVisualStyleSystem();
+            DisposeRemoteImageLoadingSystem();
             DisposeBackgroundImageTransitionSystem();
             DisposeBackdropMaterialSystem();
             _defaultTextRenderFont?.Dispose();

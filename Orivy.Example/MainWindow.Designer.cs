@@ -125,6 +125,10 @@ internal partial class MainWindow
         var layoutControlsTabIcon = CreateExampleIcon(new SKColor(0xA3, 0xA3, 0xA3), ExampleIconKind.Warning);
         layoutControlsPage.Image = layoutControlsTabIcon;
         tabView.Controls.Add(layoutControlsPage);
+        var cardDemoPage = new CardDemoPage();
+        var cardDemoTabIcon = CreateExampleIcon(new SKColor(0xF9, 0x73, 0x16), ExampleIconKind.Healthy);
+        cardDemoPage.Image = cardDemoTabIcon;
+        tabView.Controls.Add(cardDemoPage);
 
 
 

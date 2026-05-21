@@ -2226,7 +2226,7 @@ public partial class TabView : ElementBase
             if (closeButtonRect.Width > 0)
                 DrawTabCloseButton(canvas, closeButtonRect, tabIndex == _hoveredTabCloseIndex, activeTextColor);
 
-            var hasTabIcon = ShouldDrawTabIcons && page.Image != null;
+            var hasTabIcon = ShouldDrawTabIcons && page.HasImage;
             var tabTrailingReserve = closeButtonRect.Width > 0f ? closeButtonRect.Width + closeButtonSpacing : 0f;
             var innerVertPad = UsesVerticalTabLayout
                 ? GetTabVerticalContentPadding() * 2f
@@ -2236,7 +2236,7 @@ public partial class TabView : ElementBase
                 horizontalPadding, innerVertPad, iconSize, iconSpacing, tabTrailingReserve);
 
             if (hasTabIcon)
-                canvas.DrawImage(page.Image, iconRect);
+                page.RenderImageSlot(canvas, iconRect);
 
             _tabTextPaint.Color = ResolveCustomTabTextColor(isSelected, hoverProgress,
                 activeTextColor, inactiveTextColor, inactiveBackground, hoverBackground, selectedBackground);
@@ -2265,13 +2265,13 @@ public partial class TabView : ElementBase
             var ghostPage = GetPageAt(_dragTabSourceIndex);
             if (ghostPage != null)
             {
-                var hasGhostIcon = ShouldDrawTabIcons && ghostPage.Image != null;
+                var hasGhostIcon = ShouldDrawTabIcons && ghostPage.HasImage;
                 (var ghostIconRect, var ghostTextRect) = ComputeTabContentRects(
                     ghostRect, ghostPage.Text, hasGhostIcon,
                     horizontalPadding, GetTabVerticalContentPadding(), iconSize, iconSpacing, 0f);
 
                 if (hasGhostIcon)
-                    canvas.DrawImage(ghostPage.Image, ghostIconRect);
+                    ghostPage.RenderImageSlot(canvas, ghostIconRect);
 
                 _tabTextPaint.Color = activeTextColor;
                 TextRenderer.DrawText(canvas, ghostPage.Text ?? string.Empty, ghostTextRect, _tabTextPaint, _tabFont, TextAlign, true, false);
@@ -2402,7 +2402,7 @@ public partial class TabView : ElementBase
             var titleBarPadding     = GetTitleBarTabHorizontalContentPadding();
             var titleBarIcon    = TitleBarTabIconSize * ScaleFactor;
             var titleBarIconSpacing = TitleBarTabIconSpacing * ScaleFactor;
-            var hasTitleBarIcon = DrawTabIcons && page.Image != null;
+            var hasTitleBarIcon = DrawTabIcons && page.HasImage;
             var titleBarTrailingReserve = pageIndex == _selectedIndex && _titleBarCloseButtonRect.Width > 0f
                 ? _titleBarCloseButtonRect.Width + titleBarIconSpacing : 0f;
 
@@ -2411,7 +2411,7 @@ public partial class TabView : ElementBase
                 titleBarPadding, titleBarVerticalPadding, titleBarIcon, titleBarIconSpacing, titleBarTrailingReserve);
 
             if (hasTitleBarIcon)
-                canvas.DrawImage(page.Image, iconRect);
+                page.RenderImageSlot(canvas, iconRect);
 
             TextRenderer.DrawText(canvas, page.Text ?? string.Empty, textRect, _tabTextPaint, _tabFont,
                 TextAlign, true, false);
@@ -2433,11 +2433,11 @@ public partial class TabView : ElementBase
             
             var ghostPage = GetPageAt(_dragTabSourceIndex);
             if (ghostPage != null) {
-                var hasGhostIcon = DrawTabIcons && ghostPage.Image != null;
+                var hasGhostIcon = DrawTabIcons && ghostPage.HasImage;
                 var titleBarPadding = GetTitleBarTabHorizontalContentPadding();
                 (var ghostIconRect, var ghostTextRect) = ComputeTabContentRects(
                     ghostRect, ghostPage.Text, hasGhostIcon, titleBarPadding, GetTitleBarTabVerticalContentPadding(), TitleBarTabIconSize * ScaleFactor, TitleBarTabIconSpacing * ScaleFactor, 0f);
-                if (hasGhostIcon) canvas.DrawImage(ghostPage.Image, ghostIconRect);
+                if (hasGhostIcon) ghostPage.RenderImageSlot(canvas, ghostIconRect);
                 TextRenderer.DrawText(canvas, ghostPage.Text ?? string.Empty, ghostTextRect, _tabTextPaint, _tabFont, TextAlign, true, false);
             }
             canvas.RestoreToCount(layerSaved);
@@ -4032,7 +4032,7 @@ public partial class TabView : ElementBase
     private float MeasureDesiredTabHeight(ElementBase page, bool includeIcon, float verticalPadding,
         float iconSize, float iconSpacing, float trailingButtonSize, float minHeight, float maxHeight)
     {
-        var hasIcon = includeIcon && page.Image != null;
+        var hasIcon = includeIcon && page.HasImage;
         return TabViewTabGeometry.MeasureDesiredTabHeight(
             page.Text,
             hasIcon,

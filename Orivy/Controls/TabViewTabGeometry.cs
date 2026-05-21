@@ -36,7 +36,7 @@ internal static class TabViewTabGeometry
         bool includeIcon, bool includeCloseButton,
         ContentAlignment imageAlign = ContentAlignment.MiddleLeft)
     {
-        var hasIcon = includeIcon && page.Image != null;
+        var hasIcon = includeIcon && page.HasImage;
         var (blockW, _) = MeasureContentBlockSize(page.Text, hasIcon, font, iconSize, iconSpacing, imageAlign);
 
         var width = blockW + horizontalPadding * 2f;

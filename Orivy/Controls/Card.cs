@@ -6,72 +6,43 @@ namespace Orivy.Controls;
 
 public class Card : Container
 {
-    private readonly Element _header;
-    private readonly Element _descriptionLabel;
+    private readonly SKPaint _titlePaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _descriptionPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private string _title = string.Empty;
     private string _description = string.Empty;
     private bool _useThemeColors = true;
+    private float _headerGap = 14f;
 
     public Card()
     {
-        Radius = new Radius(14);
+        Radius = new Radius(12);
         Border = new Thickness(1);
-        TextAlign = ContentAlignment.MiddleLeft;
+        Padding = new Thickness(18);
+        BackColor = ColorScheme.Surface;
+        ForeColor = ColorScheme.ForeColor;
+        BorderColor = ColorScheme.Outline.WithAlpha(ColorScheme.IsDarkMode ? (byte)78 : (byte)92);
+        Shadow = new BoxShadow(0f, 1f, 2f, 0, ColorScheme.ShadowColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)0 : (byte)16));
         BackgroundImageLayout = ImageLayout.Zoom;
-        Shadow = new BoxShadow(0f, 1f, 2f, 0, ColorScheme.ShadowColor.WithAlpha(14));
-
-        Content = new Container
-        {
-            Name = "cardContent",
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            BackColor = SKColors.Transparent,
-            Border = new Thickness(0),
-            Padding = new Thickness(0),
-            Margin = new Thickness(0)
-        };
-
-        _descriptionLabel = new Element
-        {
-            Name = "cardDescription",
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            BackColor = SKColors.Transparent,
-            Border = new Thickness(0),
-            Padding = new Thickness(0, 0, 0, 16),
-            Margin = new Thickness(0),
-            TextAlign = ContentAlignment.MiddleLeft,
-            Visible = false
-        };
-
-        _header = new Element
-        {
-            Name = "cardHeader",
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            BackColor = SKColors.Transparent,
-            Border = new Thickness(0),
-            Padding = new Thickness(0, 0, 0, 4),
-            Margin = new Thickness(0),
-            Radius = new Radius(0),
-            TextAlign = ContentAlignment.MiddleLeft,
-            Visible = false
-        };
-        var headerFont = _header.Font.CloneFont();
-        headerFont.Embolden = true;
-        headerFont.Size += 1f;
-        _header.Font = headerFont;
-        headerFont.Dispose();
-
-        Controls.Add(Content);
-        Controls.Add(_descriptionLabel);
-        Controls.Add(_header);
         ApplyThemeColors();
         ColorScheme.ThemeChanged += HandleThemeChanged;
     }
 
     [Browsable(false)]
-    public Container Content { get; }
+    public Container Content => this;
+
+    public override SKRect DisplayRectangle
+    {
+        get
+        {
+            var rect = base.DisplayRectangle;
+            var headerHeight = GetHeaderHeight();
+            if (headerHeight <= 0f)
+                return rect;
+
+            rect.Top = Math.Min(rect.Bottom, rect.Top + headerHeight);
+            return rect;
+        }
+    }
 
     [DefaultValue("")]
     public string Title
@@ -84,7 +55,8 @@ public class Card : Container
                 return;
 
             _title = normalized;
-            RefreshHeaderText();
+            InvalidateMeasure();
+            Invalidate();
         }
     }
 
@@ -99,7 +71,8 @@ public class Card : Container
                 return;
 
             _description = normalized;
-            RefreshHeaderText();
+            InvalidateMeasure();
+            Invalidate();
         }
     }
 
@@ -118,15 +91,52 @@ public class Card : Container
         }
     }
 
+    [DefaultValue(14f)]
+    public float HeaderGap
+    {
+        get => _headerGap;
+        set
+        {
+            var normalized = Math.Max(0f, value);
+            if (Math.Abs(_headerGap - normalized) < 0.001f)
+                return;
+
+            _headerGap = normalized;
+            InvalidateMeasure();
+            Invalidate();
+        }
+    }
+
     public void AddContent(ElementBase content)
     {
-        Content.Controls.Add(content);
+        ArgumentNullException.ThrowIfNull(content);
+        Controls.Add(content);
+    }
+
+    public override void OnPaint(SKCanvas canvas)
+    {
+        RenderHeader(canvas);
+        base.OnPaint(canvas);
+    }
+
+    protected override SKSize GetPreferredSizeCore(SKSize proposedSize)
+    {
+        var size = base.GetPreferredSizeCore(proposedSize);
+        var headerHeight = GetHeaderHeight();
+        if (headerHeight <= 0f)
+            return size;
+
+        return new SKSize(size.Width, MathF.Ceiling(size.Height + headerHeight));
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
+        {
             ColorScheme.ThemeChanged -= HandleThemeChanged;
+            _titlePaint.Dispose();
+            _descriptionPaint.Dispose();
+        }
 
         base.Dispose(disposing);
     }
@@ -141,28 +151,91 @@ public class Card : Container
     {
         BackColor = ColorScheme.Surface;
         ForeColor = ColorScheme.ForeColor;
-        BorderColor = ColorScheme.Outline.WithAlpha(ColorScheme.IsDarkMode ? (byte)82 : (byte)92);
+        BorderColor = ColorScheme.Outline.WithAlpha(ColorScheme.IsDarkMode ? (byte)78 : (byte)92);
         Shadow = new BoxShadow(
-            0f,
+            0,
             ColorScheme.IsDarkMode ? 0.5f : 1f,
             ColorScheme.IsDarkMode ? 0f : 2f,
             0,
-            ColorScheme.ShadowColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)0 : (byte)14));
-        _header.ForeColor = ColorScheme.ForeColor;
-        _header.BackColor = SKColors.Transparent;
-        _header.BorderColor = SKColors.Transparent;
-        _descriptionLabel.ForeColor = ColorScheme.ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)168 : (byte)142);
-        _descriptionLabel.BackColor = SKColors.Transparent;
-        Content.BackColor = SKColors.Transparent;
+            ColorScheme.ShadowColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)0 : (byte)16));
+        Invalidate();
     }
 
-    private void RefreshHeaderText()
+    private float GetHeaderHeight()
     {
-        _header.Text = Title;
-        _header.Visible = !string.IsNullOrWhiteSpace(_header.Text);
-        _descriptionLabel.Text = Description;
-        _descriptionLabel.Visible = !string.IsNullOrWhiteSpace(_descriptionLabel.Text);
-        PerformLayout();
-        Invalidate();
+        var hasTitle = !string.IsNullOrWhiteSpace(Title);
+        var hasDescription = !string.IsNullOrWhiteSpace(Description);
+        if (!hasTitle && !hasDescription)
+            return 0f;
+
+        using var titleFont = CreateHeaderFont(true);
+        using var descriptionFont = CreateHeaderFont(false);
+        var height = 0f;
+
+        if (hasTitle)
+            height += GetFontLineHeight(titleFont);
+
+        if (hasDescription)
+        {
+            if (height > 0f)
+                height += 4f * ScaleFactor;
+            height += GetFontLineHeight(descriptionFont);
+        }
+
+        return MathF.Ceiling(height + HeaderGap * ScaleFactor);
+    }
+
+    private void RenderHeader(SKCanvas canvas)
+    {
+        var hasTitle = !string.IsNullOrWhiteSpace(Title);
+        var hasDescription = !string.IsNullOrWhiteSpace(Description);
+        if (!hasTitle && !hasDescription)
+            return;
+
+        var rect = base.DisplayRectangle;
+        if (rect.Width <= 0f || rect.Height <= 0f)
+            return;
+
+        using var titleFont = CreateHeaderFont(true);
+        using var descriptionFont = CreateHeaderFont(false);
+
+        _titlePaint.Color = ForeColor;
+        _descriptionPaint.Color = ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)170 : (byte)145);
+
+        var y = rect.Top;
+        if (hasTitle)
+        {
+            y += -titleFont.Metrics.Ascent;
+            canvas.DrawText(Title, rect.Left, y, SKTextAlign.Left, titleFont, _titlePaint);
+            y += titleFont.Metrics.Descent + 4f * ScaleFactor;
+        }
+
+        if (hasDescription)
+        {
+            y += -descriptionFont.Metrics.Ascent;
+            canvas.DrawText(Description, rect.Left, y, SKTextAlign.Left, descriptionFont, _descriptionPaint);
+        }
+    }
+
+    private SKFont CreateHeaderFont(bool title)
+    {
+        var font = CreateRenderFont(Font);
+        if (title)
+        {
+            font.Embolden = true;
+            font.Size += 1.5f * ScaleFactor;
+        }
+        else
+        {
+            font.Size = Math.Max(10f * ScaleFactor, font.Size * 0.9f);
+        }
+
+        return font;
+    }
+
+    private static float GetFontLineHeight(SKFont font)
+    {
+        var metrics = font.Metrics;
+        return MathF.Ceiling(metrics.Descent - metrics.Ascent + metrics.Leading);
     }
 }
