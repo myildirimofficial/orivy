@@ -149,6 +149,20 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
+    private BackgroundImagePosition _backgroundImagePosition = BackgroundImagePosition.Center;
+    public BackgroundImagePosition BackgroundImagePosition
+    {
+        get => _backgroundImagePosition;
+        set
+        {
+            if (_backgroundImagePosition == value) return;
+            _backgroundImagePosition = value;
+            ClearBackgroundBlurCache();
+            OnBackgroundImageLayoutChanged(EventArgs.Empty);
+            Invalidate();
+        }
+    }
+
     private AutoScaleMode _autoScaleMode = AutoScaleMode.None;
     public AutoScaleMode AutoScaleMode
     {

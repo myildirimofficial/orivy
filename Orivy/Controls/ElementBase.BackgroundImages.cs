@@ -3,6 +3,7 @@ using SkiaSharp;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,6 +13,7 @@ public abstract partial class ElementBase
 {
     private const int DefaultBackgroundImageTransitionDurationMs = 280;
     private const int MaxBackgroundBlurCacheEntries = 4;
+    private static readonly HttpClient s_backgroundImageHttpClient = new();
 
     private readonly AnimationManager _backgroundImageTransitionAnimation = new(true);
     private readonly SKPaint _backgroundImagePaint = new() { IsAntialias = true };
@@ -36,6 +38,9 @@ public abstract partial class ElementBase
     private bool _backgroundImageSlideshowRepeat = true;
     private float _backgroundImageBlurAmount;
     private BackgroundImageBlurMode _backgroundImageBlurMode = BackgroundImageBlurMode.Normal;
+    private string _backgroundImageUrl = string.Empty;
+    private CancellationTokenSource? _backgroundImageUrlCts;
+    private long _backgroundImageUrlRequestVersion;
 
     [Category("Appearance")]
     public BackgroundImageFrame[] BackgroundImages
@@ -158,6 +163,47 @@ public abstract partial class ElementBase
     [Browsable(false)]
     public BackgroundImageCaptionDesignMode CurrentBackgroundImageCaptionDesignMode
         => GetDisplayedBackgroundImageFrame()?.CaptionDesignMode ?? _backgroundImageCaptionDesignMode;
+
+    [Category("Appearance")]
+    [DefaultValue("")]
+    public string BackgroundImageUrl
+    {
+        get => _backgroundImageUrl;
+        set
+        {
+            var normalized = value?.Trim() ?? string.Empty;
+            if (string.Equals(_backgroundImageUrl, normalized, StringComparison.Ordinal))
+                return;
+
+            _backgroundImageUrl = normalized;
+            _ = BeginBackgroundImageUrlLoadAsync(normalized);
+        }
+    }
+
+    [Browsable(false)]
+    public bool IsBackgroundImageLoading { get; private set; }
+
+    public event EventHandler? BackgroundImageLoadingChanged;
+
+    public event EventHandler<Exception>? BackgroundImageLoadFailed;
+
+    public Task SetBackgroundImageFromUrlAsync(string url, CancellationToken cancellationToken = default)
+    {
+        _backgroundImageUrl = url?.Trim() ?? string.Empty;
+        return LoadBackgroundImageFromUrlCoreAsync(_backgroundImageUrl, cancellationToken);
+    }
+
+    private async Task BeginBackgroundImageUrlLoadAsync(string url)
+    {
+        try
+        {
+            await LoadBackgroundImageFromUrlCoreAsync(url, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The failure is surfaced through BackgroundImageLoadFailed.
+        }
+    }
 
     [Category("Appearance")]
     [DefaultValue(0f)]
@@ -336,6 +382,7 @@ public abstract partial class ElementBase
 
     private void DisposeBackgroundImageTransitionSystem()
     {
+        CancelBackgroundImageUrlLoad();
         StopBackgroundImageSlideshowLoop();
         _backgroundImageTransitionAnimation.OnAnimationProgress -= HandleBackgroundImageTransitionProgress;
         _backgroundImageTransitionAnimation.OnAnimationFinished -= HandleBackgroundImageTransitionFinished;
@@ -346,6 +393,105 @@ public abstract partial class ElementBase
         _backgroundImagePaint.Dispose();
         _backgroundTransitionFromImage = null;
         _backgroundTransitionToImage = null;
+    }
+
+    private async Task LoadBackgroundImageFromUrlCoreAsync(string url, CancellationToken cancellationToken)
+    {
+        CancelBackgroundImageUrlLoad();
+        var version = Interlocked.Increment(ref _backgroundImageUrlRequestVersion);
+
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            SetBackgroundImageLoading(false);
+            BackgroundImage = null;
+            return;
+        }
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            var exception = new ArgumentException("BackgroundImageUrl must be an absolute http or https URL.", nameof(url));
+            BackgroundImageLoadFailed?.Invoke(this, exception);
+            throw exception;
+        }
+
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _backgroundImageUrlCts = linkedCts;
+        SetBackgroundImageLoading(true);
+
+        try
+        {
+            using var response = await s_backgroundImageHttpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, linkedCts.Token).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            await using var stream = await response.Content.ReadAsStreamAsync(linkedCts.Token).ConfigureAwait(false);
+            using var data = SKData.Create(stream);
+            var image = SKImage.FromEncodedData(data);
+            if (image == null)
+                throw new InvalidOperationException("The downloaded response is not a supported image.");
+
+            if (version != Interlocked.Read(ref _backgroundImageUrlRequestVersion) || linkedCts.IsCancellationRequested)
+            {
+                image.Dispose();
+                return;
+            }
+
+            var previousImage = GetDisplayedBackgroundImage();
+            var previousFrame = GetDisplayedBackgroundImageFrame();
+            _backgroundImage = image;
+            _backgroundImages = Array.Empty<BackgroundImageFrame>();
+            _backgroundImageIndex = 0;
+            _useBackgroundImageCollection = false;
+
+            ApplyBackgroundImageChange(previousImage, _backgroundImage, 1, allowTransition: false);
+            OnBackgroundImageChanged(EventArgs.Empty);
+            NotifyBackgroundImageMetadataChange(previousFrame);
+            UpdateBackgroundImageSlideshowState();
+            Invalidate();
+        }
+        catch (OperationCanceledException) when (linkedCts.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            if (version == Interlocked.Read(ref _backgroundImageUrlRequestVersion))
+                BackgroundImageLoadFailed?.Invoke(this, ex);
+            throw;
+        }
+        finally
+        {
+            if (ReferenceEquals(_backgroundImageUrlCts, linkedCts))
+                _backgroundImageUrlCts = null;
+
+            if (version == Interlocked.Read(ref _backgroundImageUrlRequestVersion))
+                SetBackgroundImageLoading(false);
+        }
+    }
+
+    private void CancelBackgroundImageUrlLoad()
+    {
+        Interlocked.Increment(ref _backgroundImageUrlRequestVersion);
+        var cts = _backgroundImageUrlCts;
+        _backgroundImageUrlCts = null;
+        if (cts == null)
+            return;
+
+        try
+        {
+            cts.Cancel();
+        }
+        catch
+        {
+        }
+    }
+
+    private void SetBackgroundImageLoading(bool loading)
+    {
+        if (IsBackgroundImageLoading == loading)
+            return;
+
+        IsBackgroundImageLoading = loading;
+        BackgroundImageLoadingChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void UpdateBackgroundImageBlurFilter()
@@ -718,11 +864,11 @@ public abstract partial class ElementBase
         switch (BackgroundImageLayout)
         {
             case ImageLayout.None:
-                canvas.DrawImage(image, SKRect.Create(bounds.Left, bounds.Top, image.Width, image.Height), paint);
+                canvas.DrawImage(image, CreatePositionedImageRect(image, bounds, image.Width, image.Height), paint);
                 break;
 
             case ImageLayout.Center:
-                canvas.DrawImage(image, CreateCenteredImageRect(image, bounds), paint);
+                canvas.DrawImage(image, CreatePositionedImageRect(image, bounds, image.Width, image.Height), paint);
                 break;
 
             case ImageLayout.Stretch:
@@ -747,10 +893,17 @@ public abstract partial class ElementBase
     {
         var tileWidth = Math.Max(1f, image.Width);
         var tileHeight = Math.Max(1f, image.Height);
+        var startX = bounds.Left - (tileWidth * BackgroundImagePosition.X);
+        var startY = bounds.Top - (tileHeight * BackgroundImagePosition.Y);
 
-        for (var y = bounds.Top; y < bounds.Bottom; y += tileHeight)
+        while (startX > bounds.Left)
+            startX -= tileWidth;
+        while (startY > bounds.Top)
+            startY -= tileHeight;
+
+        for (var y = startY; y < bounds.Bottom; y += tileHeight)
         {
-            for (var x = bounds.Left; x < bounds.Right; x += tileWidth)
+            for (var x = startX; x < bounds.Right; x += tileWidth)
             {
                 canvas.DrawImage(image, SKRect.Create(x, y, tileWidth, tileHeight), paint);
             }
@@ -869,14 +1022,14 @@ public abstract partial class ElementBase
         }
     }
 
-    private static SKRect CreateCenteredImageRect(SKImage image, SKRect bounds)
+    private SKRect CreatePositionedImageRect(SKImage image, SKRect bounds, float width, float height)
     {
-        var left = bounds.Left + ((bounds.Width - image.Width) * 0.5f);
-        var top = bounds.Top + ((bounds.Height - image.Height) * 0.5f);
-        return SKRect.Create(left, top, image.Width, image.Height);
+        var left = bounds.Left + ((bounds.Width - width) * BackgroundImagePosition.X);
+        var top = bounds.Top + ((bounds.Height - height) * BackgroundImagePosition.Y);
+        return SKRect.Create(left, top, width, height);
     }
 
-    private static SKRect CreateZoomImageRect(SKImage image, SKRect bounds)
+    private SKRect CreateZoomImageRect(SKImage image, SKRect bounds)
     {
         if (image.Width <= 0 || image.Height <= 0 || bounds.Width <= 0f || bounds.Height <= 0f)
             return bounds;
@@ -887,9 +1040,7 @@ public abstract partial class ElementBase
 
         var scaledWidth = image.Width * scale;
         var scaledHeight = image.Height * scale;
-        var left = bounds.Left + ((bounds.Width - scaledWidth) * 0.5f);
-        var top = bounds.Top + ((bounds.Height - scaledHeight) * 0.5f);
-        return SKRect.Create(left, top, scaledWidth, scaledHeight);
+        return CreatePositionedImageRect(image, bounds, scaledWidth, scaledHeight);
     }
 
     private bool TryMapBackgroundPointToPixel(SKPoint point, SKImage image, SKRect bounds, out int pixelX, out int pixelY)
@@ -903,8 +1054,10 @@ public abstract partial class ElementBase
         switch (BackgroundImageLayout)
         {
             case ImageLayout.Tile:
-                var localX = point.X - bounds.Left;
-                var localY = point.Y - bounds.Top;
+                var tileOriginX = bounds.Left - (image.Width * BackgroundImagePosition.X);
+                var tileOriginY = bounds.Top - (image.Height * BackgroundImagePosition.Y);
+                var localX = point.X - tileOriginX;
+                var localY = point.Y - tileOriginY;
                 pixelX = Mod((int)MathF.Floor(localX), image.Width);
                 pixelY = Mod((int)MathF.Floor(localY), image.Height);
                 return true;
@@ -913,13 +1066,13 @@ public abstract partial class ElementBase
                 return TryMapPointWithinRect(point, image, bounds, out pixelX, out pixelY);
 
             case ImageLayout.Center:
-                return TryMapPointWithinRect(point, image, CreateCenteredImageRect(image, bounds), out pixelX, out pixelY);
+                return TryMapPointWithinRect(point, image, CreatePositionedImageRect(image, bounds, image.Width, image.Height), out pixelX, out pixelY);
 
             case ImageLayout.Zoom:
                 return TryMapPointWithinRect(point, image, CreateZoomImageRect(image, bounds), out pixelX, out pixelY);
 
             case ImageLayout.None:
-                return TryMapPointWithinRect(point, image, SKRect.Create(bounds.Left, bounds.Top, image.Width, image.Height), out pixelX, out pixelY);
+                return TryMapPointWithinRect(point, image, CreatePositionedImageRect(image, bounds, image.Width, image.Height), out pixelX, out pixelY);
 
             default:
                 return TryMapPointWithinRect(point, image, bounds, out pixelX, out pixelY);
