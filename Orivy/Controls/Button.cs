@@ -10,7 +10,8 @@ namespace Orivy.Controls;
 public class Button : ElementBase
 {
     private bool _checked;
-    private bool _keyboardPressArmed;
+    private bool _keyboardPressArmed;  
+    private ContextMenuStrip? _dropDownMenu;
     private readonly AnimationManager _dropDownChevronAnimation;
     private readonly SKPaint _dropDownTextPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _dropDownChevronPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round };
@@ -107,7 +108,26 @@ public class Button : ElementBase
     [DefaultValue(true)]
     public bool OpenDropDownOnClick { get; set; } = true;
 
-    public ContextMenuStrip? DropDownMenu { get; set; }
+    public ContextMenuStrip? DropDownMenu
+    {
+        get => _dropDownMenu;
+        set
+        {
+            if (ReferenceEquals(_dropDownMenu, value))
+                return;
+
+            if (_dropDownMenu != null)
+                _dropDownMenu.Closed -= HandleDropDownMenuClosed;
+
+            _dropDownMenu = value;
+
+            if (_dropDownMenu != null)
+                _dropDownMenu.Closed += HandleDropDownMenuClosed;
+
+            InvalidateMeasure();
+            Invalidate();
+        }
+    }
 
     protected override bool ShouldRenderDefaultText => !ShouldDrawDropDownGlyph;
 
@@ -137,13 +157,14 @@ public class Button : ElementBase
         if (DropDownMenu.IsOpen)
         {
             DropDownMenu.Hide();
-            StartDropDownChevronAnimation();
+            StartDropDownChevronAnimation(false);
             return;
         }
 
         DropDownOpening?.Invoke(this, EventArgs.Empty);
-        StartDropDownChevronAnimation();
         DropDownMenu.ShowAnchoredBelow(this, ClientRectangle);
+        if (DropDownMenu.IsOpen)
+            StartDropDownChevronAnimation(true);
     }
 
     public override SKSize GetPreferredSize(SKSize proposedSize)
@@ -256,6 +277,8 @@ public class Button : ElementBase
         {
             _dropDownChevronAnimation.OnAnimationProgress -= HandleDropDownChevronAnimationProgress;
             _dropDownChevronAnimation.OnAnimationFinished -= HandleDropDownChevronAnimationFinished;
+            if (_dropDownMenu != null)
+                _dropDownMenu.Closed -= HandleDropDownMenuClosed;
             _dropDownChevronAnimation.Dispose();
             _dropDownTextPaint.Dispose();
             _dropDownChevronPaint.Dispose();
@@ -303,10 +326,9 @@ public class Button : ElementBase
         canvas.RestoreToCount(save);
     }
 
-    private void StartDropDownChevronAnimation()
+    private void StartDropDownChevronAnimation(bool opening)
     {
-        _dropDownChevronAnimation.SetProgress(0d);
-        _dropDownChevronAnimation.StartNewAnimation(AnimationDirection.In);
+        _dropDownChevronAnimation.StartNewAnimation(opening ? AnimationDirection.In : AnimationDirection.Out);
     }
 
     private void HandleDropDownChevronAnimationProgress(object _)
@@ -316,12 +338,11 @@ public class Button : ElementBase
 
     private void HandleDropDownChevronAnimationFinished(object _)
     {
-        if (_dropDownChevronAnimation.Direction == AnimationDirection.In)
-        {
-            _dropDownChevronAnimation.StartNewAnimation(AnimationDirection.Out);
-            return;
-        }
-
         Invalidate();
+    }
+
+    private void HandleDropDownMenuClosed(object? sender, EventArgs e)
+    {
+        StartDropDownChevronAnimation(false);
     }
 }

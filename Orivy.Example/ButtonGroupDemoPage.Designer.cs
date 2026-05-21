@@ -147,50 +147,23 @@ internal sealed partial class ButtonGroupDemoPage
         Controls.Add(enumCard);
     }
 
-    private static Element MakeCard(string title)
+    private static Card MakeCard(string title)
     {
-        var card = new Element
+        return new Card
         {
-            Text = string.Empty,
             Dock = DockStyle.Top,
             AutoSize = true,
             Padding = new(16),
             Margin = new(0, 0, 0, 12),
-            BackColor = ColorScheme.Surface,
-            ForeColor = ColorScheme.ForeColor,
             Radius = new(14),
-            Border = new(1),
-            BorderColor = ColorScheme.Outline,
-            TextAlign = ContentAlignment.TopLeft,
+            Title = title
         };
-
-        card.Controls.Add(new Element
-        {
-            Text = title,
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            Padding = new(0, 0, 0, 12),
-            Margin = new(0),
-            BackColor = SKColors.Transparent,
-            ForeColor = ColorScheme.ForeColor,
-            Border = new(0),
-            TextAlign = ContentAlignment.MiddleLeft,
-        });
-
-        return card;
     }
 
-    private static void AddCardContent(Element card, ElementBase content)
+    private static void AddCardContent(Card card, ElementBase content)
     {
-        var header = card.Controls.Count > 0 ? card.Controls[0] : null;
-        if (header != null)
-            card.Controls.Remove(header);
-
         content.Margin = new(0);
-        card.Controls.Add(content);
-
-        if (header != null)
-            card.Controls.Add(header);
+        card.AddContent(content);
     }
 
     private static void ConfigureGroupButtons<T>(ButtonGroup<T> group)

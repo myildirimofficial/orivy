@@ -11,6 +11,9 @@ public enum SwitchButtonTransitionMode
 {
     Slide,
     SoftElastic,
+    Cupertino,
+    Material,
+    Jelly,
     Bounce,
     Stretch,
     Snap,
@@ -22,6 +25,33 @@ public enum SwitchButtonToggleArea
     FullControl,
     SwitchOnly,
     ThumbOnly
+}
+
+public sealed class SwitchButtonRenderEventArgs : EventArgs
+{
+    internal SwitchButtonRenderEventArgs(SKCanvas canvas, SwitchButton switchButton, SKRect bounds, SKRect trackBounds, float progress, float pressProgress)
+    {
+        Canvas = canvas;
+        SwitchButton = switchButton;
+        Bounds = bounds;
+        TrackBounds = trackBounds;
+        Progress = progress;
+        PressProgress = pressProgress;
+    }
+
+    public SKCanvas Canvas { get; }
+
+    public SwitchButton SwitchButton { get; }
+
+    public SKRect Bounds { get; }
+
+    public SKRect TrackBounds { get; }
+
+    public float Progress { get; }
+
+    public float PressProgress { get; }
+
+    public bool Handled { get; set; }
 }
 
 public class SwitchButton : ElementBase
@@ -44,8 +74,19 @@ public class SwitchButton : ElementBase
     private bool _suppressNextPointerClick;
     private bool _toggleArmedByPointer = true;
     private bool _toggleRequestedByKeyboard;
-    private SwitchButtonTransitionMode _transitionMode = SwitchButtonTransitionMode.Stretch;
-    private TimeSpan _transitionDuration = TimeSpan.FromMilliseconds(180);
+    private bool _useThemeColors = true;
+    private bool _customOnColor;
+    private bool _customOffColor;
+    private bool _customThumbColor;
+    private bool _customThumbCheckedColor;
+    private SKColor _onColor;
+    private SKColor _offColor;
+    private SKColor _thumbColor;
+    private SKColor _thumbCheckedColor;
+    private SwitchButtonTransitionMode _transitionMode = SwitchButtonTransitionMode.Cupertino;
+    private TimeSpan _transitionDuration = TimeSpan.FromMilliseconds(210);
+    private float _elasticity = 0.04f;
+    private float _pressStretch = 1f;
 
     public SwitchButton()
     {
@@ -86,6 +127,8 @@ public class SwitchButton : ElementBase
         _pressAnimation.OnAnimationProgress += HandleThumbAnimationProgress;
         _pressAnimation.OnAnimationFinished += HandleThumbAnimationFinished;
 
+        ApplyThemeColors();
+
         ConfigureVisualStyles(styles => styles
             .DefaultTransition(TimeSpan.FromMilliseconds(120), AnimationType.CubicEaseOut)
             .Base(baseStyle => baseStyle
@@ -94,8 +137,8 @@ public class SwitchButton : ElementBase
                 .Border(0)
                 .Radius(16)
                 .Shadow(BoxShadow.None))
-            .OnHover(rule => rule.Background(ColorScheme.Primary.WithAlpha(8)))
-            .OnPressed(rule => rule.Background(ColorScheme.Primary.WithAlpha(14)).Scale(0.985f))
+            .OnHover(rule => rule.Foreground(ColorScheme.ForeColor))
+            .OnPressed(rule => rule.Foreground(ColorScheme.ForeColor))
             .OnDisabled(rule => rule.Foreground(ColorScheme.Outline).Opacity(0.72f)),
             clearExisting: true);
 
@@ -111,6 +154,8 @@ public class SwitchButton : ElementBase
                 .SpeedOnHover(1.6f)
                 .SpeedOnPressed(2.3f)
                 .SpeedOnFocused(1.7f)));
+
+        ColorScheme.ThemeChanged += HandleThemeChanged;
     }
 
     [DefaultValue(false)]
@@ -130,15 +175,79 @@ public class SwitchButton : ElementBase
         }
     }
 
-    public SKColor OnColor { get; set; } = ColorScheme.Primary;
+    public SKColor OnColor
+    {
+        get => _onColor;
+        set
+        {
+            if (_onColor == value)
+                return;
 
-    public SKColor OffColor { get; set; } = ColorScheme.SurfaceContainerHigh;
+            _customOnColor = true;
+            _onColor = value;
+            Invalidate();
+        }
+    }
 
-    public SKColor ThumbColor { get; set; } = ColorScheme.Surface;
+    public SKColor OffColor
+    {
+        get => _offColor;
+        set
+        {
+            if (_offColor == value)
+                return;
 
-    public SKColor ThumbCheckedColor { get; set; } = SKColors.White;
+            _customOffColor = true;
+            _offColor = value;
+            Invalidate();
+        }
+    }
 
-    [DefaultValue(SwitchButtonTransitionMode.Stretch)]
+    public SKColor ThumbColor
+    {
+        get => _thumbColor;
+        set
+        {
+            if (_thumbColor == value)
+                return;
+
+            _customThumbColor = true;
+            _thumbColor = value;
+            Invalidate();
+        }
+    }
+
+    public SKColor ThumbCheckedColor
+    {
+        get => _thumbCheckedColor;
+        set
+        {
+            if (_thumbCheckedColor == value)
+                return;
+
+            _customThumbCheckedColor = true;
+            _thumbCheckedColor = value;
+            Invalidate();
+        }
+    }
+
+    [DefaultValue(true)]
+    public bool UseThemeColors
+    {
+        get => _useThemeColors;
+        set
+        {
+            if (_useThemeColors == value)
+                return;
+
+            _useThemeColors = value;
+            if (value)
+                ApplyThemeColors();
+            Invalidate();
+        }
+    }
+
+    [DefaultValue(SwitchButtonTransitionMode.Cupertino)]
     public SwitchButtonTransitionMode TransitionMode
     {
         get => _transitionMode;
@@ -153,7 +262,7 @@ public class SwitchButton : ElementBase
         }
     }
 
-    [DefaultValue(typeof(TimeSpan), "00:00:00.1800000")]
+    [DefaultValue(typeof(TimeSpan), "00:00:00.2100000")]
     public TimeSpan TransitionDuration
     {
         get => _transitionDuration;
@@ -171,7 +280,42 @@ public class SwitchButton : ElementBase
     [DefaultValue(SwitchButtonToggleArea.FullControl)]
     public SwitchButtonToggleArea ToggleArea { get; set; } = SwitchButtonToggleArea.FullControl;
 
+    [Browsable(false)]
+    public Func<float, float>? AnimationFunction { get; set; }
+
+    [DefaultValue(0.04f)]
+    public float Elasticity
+    {
+        get => _elasticity;
+        set
+        {
+            var normalized = Math.Clamp(value, 0f, 0.16f);
+            if (Math.Abs(_elasticity - normalized) < 0.0001f)
+                return;
+
+            _elasticity = normalized;
+            Invalidate();
+        }
+    }
+
+    [DefaultValue(1f)]
+    public float PressStretch
+    {
+        get => _pressStretch;
+        set
+        {
+            var normalized = Math.Clamp(value, 0f, 2.5f);
+            if (Math.Abs(_pressStretch - normalized) < 0.0001f)
+                return;
+
+            _pressStretch = normalized;
+            Invalidate();
+        }
+    }
+
     public event EventHandler? CheckedChanged;
+
+    public event EventHandler<SwitchButtonRenderEventArgs>? SwitchRender;
 
     protected override bool ShouldRenderDefaultText => false;
 
@@ -243,6 +387,20 @@ public class SwitchButton : ElementBase
             return;
 
         var switchRect = GetSwitchRect(content);
+        if (SwitchRender != null)
+        {
+            var args = new SwitchButtonRenderEventArgs(
+                canvas,
+                this,
+                content,
+                switchRect,
+                GetClampedVisualProgress(),
+                Math.Clamp((float)_pressAnimation.GetProgress(), 0f, 1f));
+            SwitchRender.Invoke(this, args);
+            if (args.Handled)
+                return;
+        }
+
         DrawSwitchTrack(canvas, switchRect);
         DrawSwitchThumb(canvas, switchRect);
         DrawSwitchText(canvas, content, switchRect);
@@ -338,6 +496,7 @@ public class SwitchButton : ElementBase
     {
         if (disposing)
         {
+            ColorScheme.ThemeChanged -= HandleThemeChanged;
             _thumbAnimation.OnAnimationProgress -= HandleThumbAnimationProgress;
             _thumbAnimation.OnAnimationFinished -= HandleThumbAnimationFinished;
             _pressAnimation.OnAnimationProgress -= HandleThumbAnimationProgress;
@@ -398,8 +557,15 @@ public class SwitchButton : ElementBase
         _trackPaint.Color = offColor.InterpolateColor(onColor, progress);
         canvas.DrawRoundRect(rect, rect.Height * 0.5f, rect.Height * 0.5f, _trackPaint);
 
+        if (Enabled && progress > 0.01f)
+        {
+            _trackPaint.Color = SKColors.White.WithAlpha((byte)Math.Clamp(24f * progress, 0f, ColorScheme.IsDarkMode ? 18f : 24f));
+            var highlight = new SKRect(rect.Left + 1f * ScaleFactor, rect.Top + 1f * ScaleFactor, rect.Right - 1f * ScaleFactor, rect.Top + rect.Height * 0.46f);
+            canvas.DrawRoundRect(highlight, highlight.Height * 0.5f, highlight.Height * 0.5f, _trackPaint);
+        }
+
         _borderPaint.Color = Enabled
-            ? ColorScheme.Outline.WithAlpha((byte)(Checked ? 40 : 115))
+            ? ColorScheme.Outline.WithAlpha((byte)Math.Clamp(ColorScheme.IsDarkMode ? 96f - progress * 42f : 92f - progress * 56f, 28f, 110f))
             : ColorScheme.Outline.WithAlpha(70);
         _borderPaint.StrokeWidth = Math.Max(1f, ScaleFactor);
         canvas.DrawRoundRect(InflateRect(rect, -_borderPaint.StrokeWidth * 0.5f), rect.Height * 0.5f, rect.Height * 0.5f, _borderPaint);
@@ -407,7 +573,7 @@ public class SwitchButton : ElementBase
 
     private void DrawSwitchThumb(SKCanvas canvas, SKRect rect)
     {
-        var rawProgress = (float)_thumbAnimation.GetProgress();
+        var rawProgress = GetAnimatedProgress();
         var visualProgress = GetElasticVisualProgress(rawProgress);
         var clamped = Math.Clamp(visualProgress, 0f, 1f);
         var phase = GetAnimationPhase(rawProgress);
@@ -425,7 +591,7 @@ public class SwitchButton : ElementBase
             : 0f;
         var stretch = TransitionMode == SwitchButtonTransitionMode.Fade
             ? 0f
-            : Math.Min(3.2f * ScaleFactor, (overshoot * 14f + settle * 1.8f) * ScaleFactor);
+            : Math.Min(GetTransitionStretchLimit(), (overshoot * 14f + settle * 1.8f) * ScaleFactor);
         var squash = TransitionMode == SwitchButtonTransitionMode.Fade
             ? 0f
             : Math.Min(1.2f * ScaleFactor, (overshoot * 6f + settle * 0.7f) * ScaleFactor);
@@ -449,9 +615,16 @@ public class SwitchButton : ElementBase
             canvas.DrawRoundRect(InflateRect(thumbRect, 4f * ScaleFactor), thumbRect.Height * 0.5f + 4f * ScaleFactor, thumbRect.Height * 0.5f + 4f * ScaleFactor, _trackPaint);
         }
 
-        _trackPaint.Color = ColorScheme.ShadowColor.WithAlpha(Checked ? (byte)34 : (byte)22);
+        _trackPaint.Color = ColorScheme.ShadowColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)130 : Checked ? (byte)34 : (byte)22);
         canvas.DrawRoundRect(OffsetRect(thumbRect, 0f, 1f * ScaleFactor), thumbRect.Height * 0.5f, thumbRect.Height * 0.5f, _trackPaint);
         canvas.DrawRoundRect(thumbRect, thumbRect.Height * 0.5f, thumbRect.Height * 0.5f, _thumbPaint);
+
+        if (!ColorScheme.IsDarkMode)
+            return;
+
+        _borderPaint.Color = SKColors.White.WithAlpha(Checked ? (byte)54 : (byte)40);
+        _borderPaint.StrokeWidth = Math.Max(1f, ScaleFactor);
+        canvas.DrawRoundRect(InflateRect(thumbRect, -_borderPaint.StrokeWidth * 0.5f), thumbRect.Height * 0.5f, thumbRect.Height * 0.5f, _borderPaint);
     }
 
     private void DrawSwitchText(SKCanvas canvas, SKRect content, SKRect switchRect)
@@ -475,7 +648,7 @@ public class SwitchButton : ElementBase
 
     private float GetClampedVisualProgress()
     {
-        return Math.Clamp(GetElasticVisualProgress((float)_thumbAnimation.GetProgress()), 0f, 1f);
+        return Math.Clamp(GetElasticVisualProgress(GetAnimatedProgress()), 0f, 1f);
     }
 
     private float GetAnimationPhase(float rawProgress)
@@ -491,16 +664,26 @@ public class SwitchButton : ElementBase
         if (TransitionMode == SwitchButtonTransitionMode.Fade)
             return Checked ? 1f : 0f;
 
-        if (TransitionMode == SwitchButtonTransitionMode.Stretch)
+        if (TransitionMode is SwitchButtonTransitionMode.Stretch or SwitchButtonTransitionMode.Cupertino or SwitchButtonTransitionMode.Material)
             return rawProgress;
 
         if (!IsElasticTransition())
             return rawProgress;
 
         var phase = GetAnimationPhase(rawProgress);
-        var decay = MathF.Pow(Math.Clamp(1f - phase, 0f, 1f), TransitionMode == SwitchButtonTransitionMode.Bounce ? 1.25f : 1.7f);
-        var wave = TransitionMode == SwitchButtonTransitionMode.Bounce ? 3.8f : 2.8f;
-        var amount = TransitionMode == SwitchButtonTransitionMode.Bounce ? 0.035f : 0.018f;
+        var decay = MathF.Pow(Math.Clamp(1f - phase, 0f, 1f), TransitionMode == SwitchButtonTransitionMode.Bounce ? 1.25f : 1.65f);
+        var wave = TransitionMode switch
+        {
+            SwitchButtonTransitionMode.Bounce => 3.8f,
+            SwitchButtonTransitionMode.Jelly => 3.25f,
+            _ => 2.55f
+        };
+        var amount = TransitionMode switch
+        {
+            SwitchButtonTransitionMode.Bounce => _elasticity,
+            SwitchButtonTransitionMode.Jelly => _elasticity * 0.75f,
+            _ => _elasticity * 0.42f
+        };
         var spring = MathF.Sin(phase * MathF.PI * wave) * decay * amount;
         return rawProgress + (Checked ? spring : -spring);
     }
@@ -509,6 +692,7 @@ public class SwitchButton : ElementBase
     {
         return TransitionMode == SwitchButtonTransitionMode.SoftElastic
             || TransitionMode == SwitchButtonTransitionMode.Bounce
+            || TransitionMode == SwitchButtonTransitionMode.Jelly
             || TransitionMode == SwitchButtonTransitionMode.Stretch;
     }
 
@@ -521,7 +705,7 @@ public class SwitchButton : ElementBase
         if (pressProgress <= 0.001f || TransitionMode == SwitchButtonTransitionMode.Fade)
             return thumbRect;
 
-        var amount = 8.5f * ScaleFactor * pressProgress;
+        var amount = GetPressedStretchAmount() * PressStretch * ScaleFactor * pressProgress;
         var maxWidth = Math.Max(thumbRect.Width, trackRect.Width - padding * 2f);
         var targetWidth = Math.Min(thumbRect.Width + amount, maxWidth);
 
@@ -566,12 +750,89 @@ public class SwitchButton : ElementBase
             SwitchButtonTransitionMode.Slide => AnimationType.CubicEaseOut,
             SwitchButtonTransitionMode.Snap => AnimationType.Linear,
             SwitchButtonTransitionMode.Fade => AnimationType.CubicEaseInOut,
+            SwitchButtonTransitionMode.Cupertino => AnimationType.CubicEaseInOut,
+            SwitchButtonTransitionMode.Material => AnimationType.CubicEaseOut,
+            SwitchButtonTransitionMode.Jelly => AnimationType.CubicEaseOut,
             SwitchButtonTransitionMode.Stretch => AnimationType.CubicEaseOut,
             SwitchButtonTransitionMode.Bounce => AnimationType.CubicEaseOut,
             _ => AnimationType.CubicEaseOut
         };
         _thumbAnimation.Increment = 16d / milliseconds;
         _thumbAnimation.SecondaryIncrement = 16d / Math.Max(1d, milliseconds * 0.86d);
+    }
+
+    private void HandleThemeChanged(object? sender, EventArgs e)
+    {
+        if (!UseThemeColors)
+            return;
+
+        ApplyThemeColors();
+        RefreshVisualStylesForStateChange();
+        Invalidate();
+    }
+
+    private void ApplyThemeColors()
+    {
+        ForeColor = ColorScheme.ForeColor;
+        if (!_customOnColor)
+            _onColor = ColorScheme.IsDarkMode ? ColorScheme.Primary.Brightness(0.14f) : ColorScheme.Primary;
+        if (!_customOffColor)
+            _offColor = ColorScheme.IsDarkMode
+                ? new SKColor(39, 39, 42)
+                : ColorScheme.SurfaceContainerHigh;
+        if (!_customThumbColor)
+            _thumbColor = ColorScheme.IsDarkMode
+                ? new SKColor(250, 250, 250)
+                : ColorScheme.Surface;
+        if (!_customThumbCheckedColor)
+            _thumbCheckedColor = SKColors.White;
+    }
+
+    public SwitchButton RenderSwitchWith(EventHandler<SwitchButtonRenderEventArgs> renderer)
+    {
+        SwitchRender += renderer;
+        Invalidate();
+        return this;
+    }
+
+    private float GetPressedStretchAmount()
+    {
+        return TransitionMode switch
+        {
+            SwitchButtonTransitionMode.Cupertino => 10.5f,
+            SwitchButtonTransitionMode.Jelly => 9.5f,
+            SwitchButtonTransitionMode.Material => 5.5f,
+            SwitchButtonTransitionMode.Snap => 0f,
+            SwitchButtonTransitionMode.Fade => 0f,
+            _ => 8.5f
+        };
+    }
+
+    private float GetAnimatedProgress()
+    {
+        var raw = Math.Clamp((float)_thumbAnimation.GetProgress(), 0f, 1f);
+        if (AnimationFunction == null)
+            return raw;
+
+        try
+        {
+            return AnimationFunction(raw);
+        }
+        catch
+        {
+            return raw;
+        }
+    }
+
+    private float GetTransitionStretchLimit()
+    {
+        return TransitionMode switch
+        {
+            SwitchButtonTransitionMode.Material => 1.8f * ScaleFactor,
+            SwitchButtonTransitionMode.Cupertino => 3.6f * ScaleFactor,
+            SwitchButtonTransitionMode.Jelly => 4.2f * ScaleFactor,
+            _ => 3.2f * ScaleFactor
+        };
     }
 
     private static SKRect ClampThumbRectToTrack(SKRect thumbRect, SKRect trackRect, float padding)

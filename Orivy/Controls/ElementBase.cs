@@ -7,6 +7,7 @@ using SkiaSharp;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace Orivy.Controls;
@@ -14,6 +15,17 @@ namespace Orivy.Controls;
 public abstract partial class ElementBase : IElement, IArrangedElement, IDisposable
 {
     private static int s_globalLayoutPassId;
+    private const int DefaultToolTipInitialDelay = 650;
+    private const float DefaultToolTipMaxWidth = 320f;
+    private const float DefaultToolTipOffset = 18f;
+    private static readonly object s_toolTipSync = new();
+    private static System.Timers.Timer? s_toolTipTimer;
+    private static ElementBase? s_toolTipOwner;
+    private static SKRect s_toolTipOwnerBounds;
+    private static long s_toolTipStartTimestamp;
+    private static long s_toolTipVisibleTimestamp;
+    private static bool s_toolTipVisible;
+
     internal bool _childControlsNeedAnchorLayout { get; set; }
     internal bool _forceAnchorCalculations { get; set; }
 
@@ -35,6 +47,21 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     // When > 0 layout is suspended; when it reaches 0 we allow layouts again.
     protected int _layoutSuspendCount;
     private object? _dataContext;
+    private string _toolTipText = string.Empty;
+    private int _toolTipInitialDelay = DefaultToolTipInitialDelay;
+    private bool _toolTipEnabled = true;
+    private bool _toolTipShowArrow = true;
+    private Position _toolTipPlacement = Position.Auto;
+    private SKColor _toolTipBackColor = SKColors.Empty;
+    private SKColor _toolTipForeColor = SKColors.Empty;
+    private SKColor _toolTipBorderColor = SKColors.Empty;
+    private SKColor _toolTipShadowColor = SKColors.Empty;
+    private Thickness _toolTipPadding = new(12, 8, 12, 8);
+    private float _toolTipBorderRadius = 6f;
+    private float _toolTipMaxWidth = DefaultToolTipMaxWidth;
+    private float _toolTipOffset = DefaultToolTipOffset;
+    private float _toolTipFontSize;
+    private bool _toolTipFontEmbolden;
     private List<BindingHandle>? _ownedBindingHandles;
     private readonly SKPaint _renderBackgroundPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _renderBorderPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke };
@@ -227,6 +254,195 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             if (!ReferenceEquals(previousContext, DataContext))
                 OnDataContextChanged(EventArgs.Empty);
         }
+    }
+
+    [Category("Behavior")]
+    [DefaultValue("")]
+    public string ToolTipText
+    {
+        get => _toolTipText;
+        set
+        {
+            var normalized = value ?? string.Empty;
+            if (_toolTipText == normalized)
+                return;
+
+            _toolTipText = normalized;
+            if (ReferenceEquals(s_toolTipOwner, this) && !HasToolTip)
+                HideToolTip(this);
+        }
+    }
+
+    [Category("Behavior")]
+    [DefaultValue(true)]
+    public bool ToolTipEnabled
+    {
+        get => _toolTipEnabled;
+        set
+        {
+            if (_toolTipEnabled == value)
+                return;
+
+            _toolTipEnabled = value;
+            if (!value && ReferenceEquals(s_toolTipOwner, this))
+                HideToolTip(this);
+        }
+    }
+
+    [Category("Behavior")]
+    [DefaultValue(DefaultToolTipInitialDelay)]
+    public int ToolTipInitialDelay
+    {
+        get => _toolTipInitialDelay;
+        set => _toolTipInitialDelay = Math.Max(0, value);
+    }
+
+    [Category("Behavior")]
+    [DefaultValue(Position.Auto)]
+    public Position ToolTipPlacement
+    {
+        get => _toolTipPlacement;
+        set
+        {
+            if (_toolTipPlacement == value)
+                return;
+
+            _toolTipPlacement = value;
+            if (ReferenceEquals(s_toolTipOwner, this))
+                GetParentWindow()?.Invalidate();
+        }
+    }
+
+    [Category("Appearance")]
+    public SKColor ToolTipBackColor
+    {
+        get => _toolTipBackColor;
+        set { _toolTipBackColor = value; InvalidateActiveToolTip(); }
+    }
+
+    [Category("Appearance")]
+    public SKColor ToolTipForeColor
+    {
+        get => _toolTipForeColor;
+        set { _toolTipForeColor = value; InvalidateActiveToolTip(); }
+    }
+
+    [Category("Appearance")]
+    public SKColor ToolTipBorderColor
+    {
+        get => _toolTipBorderColor;
+        set { _toolTipBorderColor = value; InvalidateActiveToolTip(); }
+    }
+
+    [Category("Appearance")]
+    public SKColor ToolTipShadowColor
+    {
+        get => _toolTipShadowColor;
+        set { _toolTipShadowColor = value; InvalidateActiveToolTip(); }
+    }
+
+    [Category("Appearance")]
+    [DefaultValue(typeof(Thickness), "12, 8, 12, 8")]
+    public Thickness ToolTipPadding
+    {
+        get => _toolTipPadding;
+        set { _toolTipPadding = value; InvalidateActiveToolTip(); }
+    }
+
+    [Category("Appearance")]
+    [DefaultValue(6f)]
+    public float ToolTipBorderRadius
+    {
+        get => _toolTipBorderRadius;
+        set { _toolTipBorderRadius = Math.Max(0f, value); InvalidateActiveToolTip(); }
+    }
+
+    [Category("Layout")]
+    [DefaultValue(DefaultToolTipMaxWidth)]
+    public float ToolTipMaxWidth
+    {
+        get => _toolTipMaxWidth;
+        set { _toolTipMaxWidth = Math.Max(80f, value); InvalidateActiveToolTip(); }
+    }
+
+    [Category("Layout")]
+    [DefaultValue(DefaultToolTipOffset)]
+    public float ToolTipOffset
+    {
+        get => _toolTipOffset;
+        set { _toolTipOffset = Math.Max(4f, value); InvalidateActiveToolTip(); }
+    }
+
+    [Category("Appearance")]
+    [DefaultValue(true)]
+    public bool ToolTipShowArrow
+    {
+        get => _toolTipShowArrow;
+        set { _toolTipShowArrow = value; InvalidateActiveToolTip(); }
+    }
+
+    [Category("Appearance")]
+    [DefaultValue(0f)]
+    public float ToolTipFontSize
+    {
+        get => _toolTipFontSize;
+        set { _toolTipFontSize = Math.Max(0f, value); InvalidateActiveToolTip(); }
+    }
+
+    [Category("Appearance")]
+    [DefaultValue(false)]
+    public bool ToolTipFontEmbolden
+    {
+        get => _toolTipFontEmbolden;
+        set { _toolTipFontEmbolden = value; InvalidateActiveToolTip(); }
+    }
+
+    [Browsable(false)]
+    public bool HasToolTip => ToolTipEnabled && !string.IsNullOrWhiteSpace(ToolTipText);
+
+    public event EventHandler<ToolTipRenderEventArgs>? ToolTipRender;
+
+    public ElementBase SetToolTip(string text, Position placement = Position.Auto, int? initialDelay = null)
+    {
+        ToolTipText = text;
+        ToolTipPlacement = placement;
+        if (initialDelay.HasValue)
+            ToolTipInitialDelay = initialDelay.Value;
+        return this;
+    }
+
+    public ElementBase ConfigureToolTip(
+        SKColor? background = null,
+        SKColor? foreground = null,
+        SKColor? border = null,
+        SKColor? shadow = null,
+        Thickness? padding = null,
+        float? radius = null,
+        float? maxWidth = null,
+        float? offset = null,
+        bool? showArrow = null,
+        float? fontSize = null,
+        bool? fontEmbolden = null)
+    {
+        if (background.HasValue) ToolTipBackColor = background.Value;
+        if (foreground.HasValue) ToolTipForeColor = foreground.Value;
+        if (border.HasValue) ToolTipBorderColor = border.Value;
+        if (shadow.HasValue) ToolTipShadowColor = shadow.Value;
+        if (padding.HasValue) ToolTipPadding = padding.Value;
+        if (radius.HasValue) ToolTipBorderRadius = radius.Value;
+        if (maxWidth.HasValue) ToolTipMaxWidth = maxWidth.Value;
+        if (offset.HasValue) ToolTipOffset = offset.Value;
+        if (showArrow.HasValue) ToolTipShowArrow = showArrow.Value;
+        if (fontSize.HasValue) ToolTipFontSize = fontSize.Value;
+        if (fontEmbolden.HasValue) ToolTipFontEmbolden = fontEmbolden.Value;
+        return this;
+    }
+
+    public ElementBase RenderToolTipWith(EventHandler<ToolTipRenderEventArgs> renderer)
+    {
+        ToolTipRender += renderer;
+        InvalidateActiveToolTip();
+        return this;
     }
 
     public ElementBase Parent
@@ -2370,6 +2586,241 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
+    internal static void RenderActiveToolTip(SKCanvas canvas, SKSize windowSize)
+    {
+        ElementBase? owner;
+        string text;
+        SKRect ownerBounds;
+        bool visible;
+
+        lock (s_toolTipSync)
+        {
+            owner = s_toolTipOwner;
+            visible = s_toolTipVisible;
+            text = owner?.ToolTipText ?? string.Empty;
+            ownerBounds = s_toolTipOwnerBounds;
+        }
+
+        if (!visible || owner == null || !owner.HasToolTip || string.IsNullOrWhiteSpace(text))
+            return;
+
+        using var font = owner.CreateRenderFont(owner.Font);
+        font.Size = owner.ToolTipFontSize > 0f
+            ? owner.ToolTipFontSize * owner.ScaleFactor
+            : Math.Max(11f, Math.Min(12.5f * owner.ScaleFactor, font.Size * 0.88f));
+        font.Embolden = owner.ToolTipFontEmbolden || font.Embolden;
+
+        var enterMs = (Stopwatch.GetTimestamp() - s_toolTipVisibleTimestamp) * 1000d / Stopwatch.Frequency;
+        var progress = Math.Clamp((float)(enterMs / 90d), 0f, 1f);
+        progress = 1f - MathF.Pow(1f - progress, 3f);
+        var alpha = (byte)Math.Clamp((int)MathF.Round(255f * progress), 0, 255);
+        var scale = 0.965f + 0.035f * progress;
+
+        var baseBackground = owner.ToolTipBackColor == SKColors.Empty ? new SKColor(24, 24, 27) : owner.ToolTipBackColor;
+        var baseForeground = owner.ToolTipForeColor == SKColors.Empty ? new SKColor(250, 250, 250) : owner.ToolTipForeColor;
+        var baseBorder = owner.ToolTipBorderColor == SKColors.Empty ? new SKColor(255, 255, 255, 28) : owner.ToolTipBorderColor;
+        var baseShadow = owner.ToolTipShadowColor == SKColors.Empty ? new SKColor(0, 0, 0, 80) : owner.ToolTipShadowColor;
+        var tooltipBackground = baseBackground.WithAlpha((byte)Math.Clamp((int)(baseBackground.Alpha * progress), 0, 255));
+        var tooltipBorder = baseBorder.WithAlpha((byte)Math.Clamp((int)(baseBorder.Alpha * progress), 0, 255));
+        var tooltipText = baseForeground.WithAlpha((byte)Math.Clamp((int)(baseForeground.Alpha * progress), 0, 255));
+        var shadowColor = baseShadow.WithAlpha((byte)Math.Clamp((int)(baseShadow.Alpha * progress), 0, 255));
+
+        using var textPaint = new SKPaint { IsAntialias = true, Color = tooltipText };
+        using var backgroundPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = tooltipBackground };
+        using var borderPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = Math.Max(1f, owner.ScaleFactor), Color = tooltipBorder };
+        using var shadowPaint = new SKPaint
+        {
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill,
+            Color = shadowColor,
+            ImageFilter = SKImageFilter.CreateDropShadow(0f, 10f * owner.ScaleFactor, 14f * owner.ScaleFactor, 4f * owner.ScaleFactor, shadowColor)
+        };
+
+        var maxTextWidth = Math.Min(owner.ToolTipMaxWidth * owner.ScaleFactor, Math.Max(80f, windowSize.Width - 28f));
+        var lines = WrapToolTipLines(text, font, maxTextWidth);
+        if (lines.Count == 0)
+            return;
+
+        var metrics = font.Metrics;
+        var lineHeight = MathF.Ceiling(metrics.Descent - metrics.Ascent + metrics.Leading + 3f * owner.ScaleFactor);
+        var padding = owner.ToolTipPadding;
+        var paddingX = Math.Max(0f, (padding.Left + padding.Right) * 0.5f * owner.ScaleFactor);
+        var paddingY = Math.Max(0f, (padding.Top + padding.Bottom) * 0.5f * owner.ScaleFactor);
+        var textWidth = 0f;
+        for (var i = 0; i < lines.Count; i++)
+            textWidth = Math.Max(textWidth, font.MeasureText(lines[i]));
+
+        var width = MathF.Ceiling(textWidth + paddingX * 2f);
+        var height = MathF.Ceiling(lineHeight * lines.Count + paddingY * 2f);
+        var gap = owner.ToolTipOffset * owner.ScaleFactor;
+        var placement = ResolveToolTipPlacement(owner.ToolTipPlacement, ownerBounds, width, height, gap, windowSize);
+        var rect = CreateToolTipRect(ownerBounds, width, height, gap, placement);
+        rect.Offset(
+            Math.Clamp(rect.Left, 8f, Math.Max(8f, windowSize.Width - rect.Width - 8f)) - rect.Left,
+            Math.Clamp(rect.Top, 8f, Math.Max(8f, windowSize.Height - rect.Height - 8f)) - rect.Top);
+
+        var pivot = new SKPoint(
+            placement == Position.Left ? rect.Right : placement == Position.Right ? rect.Left : ownerBounds.MidX,
+            placement == Position.Top ? rect.Bottom : placement == Position.Bottom ? rect.Top : ownerBounds.MidY);
+        var saved = canvas.Save();
+        canvas.Scale(scale, scale, pivot.X, pivot.Y);
+
+        var radius = owner.ToolTipBorderRadius * owner.ScaleFactor;
+        var arrow = 6f * owner.ScaleFactor;
+        using var tooltipPath = CreateToolTipPath(rect, radius, owner.ToolTipShowArrow ? arrow : 0f, placement, ownerBounds);
+
+        var textBounds = new SKRect(rect.Left + paddingX, rect.Top + paddingY, rect.Right - paddingX, rect.Bottom - paddingY);
+        if (owner.ToolTipRender != null)
+        {
+            var args = new ToolTipRenderEventArgs(canvas, owner, rect, textBounds, lines, font, placement, progress);
+            owner.ToolTipRender.Invoke(owner, args);
+            if (args.Handled)
+            {
+                canvas.RestoreToCount(saved);
+                return;
+            }
+        }
+
+        canvas.DrawPath(tooltipPath, shadowPaint);
+        canvas.DrawPath(tooltipPath, backgroundPaint);
+        canvas.DrawPath(tooltipPath, borderPaint);
+
+        var baseline = rect.Top + paddingY - metrics.Ascent;
+        for (var i = 0; i < lines.Count; i++)
+            canvas.DrawText(lines[i], rect.Left + paddingX, baseline + i * lineHeight, SKTextAlign.Left, font, textPaint);
+
+        canvas.RestoreToCount(saved);
+    }
+
+    private static List<string> WrapToolTipLines(string text, SKFont font, float maxWidth)
+    {
+        var lines = new List<string>();
+        var paragraphs = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        foreach (var paragraph in paragraphs)
+        {
+            var words = paragraph.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (words.Length == 0)
+            {
+                lines.Add(string.Empty);
+                continue;
+            }
+
+            var current = words[0];
+            for (var i = 1; i < words.Length; i++)
+            {
+                var candidate = current + " " + words[i];
+                if (font.MeasureText(candidate) <= maxWidth)
+                {
+                    current = candidate;
+                    continue;
+                }
+
+                lines.Add(current);
+                current = words[i];
+            }
+
+            lines.Add(current);
+        }
+
+        return lines;
+    }
+
+    private static SKPath CreateToolTipPath(SKRect rect, float radius, float arrow, Position placement, SKRect ownerBounds)
+    {
+        var path = new SKPath { FillType = SKPathFillType.Winding };
+        var r = Math.Clamp(radius, 0f, Math.Min(rect.Width, rect.Height) / 2f);
+        var arrowSize = Math.Max(0f, arrow);
+        var arrowHalf = arrowSize;
+        var minArrowX = rect.Left + r + arrowHalf;
+        var maxArrowX = rect.Right - r - arrowHalf;
+        var minArrowY = rect.Top + r + arrowHalf;
+        var maxArrowY = rect.Bottom - r - arrowHalf;
+        var arrowX = Math.Clamp(ownerBounds.MidX, minArrowX, maxArrowX);
+        var arrowY = Math.Clamp(ownerBounds.MidY, minArrowY, maxArrowY);
+
+        path.MoveTo(rect.Left + r, rect.Top);
+
+        if (placement == Position.Bottom && arrowSize > 0f)
+        {
+            path.LineTo(arrowX - arrowHalf, rect.Top);
+            path.LineTo(arrowX, rect.Top - arrowSize);
+            path.LineTo(arrowX + arrowHalf, rect.Top);
+        }
+
+        path.LineTo(rect.Right - r, rect.Top);
+        path.QuadTo(rect.Right, rect.Top, rect.Right, rect.Top + r);
+
+        if (placement == Position.Left && arrowSize > 0f)
+        {
+            path.LineTo(rect.Right, arrowY - arrowHalf);
+            path.LineTo(rect.Right + arrowSize, arrowY);
+            path.LineTo(rect.Right, arrowY + arrowHalf);
+        }
+
+        path.LineTo(rect.Right, rect.Bottom - r);
+        path.QuadTo(rect.Right, rect.Bottom, rect.Right - r, rect.Bottom);
+
+        if (placement == Position.Top && arrowSize > 0f)
+        {
+            path.LineTo(arrowX + arrowHalf, rect.Bottom);
+            path.LineTo(arrowX, rect.Bottom + arrowSize);
+            path.LineTo(arrowX - arrowHalf, rect.Bottom);
+        }
+
+        path.LineTo(rect.Left + r, rect.Bottom);
+        path.QuadTo(rect.Left, rect.Bottom, rect.Left, rect.Bottom - r);
+
+        if (placement == Position.Right && arrowSize > 0f)
+        {
+            path.LineTo(rect.Left, arrowY + arrowHalf);
+            path.LineTo(rect.Left - arrowSize, arrowY);
+            path.LineTo(rect.Left, arrowY - arrowHalf);
+        }
+
+        path.LineTo(rect.Left, rect.Top + r);
+        path.QuadTo(rect.Left, rect.Top, rect.Left + r, rect.Top);
+        path.Close();
+        return path;
+    }
+
+    private static Position ResolveToolTipPlacement(Position requested, SKRect ownerBounds, float width, float height, float gap, SKSize windowSize)
+    {
+        if (requested != Position.Auto)
+            return requested;
+
+        var fitsBottom = ownerBounds.Bottom + gap + height <= windowSize.Height - 8f;
+        var fitsTop = ownerBounds.Top - gap - height >= 8f;
+        var fitsRight = ownerBounds.Right + gap + width <= windowSize.Width - 8f;
+        var fitsLeft = ownerBounds.Left - gap - width >= 8f;
+
+        if (fitsBottom) return Position.Bottom;
+        if (fitsTop) return Position.Top;
+        if (fitsRight) return Position.Right;
+        if (fitsLeft) return Position.Left;
+
+        var bottomSpace = windowSize.Height - ownerBounds.Bottom;
+        var topSpace = ownerBounds.Top;
+        var rightSpace = windowSize.Width - ownerBounds.Right;
+        var leftSpace = ownerBounds.Left;
+        var maxSpace = Math.Max(Math.Max(bottomSpace, topSpace), Math.Max(rightSpace, leftSpace));
+
+        if (maxSpace == topSpace) return Position.Top;
+        if (maxSpace == rightSpace) return Position.Right;
+        if (maxSpace == leftSpace) return Position.Left;
+        return Position.Bottom;
+    }
+
+    private static SKRect CreateToolTipRect(SKRect ownerBounds, float width, float height, float gap, Position placement)
+    {
+        return placement switch
+        {
+            Position.Top => SKRect.Create(ownerBounds.MidX - width / 2f, ownerBounds.Top - gap - height, width, height),
+            Position.Left => SKRect.Create(ownerBounds.Left - gap - width, ownerBounds.MidY - height / 2f, width, height),
+            Position.Right => SKRect.Create(ownerBounds.Right + gap, ownerBounds.MidY - height / 2f, width, height),
+            _ => SKRect.Create(ownerBounds.MidX - width / 2f, ownerBounds.Bottom + gap, width, height)
+        };
+    }
+
 
     internal void HandleDefaultFontChanged()
     {
@@ -3050,6 +3501,113 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         Invalidate();
     }
 
+    private static void EnsureToolTipTimer()
+    {
+        if (s_toolTipTimer != null)
+            return;
+
+        s_toolTipTimer = new System.Timers.Timer(33) { AutoReset = true };
+        s_toolTipTimer.Elapsed += (_, _) => UpdateToolTipTimerFrame();
+    }
+
+    private void InvalidateActiveToolTip()
+    {
+        if (ReferenceEquals(s_toolTipOwner, this))
+            GetParentWindow()?.Invalidate();
+    }
+
+    private static void BeginToolTip(ElementBase owner)
+    {
+        if (!owner.HasToolTip || !owner.Enabled || !owner.Visible)
+            return;
+
+        var bounds = GetWindowRelativeBounds(owner);
+        lock (s_toolTipSync)
+        {
+            s_toolTipOwner = owner;
+            s_toolTipOwnerBounds = bounds;
+            s_toolTipStartTimestamp = Stopwatch.GetTimestamp();
+            s_toolTipVisible = owner.ToolTipInitialDelay == 0;
+            s_toolTipVisibleTimestamp = s_toolTipVisible ? s_toolTipStartTimestamp : 0;
+            EnsureToolTipTimer();
+            s_toolTipTimer?.Start();
+        }
+
+        owner.GetParentWindow()?.Invalidate();
+    }
+
+    private static void HideToolTip(ElementBase owner)
+    {
+        bool changed;
+        lock (s_toolTipSync)
+        {
+            if (!ReferenceEquals(s_toolTipOwner, owner))
+                return;
+
+            changed = s_toolTipOwner != null || s_toolTipVisible;
+            s_toolTipOwner = null;
+            s_toolTipVisible = false;
+            s_toolTipTimer?.Stop();
+        }
+
+        if (changed)
+            owner.GetParentWindow()?.Invalidate();
+    }
+
+    private void UpdateToolTipPointer(SKPoint localPoint)
+    {
+        if (!ReferenceEquals(s_toolTipOwner, this))
+            return;
+
+        var bounds = GetWindowRelativeBounds(this);
+        lock (s_toolTipSync)
+        {
+            if (!ReferenceEquals(s_toolTipOwner, this))
+                return;
+
+            s_toolTipOwnerBounds = bounds;
+        }
+    }
+
+    private static void UpdateToolTipTimerFrame()
+    {
+        ElementBase? owner;
+        bool shouldInvalidate = false;
+
+        lock (s_toolTipSync)
+        {
+            owner = s_toolTipOwner;
+            if (owner == null || !owner.HasToolTip || !owner.Enabled || !owner.Visible)
+            {
+                s_toolTipOwner = null;
+                s_toolTipVisible = false;
+                s_toolTipTimer?.Stop();
+                return;
+            }
+
+            if (!s_toolTipVisible)
+            {
+                var elapsedMs = (Stopwatch.GetTimestamp() - s_toolTipStartTimestamp) * 1000d / Stopwatch.Frequency;
+                if (elapsedMs >= owner.ToolTipInitialDelay)
+                {
+                    s_toolTipVisible = true;
+                    s_toolTipVisibleTimestamp = Stopwatch.GetTimestamp();
+                    shouldInvalidate = true;
+                }
+            }
+            else
+            {
+                var enterMs = (Stopwatch.GetTimestamp() - s_toolTipVisibleTimestamp) * 1000d / Stopwatch.Frequency;
+                shouldInvalidate = enterMs < 120d;
+                if (!shouldInvalidate)
+                    s_toolTipTimer?.Stop();
+            }
+        }
+
+        if (shouldInvalidate)
+            owner?.GetParentWindow()?.Invalidate();
+    }
+
     internal virtual void OnSizeChanged(EventArgs e)
     {
         SizeChanged?.Invoke(this, e);
@@ -3074,6 +3632,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     internal virtual void OnMouseMove(MouseEventArgs e)
     {
         MouseMove?.Invoke(this, e);
+        UpdateToolTipPointer(e.Location);
 
         var hoveredElement = TryGetInputTarget(e, out var target, out var childEventArgs)
             ? target
@@ -3085,6 +3644,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         {
             _lastHoveredElement?.OnMouseLeave(EventArgs.Empty);
             hoveredElement?.OnMouseEnter(EventArgs.Empty);
+            if (hoveredElement != null && childEventArgs != null)
+                hoveredElement.UpdateToolTipPointer(childEventArgs.Location);
             _lastHoveredElement = hoveredElement;
 
             // inform parent window so it can change the cursor appropriately
@@ -3258,6 +3819,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     internal virtual void OnMouseLeave(EventArgs e)
     {
         MouseLeave?.Invoke(this, e);
+        HideToolTip(this);
         UpdatePointerOverState(false);
         UpdatePressedState(false);
         UpdateHostedScrollBarHoverState(false);
@@ -3290,6 +3852,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     internal virtual void OnMouseEnter(EventArgs e)
     {
         MouseEnter?.Invoke(this, e);
+        BeginToolTip(this);
         UpdatePointerOverState(true);
         UpdateHostedScrollBarHoverState(true);
         //foreach (var control in Controls)
@@ -3818,6 +4381,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
         if (disposing)
         {
+            HideToolTip(this);
+
             // Dispose managed resources.
             if (_ownedBindingHandles != null)
             {

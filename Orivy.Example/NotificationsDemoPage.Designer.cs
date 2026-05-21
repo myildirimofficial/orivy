@@ -95,26 +95,18 @@ internal sealed partial class NotificationsDemoPage
         WireEvents();
     }
 
-    private static Element CreateHeader()
+    private static Card CreateHeader()
     {
-        var header = new Element
+        var header = new Card
         {
-            Text = "Notification Surface\nAlert-style toasts, global stack mode, dialog presentation, center positioning, inline actions, theme modes and the manual progress API are all demonstrated on this page.",
+            Title = "Notification Surface",
+            Description = "Alert-style toasts, global stack mode, dialog presentation, center positioning, inline actions, theme modes and the manual progress API are all demonstrated on this page.",
             Dock = DockStyle.Top,
-            Height = 88,
+            AutoSize = true,
             Padding = new Thickness(18),
             Margin = new Thickness(0, 0, 0, 20),
             Radius = new Radius(16),
-            Border = new Thickness(1),
-            TextAlign = ContentAlignment.MiddleLeft,
         };
-
-        header.ConfigureVisualStyles(s => s
-            .Base(b => b
-                .Background(ColorScheme.SurfaceVariant)
-                .Foreground(ColorScheme.ForeColor)
-                .BorderColor(ColorScheme.Outline)
-                .Radius(16)));
 
         return header;
     }

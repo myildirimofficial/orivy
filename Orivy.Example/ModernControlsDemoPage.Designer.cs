@@ -31,8 +31,11 @@ internal sealed partial class ModernControlsDemoPage
             Location = new SKPoint(0, 4),
             Size = new SKSize(148, 30),
             Checked = true,
-            TransitionMode = SwitchButtonTransitionMode.Stretch,
-            TransitionDuration = TimeSpan.FromMilliseconds(180)
+            TransitionMode = SwitchButtonTransitionMode.Cupertino,
+            TransitionDuration = TimeSpan.FromMilliseconds(260),
+            Elasticity = 0.07f,
+            PressStretch = 1.18f,
+            AnimationFunction = t => 1f - MathF.Pow(1f - t, 3.2f)
         };
         var quietSwitch = new SwitchButton
         {
@@ -41,8 +44,9 @@ internal sealed partial class ModernControlsDemoPage
             Location = new SKPoint(164, 4),
             Size = new SKSize(136, 30),
             OnColor = new SKColor(0x0D, 0x94, 0xA8),
-            TransitionMode = SwitchButtonTransitionMode.Slide,
+            TransitionMode = SwitchButtonTransitionMode.Material,
             TransitionDuration = TimeSpan.FromMilliseconds(160),
+            AnimationFunction = t => t * t * (3f - 2f * t),
             ToggleArea = SwitchButtonToggleArea.SwitchOnly
         };
         var bounceSwitch = new SwitchButton
@@ -52,8 +56,10 @@ internal sealed partial class ModernControlsDemoPage
             Location = new SKPoint(316, 4),
             Size = new SKSize(116, 30),
             OnColor = new SKColor(0x22, 0xC5, 0x5E),
-            TransitionMode = SwitchButtonTransitionMode.Bounce,
-            TransitionDuration = TimeSpan.FromMilliseconds(190)
+            TransitionMode = SwitchButtonTransitionMode.Jelly,
+            TransitionDuration = TimeSpan.FromMilliseconds(280),
+            Elasticity = 0.09f,
+            PressStretch = 1.35f
         };
         switchRow.Controls.Add(bounceSwitch);
         switchRow.Controls.Add(quietSwitch);
@@ -228,7 +234,8 @@ internal sealed partial class ModernControlsDemoPage
             Height = 48,
             Margin = new(0, 0, 0, 12),
             Value = 62,
-            ShowValue = true
+            ShowValue = true,
+            ToolTipText = "Drag or use the mouse wheel to update the progress value."
         };
         progressNumeric = new NumericUpDown
         {
@@ -240,7 +247,8 @@ internal sealed partial class ModernControlsDemoPage
             Value = 62,
             Suffix = "%",
             MouseWheelEnabled = true,
-            AnimationMode = NumericUpDownAnimationMode.Slide
+            AnimationMode = NumericUpDownAnimationMode.Slide,
+            ToolTipText = "Percent value. Up/down buttons, keyboard arrows and mouse wheel are supported."
         };
         var currencyNumeric = new NumericUpDown
         {
@@ -267,14 +275,16 @@ internal sealed partial class ModernControlsDemoPage
             Value = 32m,
             Suffix = " px",
             MouseWheelEnabled = true,
-            ButtonVisibility = NumericUpDownButtonVisibility.HoverOrFocused
+            ButtonVisibility = NumericUpDownButtonVisibility.HoverOrFocused,
+            ToolTipText = "Stepper buttons appear when the whole NumericUpDown is hovered or focused."
         };
         var advanceButton = new Button
         {
             Name = "modernAdvanceProgressButton",
             Text = "Advance",
             Location = new SKPoint(292, 0),
-            Size = new SKSize(108, 38)
+            Size = new SKSize(108, 38),
+            ToolTipText = "Adds 17 percent to the progress examples."
         };
         var decimalNumeric = new NumericUpDown
         {
@@ -311,7 +321,8 @@ internal sealed partial class ModernControlsDemoPage
             Increment = 5,
             Value = 128,
             TextBoxMode = true,
-            ButtonVisibility = NumericUpDownButtonVisibility.HoverOrFocused
+            ButtonVisibility = NumericUpDownButtonVisibility.HoverOrFocused,
+            ToolTipText = "TextBoxMode uses the shared TextBox control for direct numeric input."
         };
         var inputRow = CreateRow(48);
         inputRow.Controls.Add(pixelsNumeric);
@@ -361,9 +372,161 @@ internal sealed partial class ModernControlsDemoPage
             Dock = DockStyle.Top,
             Size = new SKSize(172, 38),
             DropDownMenu = dropdownMenu,
-            ShowDropDownArrow = true
+            ShowDropDownArrow = true,
+            ToolTipText = "Click to open the context menu. Shortcut keys are shown inside the popup."
         };
         AddCardContent(dropdownCard, dropdownButton);
+
+        var tooltipCard = CreateCard("ToolTip", "Every ElementBase derived control can expose the same lightweight tooltip overlay.");
+        var tooltipRow = CreateRow(52);
+        var fastTipButton = new Button
+        {
+            Name = "modernFastToolTipButton",
+            Text = "Fast tip",
+            Location = new SKPoint(0, 4),
+            Size = new SKSize(118, 38),
+            ToolTipInitialDelay = 120,
+            ToolTipPlacement = Position.Top,
+            ToolTipText = "This tooltip opens above the button with a shorter delay."
+        };
+        var longTipTarget = new Element
+        {
+            Name = "modernLongToolTipTarget",
+            Text = "Styled target",
+            Location = new SKPoint(132, 4),
+            Size = new SKSize(188, 38),
+            BackColor = ColorScheme.SurfaceContainer,
+            ForeColor = ColorScheme.ForeColor,
+            Radius = new(10),
+            Border = new(1),
+            BorderColor = ColorScheme.Outline.WithAlpha(90),
+            TextAlign = ContentAlignment.MiddleCenter,
+            ToolTipPlacement = Position.Bottom,
+            ToolTipText = "This tooltip uses custom colors, padding and width. It is still rendered as a top-level overlay."
+        };
+        longTipTarget.ConfigureToolTip(
+            background: new SKColor(15, 23, 42),
+            foreground: SKColors.White,
+            border: new SKColor(56, 189, 248, 90),
+            shadow: new SKColor(2, 6, 23, 120),
+            padding: new Thickness(14, 9, 14, 9),
+            radius: 8,
+            maxWidth: 260,
+            fontSize: 13,
+            fontEmbolden: true);
+        var delayedTipButton = new Button
+        {
+            Name = "modernDelayedToolTipButton",
+            Text = "Right tip",
+            Location = new SKPoint(334, 4),
+            Size = new SKSize(128, 38),
+        };
+        delayedTipButton
+            .SetToolTip("This one waits longer and prefers the right side.", Position.Right, 1000)
+            .ConfigureToolTip(offset: 14, radius: 7);
+        tooltipRow.Controls.Add(delayedTipButton);
+        tooltipRow.Controls.Add(longTipTarget);
+        tooltipRow.Controls.Add(fastTipButton);
+        var placementRow = CreateRow(52);
+        var autoTipButton = new Button
+        {
+            Name = "modernAutoToolTipButton",
+            Text = "Auto",
+            Location = new SKPoint(0, 4),
+            Size = new SKSize(86, 38),
+            ToolTipText = "Auto chooses the first placement that fits in the window.",
+            ToolTipPlacement = Position.Auto
+        };
+        var topTipButton = new Button
+        {
+            Name = "modernTopToolTipButton",
+            Text = "Top",
+            Location = new SKPoint(98, 4),
+            Size = new SKSize(86, 38),
+            ToolTipText = "Top placement",
+            ToolTipPlacement = Position.Top
+        };
+        var bottomTipButton = new Button
+        {
+            Name = "modernBottomToolTipButton",
+            Text = "Bottom",
+            Location = new SKPoint(196, 4),
+            Size = new SKSize(96, 38),
+            ToolTipText = "Bottom placement",
+            ToolTipPlacement = Position.Bottom
+        };
+        var leftTipButton = new Button
+        {
+            Name = "modernLeftToolTipButton",
+            Text = "Left",
+            Location = new SKPoint(304, 4),
+            Size = new SKSize(86, 38),
+            ToolTipText = "Left placement",
+            ToolTipPlacement = Position.Left
+        };
+        var rightTipButton = new Button
+        {
+            Name = "modernRightToolTipButton",
+            Text = "Right",
+            Location = new SKPoint(402, 4),
+            Size = new SKSize(92, 38),
+            ToolTipText = "Right placement",
+            ToolTipPlacement = Position.Right
+        };
+        placementRow.Controls.Add(rightTipButton);
+        placementRow.Controls.Add(leftTipButton);
+        placementRow.Controls.Add(bottomTipButton);
+        placementRow.Controls.Add(topTipButton);
+        placementRow.Controls.Add(autoTipButton);
+        var customToolTipRow = CreateRow(52);
+        var customRenderTip = new Element
+        {
+            Name = "modernCustomRenderToolTipTarget",
+            Text = "Custom rendered tooltip",
+            Location = new SKPoint(0, 4),
+            Size = new SKSize(220, 38),
+            BackColor = ColorScheme.SurfaceContainer,
+            ForeColor = ColorScheme.ForeColor,
+            Radius = new(10),
+            Border = new(1),
+            BorderColor = ColorScheme.Outline.WithAlpha(88),
+            TextAlign = ContentAlignment.MiddleCenter,
+            ToolTipPlacement = Position.Top,
+            ToolTipText = "Custom render\nGradient surface + dynamic text"
+        };
+        customRenderTip
+            .ConfigureToolTip(maxWidth: 260, padding: new Thickness(16, 11, 16, 11), radius: 12, offset: 16)
+            .RenderToolTipWith((_, args) =>
+            {
+                args.Handled = true;
+                using var path = new SKPath();
+                path.AddRoundRect(args.Bounds, 12, 12);
+                using var fill = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
+                fill.Shader = SKShader.CreateLinearGradient(
+                    new SKPoint(args.Bounds.Left, args.Bounds.Top),
+                    new SKPoint(args.Bounds.Right, args.Bounds.Bottom),
+                    new[] { new SKColor(15, 23, 42, (byte)(245 * args.Progress)), new SKColor(30, 64, 175, (byte)(245 * args.Progress)) },
+                    null,
+                    SKShaderTileMode.Clamp);
+                using var border = new SKPaint
+                {
+                    IsAntialias = true,
+                    Style = SKPaintStyle.Stroke,
+                    StrokeWidth = 1,
+                    Color = new SKColor(125, 211, 252, (byte)(110 * args.Progress))
+                };
+                using var text = new SKPaint { IsAntialias = true, Color = SKColors.White.WithAlpha((byte)(255 * args.Progress)) };
+                args.Canvas.DrawPath(path, fill);
+                args.Canvas.DrawPath(path, border);
+                var metrics = args.Font.Metrics;
+                var y = args.TextBounds.Top - metrics.Ascent;
+                for (var i = 0; i < args.Lines.Count; i++)
+                    args.Canvas.DrawText(args.Lines[i], args.TextBounds.Left, y + i * (args.Font.Size + 5), SKTextAlign.Left, args.Font, text);
+            });
+        customToolTipRow.Controls.Add(customRenderTip);
+        AddCardContent(tooltipCard, customToolTipRow);
+        AddCardContent(tooltipCard, placementRow);
+        AddCardContent(tooltipCard, tooltipRow);
 
         var separatorCard = CreateCard("Separator", "Horizontal and vertical separators use the same lightweight drawing control.");
         var horizontalSeparator = new Separator
@@ -408,6 +571,7 @@ internal sealed partial class ModernControlsDemoPage
         AddCardContent(separatorCard, verticalHost);
         AddCardContent(separatorCard, horizontalSeparator);
 
+        Controls.Add(tooltipCard);
         Controls.Add(dropdownCard);
         Controls.Add(separatorCard);
         Controls.Add(inputCard);
@@ -416,39 +580,17 @@ internal sealed partial class ModernControlsDemoPage
         Controls.Add(header);
     }
 
-    private static Element CreateCard(string title, string description)
+    private static Card CreateCard(string title, string description)
     {
-        var card = new Element
+        return new Card
         {
-            Text = string.Empty,
             Dock = DockStyle.Top,
             AutoSize = true,
             Padding = new(18),
             Margin = new(0, 0, 0, 16),
-            BackColor = ColorScheme.Surface,
-            ForeColor = ColorScheme.ForeColor,
-            Radius = new(12),
-            Border = new(1),
-            BorderColor = ColorScheme.Outline.WithAlpha(90),
-            TextAlign = ContentAlignment.MiddleLeft,
-            Tag = "theme-card"
+            Title = title,
+            Description = description
         };
-
-        var body = new Element
-        {
-            Text = $"{title}\n{description}",
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            Padding = new(0, 0, 0, 14),
-            Margin = new(0),
-            BackColor = SKColors.Transparent,
-            ForeColor = ColorScheme.ForeColor,
-            Border = new(0),
-            TextAlign = ContentAlignment.MiddleLeft,
-            Tag = "theme-card-header"
-        };
-        card.Controls.Add(body);
-        return card;
     }
 
     private static Element CreateRow(int height)
@@ -487,15 +629,8 @@ internal sealed partial class ModernControlsDemoPage
         };
     }
 
-    private static void AddCardContent(Element card, ElementBase content)
+    private static void AddCardContent(Card card, ElementBase content)
     {
-        var header = card.Controls.Count > 0 ? card.Controls[0] : null;
-        if (header != null)
-            card.Controls.Remove(header);
-
-        card.Controls.Add(content);
-
-        if (header != null)
-            card.Controls.Add(header);
+        card.AddContent(content);
     }
 }

@@ -542,6 +542,7 @@ public partial class WindowBase
 
         RenderWindowFrame(canvas, info);
         RenderChildren(canvas);
+        RenderActiveToolTip(canvas, new SKSize(info.Width, info.Height));
 
         if (ShowPerfOverlay)
             DrawPerfOverlay(canvas);

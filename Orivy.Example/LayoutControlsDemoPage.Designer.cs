@@ -149,46 +149,21 @@ internal sealed partial class LayoutControlsDemoPage
         };
     }
 
-    private static Element CreateCard(string title, string description)
+    private static Card CreateCard(string title, string description)
     {
-        var card = new Element
+        return new Card
         {
             Dock = DockStyle.Top,
             AutoSize = true,
             Padding = new(18),
             Margin = new(0, 0, 0, 16),
-            BackColor = ColorScheme.Surface,
-            ForeColor = ColorScheme.ForeColor,
-            Radius = new(12),
-            Border = new(1),
-            BorderColor = ColorScheme.Outline.WithAlpha(90),
-            Tag = "theme-card"
+            Title = title,
+            Description = description
         };
-
-        card.Controls.Add(new Element
-        {
-            Text = $"{title}\n{description}",
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            Padding = new(0, 0, 0, 14),
-            Border = new(0),
-            BackColor = SKColors.Transparent,
-            ForeColor = ColorScheme.ForeColor,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Tag = "theme-card-header"
-        });
-        return card;
     }
 
-    private static void AddCardContent(Element card, ElementBase content)
+    private static void AddCardContent(Card card, ElementBase content)
     {
-        var header = card.Controls.Count > 0 ? card.Controls[0] : null;
-        if (header != null)
-            card.Controls.Remove(header);
-
-        card.Controls.Add(content);
-
-        if (header != null)
-            card.Controls.Add(header);
+        card.AddContent(content);
     }
 }
