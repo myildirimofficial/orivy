@@ -578,7 +578,7 @@ public abstract partial class ElementBase
         var activeImage = GetDisplayedBackgroundImage();
         if (activeImage == null && _backgroundTransitionFromImage == null && _backgroundTransitionToImage == null)
         {
-            if (IsBackgroundImageLoading)
+            if (_backgroundImageLoading)
                 RenderRemoteImageLoadingSpinner(canvas, bounds);
             return;
         }
@@ -591,10 +591,15 @@ public abstract partial class ElementBase
         else if (activeImage != null)
             DrawBackgroundImage(canvas, activeImage, bounds, 255);
 
-        if (IsBackgroundImageLoading)
+        if (_backgroundImageLoading)
             RenderRemoteImageLoadingSpinner(canvas, bounds);
 
         canvas.RestoreToCount(saved);
+    }
+
+    protected virtual SKRect GetBackgroundImageRenderBounds(SKRect elementBounds)
+    {
+        return elementBounds;
     }
 
     protected bool TryGetBackgroundImageSampleColor(SKRect contentBounds, SKRect sampleBounds, out SKColor color)
@@ -737,7 +742,11 @@ public abstract partial class ElementBase
                 break;
 
             case ImageLayout.Zoom:
-                canvas.DrawImage(image, CreateZoomSourceRect(image, bounds), bounds, paint);
+                canvas.DrawImage(image, CreateZoomImageRect(image, bounds), paint);
+                break;
+
+            case ImageLayout.Cover:
+                canvas.DrawImage(image, CreateCoverSourceRect(image, bounds), bounds, paint);
                 break;
 
             case ImageLayout.Tile:
@@ -890,7 +899,21 @@ public abstract partial class ElementBase
         return SKRect.Create(left, top, width, height);
     }
 
-    private SKRect CreateZoomSourceRect(SKImage image, SKRect bounds)
+    private SKRect CreateZoomImageRect(SKImage image, SKRect bounds)
+    {
+        if (image.Width <= 0 || image.Height <= 0 || bounds.Width <= 0f || bounds.Height <= 0f)
+            return bounds;
+
+        var scale = Math.Min(bounds.Width / image.Width, bounds.Height / image.Height);
+        if (scale <= 0f || float.IsNaN(scale) || float.IsInfinity(scale))
+            return bounds;
+
+        var scaledWidth = image.Width * scale;
+        var scaledHeight = image.Height * scale;
+        return CreatePositionedImageRect(image, bounds, scaledWidth, scaledHeight);
+    }
+
+    private SKRect CreateCoverSourceRect(SKImage image, SKRect bounds)
     {
         if (image.Width <= 0 || image.Height <= 0 || bounds.Width <= 0f || bounds.Height <= 0f)
             return SKRect.Create(0f, 0f, Math.Max(1, image.Width), Math.Max(1, image.Height));
@@ -936,7 +959,10 @@ public abstract partial class ElementBase
                 return TryMapPointWithinRect(point, image, CreatePositionedImageRect(image, bounds, image.Width, image.Height), out pixelX, out pixelY);
 
             case ImageLayout.Zoom:
-                return TryMapPointWithinSourceRect(point, image, bounds, CreateZoomSourceRect(image, bounds), out pixelX, out pixelY);
+                return TryMapPointWithinRect(point, image, CreateZoomImageRect(image, bounds), out pixelX, out pixelY);
+
+            case ImageLayout.Cover:
+                return TryMapPointWithinSourceRect(point, image, bounds, CreateCoverSourceRect(image, bounds), out pixelX, out pixelY);
 
             case ImageLayout.None:
                 return TryMapPointWithinRect(point, image, CreatePositionedImageRect(image, bounds, image.Width, image.Height), out pixelX, out pixelY);

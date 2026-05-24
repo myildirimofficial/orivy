@@ -64,7 +64,7 @@ internal partial class MainWindow
         {
             Name = "backgroundHero",
             Dock = DockStyle.Top,
-            Height = 292,
+            Height = 492,
             BackColor = SKColors.Transparent,
             Margin = new Thickness(0, 0, 0, 18),
             Padding = new Thickness(18),
@@ -208,7 +208,7 @@ internal partial class MainWindow
                 return assetSlides;
         }
 
-        return new List<BackgroundImageFrame>();
+        return [];
     }
 
     private static bool IsSupportedBackgroundImageAsset(string path)

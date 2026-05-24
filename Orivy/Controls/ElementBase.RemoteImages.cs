@@ -18,47 +18,29 @@ public abstract partial class ElementBase
     private CancellationTokenSource? _backgroundImageLoadCts;
     private long _imageLoadVersion;
     private long _backgroundImageLoadVersion;
-    private bool _isImageLoading;
-    private bool _isBackgroundImageLoading;
+    private bool _manualLoading;
+    private bool _imageLoading;
+    private bool _backgroundImageLoading;
 
-    [Browsable(false)]
-    public bool IsImageLoading
+    [DefaultValue(false)]
+    public bool IsLoading
     {
-        get => _isImageLoading;
-        private set
+        get => HasActiveLoadingState;
+        set
         {
-            if (_isImageLoading == value)
+            var previous = HasActiveLoadingState;
+            if (_manualLoading == value)
                 return;
 
-            _isImageLoading = value;
-            ImageLoadingChanged?.Invoke(this, EventArgs.Empty);
-            UpdateRemoteImageLoadingAnimation();
-            Invalidate();
+            _manualLoading = value;
+            NotifyLoadingStateChanged(previous);
         }
     }
 
     [Browsable(false)]
-    public bool IsBackgroundImageLoading
-    {
-        get => _isBackgroundImageLoading;
-        private set
-        {
-            if (_isBackgroundImageLoading == value)
-                return;
+    public bool HasImage => _image != null || _imageLoading;
 
-            _isBackgroundImageLoading = value;
-            BackgroundImageLoadingChanged?.Invoke(this, EventArgs.Empty);
-            UpdateRemoteImageLoadingAnimation();
-            Invalidate();
-        }
-    }
-
-    [Browsable(false)]
-    public bool HasImage => _image != null || IsImageLoading;
-
-    public event EventHandler? ImageLoadingChanged;
-
-    public event EventHandler? BackgroundImageLoadingChanged;
+    public event EventHandler? LoadingChanged;
 
     public event EventHandler<Exception>? ImageLoadFailed;
 
@@ -101,7 +83,7 @@ public abstract partial class ElementBase
         var version = Interlocked.Increment(ref _imageLoadVersion);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _imageLoadCts = linkedCts;
-        IsImageLoading = true;
+        SetImageLoading(true);
 
         try
         {
@@ -129,7 +111,7 @@ public abstract partial class ElementBase
                 _imageLoadCts = null;
 
             if (version == Interlocked.Read(ref _imageLoadVersion))
-                IsImageLoading = false;
+                SetImageLoading(false);
         }
     }
 
@@ -150,7 +132,7 @@ public abstract partial class ElementBase
         var version = Interlocked.Increment(ref _backgroundImageLoadVersion);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _backgroundImageLoadCts = linkedCts;
-        IsBackgroundImageLoading = true;
+        SetBackgroundImageLoading(true);
 
         try
         {
@@ -178,7 +160,7 @@ public abstract partial class ElementBase
                 _backgroundImageLoadCts = null;
 
             if (version == Interlocked.Read(ref _backgroundImageLoadVersion))
-                IsBackgroundImageLoading = false;
+                SetBackgroundImageLoading(false);
         }
     }
 
@@ -187,7 +169,7 @@ public abstract partial class ElementBase
         if (_image != null)
             canvas.DrawImage(_image, bounds);
 
-        if (IsImageLoading)
+        if (_imageLoading)
             RenderRemoteImageLoadingSpinner(canvas, bounds);
     }
 
@@ -237,13 +219,13 @@ public abstract partial class ElementBase
 
     private void HandleRemoteImageLoadingAnimationProgress(object _)
     {
-        if (IsImageLoading || IsBackgroundImageLoading)
+        if (HasActiveLoadingState)
             Invalidate();
     }
 
     private void HandleRemoteImageLoadingAnimationFinished(object _)
     {
-        if (!IsImageLoading && !IsBackgroundImageLoading)
+        if (!HasActiveLoadingState)
         {
             Invalidate();
             return;
@@ -255,7 +237,7 @@ public abstract partial class ElementBase
 
     private void UpdateRemoteImageLoadingAnimation()
     {
-        if (IsImageLoading || IsBackgroundImageLoading)
+        if (HasActiveLoadingState)
         {
             if (!_remoteImageLoadingAnimation.Running)
             {
@@ -273,14 +255,46 @@ public abstract partial class ElementBase
     {
         Interlocked.Increment(ref _imageLoadVersion);
         CancelRemoteImageLoad(ref _imageLoadCts);
-        IsImageLoading = false;
+        SetImageLoading(false);
     }
 
     private void CancelBackgroundImageUrlLoad()
     {
         Interlocked.Increment(ref _backgroundImageLoadVersion);
         CancelRemoteImageLoad(ref _backgroundImageLoadCts);
-        IsBackgroundImageLoading = false;
+        SetBackgroundImageLoading(false);
+    }
+
+    private bool HasActiveLoadingState => _manualLoading || _imageLoading || _backgroundImageLoading;
+
+    private void SetImageLoading(bool value)
+    {
+        if (_imageLoading == value)
+            return;
+
+        var previous = HasActiveLoadingState;
+        _imageLoading = value;
+        NotifyLoadingStateChanged(previous);
+    }
+
+    private void SetBackgroundImageLoading(bool value)
+    {
+        if (_backgroundImageLoading == value)
+            return;
+
+        var previous = HasActiveLoadingState;
+        _backgroundImageLoading = value;
+        NotifyLoadingStateChanged(previous);
+    }
+
+    private void NotifyLoadingStateChanged(bool previous)
+    {
+        var current = HasActiveLoadingState;
+        if (previous != current)
+            LoadingChanged?.Invoke(this, EventArgs.Empty);
+
+        UpdateRemoteImageLoadingAnimation();
+        Invalidate();
     }
 
     private static void CancelRemoteImageLoad(ref CancellationTokenSource? cts)

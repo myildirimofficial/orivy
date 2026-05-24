@@ -2506,13 +2506,16 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                 }
             }
 
-            RenderBackgroundImages(targetCanvas, elementRect);
+            RenderBackgroundImages(targetCanvas, GetBackgroundImageRenderBounds(elementRect));
 
             RenderBackdropMaterial(targetCanvas, elementRect, hasRadius);
 
             RenderMotionEffects(targetCanvas, elementRect);
 
             OnPaint(targetCanvas);
+
+            if (_manualLoading)
+                RenderRemoteImageLoadingSpinner(targetCanvas, elementRect);
 
             // ── Border ──
             if (!_border.IsEmpty)

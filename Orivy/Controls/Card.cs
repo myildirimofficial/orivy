@@ -12,6 +12,8 @@ public class Card : Container
     private string _description = string.Empty;
     private bool _useThemeColors = true;
     private float _headerGap = 14f;
+    private float _mediaHeight;
+    private CardHeaderPlacement _headerPlacement = CardHeaderPlacement.Overlay;
 
     public Card()
     {
@@ -39,7 +41,7 @@ public class Card : Container
             if (headerHeight <= 0f)
                 return rect;
 
-            rect.Top = Math.Min(rect.Bottom, rect.Top + headerHeight);
+            rect.Top = Math.Min(rect.Bottom, GetHeaderTop(rect, headerHeight) + headerHeight);
             return rect;
         }
     }
@@ -107,6 +109,39 @@ public class Card : Container
         }
     }
 
+    [DefaultValue(0f)]
+    public float MediaHeight
+    {
+        get => _mediaHeight;
+        set
+        {
+            var normalized = Math.Max(0f, value);
+            if (Math.Abs(_mediaHeight - normalized) < 0.001f)
+                return;
+
+            _mediaHeight = normalized;
+            InvalidateMeasure();
+            PerformLayout();
+            Invalidate();
+        }
+    }
+
+    [DefaultValue(CardHeaderPlacement.Overlay)]
+    public CardHeaderPlacement HeaderPlacement
+    {
+        get => _headerPlacement;
+        set
+        {
+            if (_headerPlacement == value)
+                return;
+
+            _headerPlacement = value;
+            InvalidateMeasure();
+            PerformLayout();
+            Invalidate();
+        }
+    }
+
     public void AddContent(ElementBase content)
     {
         ArgumentNullException.ThrowIfNull(content);
@@ -117,6 +152,18 @@ public class Card : Container
     {
         RenderHeader(canvas);
         base.OnPaint(canvas);
+    }
+
+    protected override SKRect GetBackgroundImageRenderBounds(SKRect elementBounds)
+    {
+        if (HeaderPlacement != CardHeaderPlacement.BelowImage || BackgroundImageLayout == ImageLayout.Stretch)
+            return base.GetBackgroundImageRenderBounds(elementBounds);
+
+        var mediaHeight = GetResolvedMediaHeight();
+        if (mediaHeight <= 0f)
+            return base.GetBackgroundImageRenderBounds(elementBounds);
+
+        return SKRect.Create(elementBounds.Left, elementBounds.Top, elementBounds.Width, mediaHeight);
     }
 
     protected override SKSize GetPreferredSizeCore(SKSize proposedSize)
@@ -185,6 +232,28 @@ public class Card : Container
         return MathF.Ceiling(height + HeaderGap * ScaleFactor);
     }
 
+    private float GetResolvedMediaHeight()
+    {
+        var scaledMediaHeight = MediaHeight > 0f
+            ? MediaHeight * ScaleFactor
+            : Height * 0.54f;
+
+        var minHeight = Math.Min(64f * ScaleFactor, Math.Max(0f, Height - Padding.Top - Padding.Bottom));
+        var maxHeight = Math.Max(minHeight, Height - Padding.Bottom - GetHeaderHeight());
+        return Math.Clamp(scaledMediaHeight, minHeight, maxHeight);
+    }
+
+    private float GetHeaderTop(SKRect displayRect, float headerHeight)
+    {
+        if (HeaderPlacement != CardHeaderPlacement.BelowImage || BackgroundImageLayout == ImageLayout.Stretch)
+            return displayRect.Top;
+
+        var mediaBottom = GetResolvedMediaHeight();
+        var top = mediaBottom + HeaderGap * ScaleFactor;
+        var maxTop = Math.Max(displayRect.Top, displayRect.Bottom - headerHeight);
+        return Math.Clamp(top, displayRect.Top, maxTop);
+    }
+
     private void RenderHeader(SKCanvas canvas)
     {
         var hasTitle = !string.IsNullOrWhiteSpace(Title);
@@ -202,7 +271,8 @@ public class Card : Container
         _titlePaint.Color = ForeColor;
         _descriptionPaint.Color = ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)170 : (byte)145);
 
-        var y = rect.Top;
+        var headerHeight = GetHeaderHeight();
+        var y = GetHeaderTop(rect, headerHeight);
         if (hasTitle)
         {
             y += -titleFont.Metrics.Ascent;
