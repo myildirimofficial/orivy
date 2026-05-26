@@ -73,5 +73,22 @@ breadcrumb.Controls.Add(new Button { Text = "Display", AutoSize = true, Shadow =
 window.Controls.Add(breadcrumb);
 ```
 
+6) Absolute child badge inside a button
+
+```csharp
+var inbox = new Button { Text = "Inbox", Size = new SKSize(116, 36) };
+inbox.Controls.Add(new Badge
+{
+    Text = "12",
+    Variant = BadgeVariant.Danger,
+    PositionMode = ElementPositionMode.Absolute,
+    AbsoluteAlignment = ContentAlignment.TopRight,
+    Location = new SKPoint(-4, -4),
+    CanSelect = false,
+    TabStop = false
+});
+window.Controls.Add(inbox);
+```
+
 Notes
 - Many controls expose events and properties similar to WinForms; inspect `Orivy/Controls/*` for full APIs and examples.

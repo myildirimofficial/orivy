@@ -426,27 +426,30 @@ internal sealed partial class ModernControlsDemoPage
             Location = new SKPoint(86, 8),
             Size = new SKSize(68, 24)
         });
-        badgeRow.Controls.Add(new Button
+        var inboxButton = new Button
         {
             Text = "Inbox",
-            BadgeText = "12",
             Location = new SKPoint(170, 2),
             Size = new SKSize(116, 36),
-            BadgeAlign = ContentAlignment.MiddleRight,
-            BadgeBackColor = new SKColor(239, 68, 68),
-            BadgeForeColor = SKColors.White,
             Shadow = BoxShadow.None,
-            Controls = {
-                new Badge
-                {
-                    Text = "24",
-                    Variant = BadgeVariant.Danger,
-                    Size = new SKSize(24, 24),
-                    Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                    //Location = new SKPoint(100, -4)
-                }
-            }
+        };
+        inboxButton.Controls.Add(new Badge
+        {
+            Text = "12",
+            Variant = BadgeVariant.Danger,
+            AutoSize = true,
+            Padding = new Thickness(0),
+            PositionMode = ElementPositionMode.Absolute,
+            AbsoluteAlignment = ContentAlignment.TopRight,
+            Location = new SKPoint(-2, -2),
+            Border = new Thickness(2),
+            Font = new SKFont(SKTypeface.Default, 6),
+            CanSelect = false,
+            TabStop = false,
+            Shadow = BoxShadow.None
         });
+
+        badgeRow.Controls.Add(inboxButton);
 
         var accordion = new Accordion
         {
@@ -455,6 +458,7 @@ internal sealed partial class ModernControlsDemoPage
             Gap = 0,
             AllowMultipleExpanded = false
         };
+
         accordion.Controls.Add(CreateCollapseItem("Advanced display", "Brightness, HDR and scale settings live in a compact animated section.", true));
         accordion.Controls.Add(CreateCollapseItem("Optional features", "Collapse keeps content hidden until the user asks for detail.", false));
 

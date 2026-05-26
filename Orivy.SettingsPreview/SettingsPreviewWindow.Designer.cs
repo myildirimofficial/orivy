@@ -25,6 +25,7 @@ internal sealed partial class SettingsPreviewWindow
         FormStartPosition = FormStartPosition.CenterScreen;
         WindowThemeType = WindowThemeType.Mica;
         RenderBackend = Rendering.RenderBackend.Software;
+        DrawTitleBorder = false;
 
         shell = new SplitContainer
         {
@@ -773,15 +774,31 @@ internal sealed partial class SettingsPreviewWindow
     {
         var card = CreateCard(title, description, 180);
         card.Padding = new Thickness(18);
-        card.Controls.Add(new Button
+        var openButton = new Button
         {
             Text = "Open",
             Dock = DockStyle.Bottom,
             Height = 34,
             Shadow = BoxShadow.None,
-            BadgeText = title.Contains("Security", StringComparison.OrdinalIgnoreCase) ? "!" : "",
             ToolTipText = "Preview only"
-        });
+        };
+        if (title.Contains("Security", StringComparison.OrdinalIgnoreCase))
+        {
+            openButton.Controls.Add(new Badge
+            {
+                Text = "!",
+                Variant = BadgeVariant.Danger,
+                MinimumSize = new SKSize(20, 20),
+                Padding = new Thickness(7, 2, 7, 2),
+                PositionMode = ElementPositionMode.Absolute,
+                AbsoluteAlignment = ContentAlignment.TopRight,
+                Location = new SKPoint(-4, 4),
+                CanSelect = false,
+                TabStop = false,
+                Shadow = BoxShadow.None
+            });
+        }
+        card.Controls.Add(openButton);
         card.Controls.Add(new Element
         {
             Dock = DockStyle.Top,

@@ -12,6 +12,12 @@ using System.Runtime.InteropServices;
 
 namespace Orivy.Controls;
 
+public enum ElementPositionMode
+{
+    Normal,
+    Absolute
+}
+
 public abstract partial class ElementBase : IElement, IArrangedElement, IDisposable
 {
     private static int s_globalLayoutPassId;
@@ -807,6 +813,10 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     #region Properties
 
     private SKPoint _location;
+    private SKPoint _absoluteArrangedLocation;
+    private bool _hasAbsoluteArrangedLocation;
+    private ElementPositionMode _positionMode;
+    private ContentAlignment _absoluteAlignment = ContentAlignment.TopLeft;
 
     public virtual SKPoint Location
     {
@@ -818,7 +828,43 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
             _location = value;
 
+            if (PositionMode == ElementPositionMode.Absolute)
+                Parent?.PerformLayout(this, nameof(Location));
+
             OnLocationChanged(EventArgs.Empty);
+        }
+    }
+
+    [DefaultValue(ElementPositionMode.Normal)]
+    public virtual ElementPositionMode PositionMode
+    {
+        get => _positionMode;
+        set
+        {
+            if (_positionMode == value)
+                return;
+
+            _positionMode = value;
+            if (_positionMode != ElementPositionMode.Absolute)
+                _hasAbsoluteArrangedLocation = false;
+
+            Parent?.PerformLayout(this, nameof(PositionMode));
+            Parent?.Invalidate();
+        }
+    }
+
+    [DefaultValue(typeof(ContentAlignment), nameof(ContentAlignment.TopLeft))]
+    public virtual ContentAlignment AbsoluteAlignment
+    {
+        get => _absoluteAlignment;
+        set
+        {
+            if (_absoluteAlignment == value)
+                return;
+
+            _absoluteAlignment = value;
+            Parent?.PerformLayout(this, nameof(AbsoluteAlignment));
+            Parent?.Invalidate();
         }
     }
 
@@ -2020,11 +2066,20 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private static SKPoint GetRenderedChildLocation(ElementBase parent, ElementBase child)
     {
+        var location = child.GetRenderLocation();
+        
         if (!UsesParentScrollTransform(parent, child))
-            return child.Location;
+            return location;
 
         var scrollOffset = parent.GetScrollOffset();
-        return new SKPoint(child.Location.X - scrollOffset.X, child.Location.Y - scrollOffset.Y);
+        return new SKPoint(location.X - scrollOffset.X, location.Y - scrollOffset.Y);
+    }
+
+    private SKPoint GetRenderLocation()
+    {
+        return PositionMode == ElementPositionMode.Absolute && _hasAbsoluteArrangedLocation
+            ? _absoluteArrangedLocation
+            : Location;
     }
 
     // Cached buffer for child rendering order — avoids per-frame rebuild/sort work
@@ -2034,6 +2089,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     private readonly List<ElementBase> _renderNormalChildren = new();
     private readonly List<ElementBase> _renderScrollBarChildren = new();
     private readonly List<ElementBase> _renderFloatingChildren = new();
+    private readonly List<ElementBase> _renderAbsoluteChildren = new();
 
     private static int CompareChildRenderOrder(ElementBase a, ElementBase b)
     {
@@ -2069,7 +2125,73 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private static bool IntersectsViewport(ElementBase child, SKRect viewport)
     {
-        return child.Bounds.IntersectsWith(viewport);
+        return child.GetRenderBoundsWithOverflow().IntersectsWith(viewport);
+    }
+
+    private SKRect GetRenderBounds()
+    {
+        return SKRect.Create(GetRenderLocation(), Size);
+    }
+
+    private SKRect GetRenderBoundsWithOverflow()
+    {
+        var bounds = GetLocalVisualBounds();
+        var location = GetRenderLocation();
+        bounds.Offset(location.X, location.Y);
+        return bounds;
+    }
+
+    private SKRect GetLocalVisualBounds()
+    {
+        var bounds = ClientRectangle;
+
+        if (Controls.Count == 0)
+            return bounds;
+
+        for (var i = 0; i < Controls.Count; i++)
+        {
+            if (Controls[i] is not ElementBase child || !child.Visible)
+                continue;
+
+            var childBounds = child.GetLocalVisualBounds();
+            var childLocation = child.GetRenderLocation();
+            childBounds.Offset(childLocation.X, childLocation.Y);
+            bounds = UnionRects(bounds, childBounds);
+        }
+
+        return bounds;
+    }
+
+    private SKRect GetChildrenClipBounds(SKRect fallback)
+    {
+        var bounds = fallback;
+
+        if (Controls.Count == 0)
+            return bounds;
+
+        for (var i = 0; i < Controls.Count; i++)
+        {
+            if (Controls[i] is not ElementBase child || !child.Visible)
+                continue;
+
+            bounds = UnionRects(bounds, child.GetRenderBoundsWithOverflow());
+        }
+
+        return bounds;
+    }
+
+    private static SKRect UnionRects(SKRect first, SKRect second)
+    {
+        if (first.IsEmpty)
+            return second;
+        if (second.IsEmpty)
+            return first;
+
+        return new SKRect(
+            MathF.Min(first.Left, second.Left),
+            MathF.Min(first.Top, second.Top),
+            MathF.Max(first.Right, second.Right),
+            MathF.Max(first.Bottom, second.Bottom));
     }
 
     private SKPoint GetInputCandidatePoint(ElementBase control, SKPoint originalPoint, SKPoint adjustedPoint, float scale)
@@ -2110,7 +2232,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
             var candidatePoint = GetInputCandidatePoint(control, originalPoint, adjustedPoint, scale);
 
-            if (!control.Bounds.Contains(candidatePoint))
+            if (!control.GetRenderBoundsWithOverflow().Contains(candidatePoint))
                 continue;
 
             target = control;
@@ -2140,8 +2262,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         childEventArgs = new MouseEventArgs(
             e.Button,
             e.Clicks,
-            (int)(hitPoint.X - target.Location.X),
-            (int)(hitPoint.Y - target.Location.Y),
+            (int)(hitPoint.X - target.GetRenderLocation().X),
+            (int)(hitPoint.Y - target.GetRenderLocation().Y),
             e.Delta,
             e.IsHorizontalWheel);
         return true;
@@ -2373,6 +2495,11 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     protected void RenderChildren(SKCanvas canvas)
     {
+        RenderChildren(canvas, includeFlowChildren: true, includeAbsoluteChildren: true);
+    }
+
+    private void RenderChildren(SKCanvas canvas, bool includeFlowChildren, bool includeAbsoluteChildren)
+    {
         EnsureChildRenderBuffer();
 
         if (_childRenderBuffer.Count == 0)
@@ -2405,16 +2532,22 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         _renderNormalChildren.Clear();
         _renderScrollBarChildren.Clear();
         _renderFloatingChildren.Clear();
+        _renderAbsoluteChildren.Clear();
         for (var i = 0; i < _childRenderBuffer.Count; i++)
         {
             var child = _childRenderBuffer[i];
             if (!IsRenderableChild(child))
                 continue;
-            if (IsScrollBar(child))
+            if (child.PositionMode == ElementPositionMode.Absolute)
+            {
+                if (includeAbsoluteChildren)
+                    _renderAbsoluteChildren.Add(child);
+            }
+            else if (IsScrollBar(child))
                 _renderScrollBarChildren.Add(child);
             else if (IsFloatingPopup(child))
                 _renderFloatingChildren.Add(child);
-            else if (IntersectsViewport(child, viewport))
+            else if (includeFlowChildren && IntersectsViewport(child, viewport))
                 _renderNormalChildren.Add(child);
         }
 
@@ -2439,6 +2572,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
         for (var i = 0; i < _renderFloatingChildren.Count; i++)
             _renderFloatingChildren[i].Render(canvas);
+
+        for (var i = 0; i < _renderAbsoluteChildren.Count; i++)
+            _renderAbsoluteChildren[i].Render(canvas);
     }
 
     public void Render(SKCanvas targetCanvas)
@@ -2449,7 +2585,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         try
         {
             var saved = targetCanvas.Save();
-            targetCanvas.Translate(Location.X + _renderTranslateX, Location.Y + _renderTranslateY);
+            var renderLocation = GetRenderLocation();
+            targetCanvas.Translate(renderLocation.X + _renderTranslateX, renderLocation.Y + _renderTranslateY);
 
             if (Math.Abs(_renderScaleX - 1f) > 0.0001f || Math.Abs(_renderScaleY - 1f) > 0.0001f)
             {
@@ -2470,6 +2607,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             var hasRadius = !_radius.IsEmpty;
             var elementRect = new SkiaSharp.SKRect(0, 0, Width, Height);
             var hasShadows = _shadows.Length > 0;
+            var shapeClipSaveCount = -1;
 
             // ── Outer shadows (drawn BEFORE clip so they extend beyond element bounds) ──
             if (hasShadows)
@@ -2487,6 +2625,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             if (hasRadius)
             {
                 var roundRect = GetScratchRoundRect(elementRect, _radius);
+                shapeClipSaveCount = targetCanvas.Save();
                 targetCanvas.ClipRoundRect(roundRect, antialias: true);
 
                 // ── Background ──
@@ -2583,9 +2722,19 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                 RenderDefaultText(targetCanvas);
 
             // ── Children ──
-            targetCanvas.ClipRect(elementRect);
-            if (!TryRenderChildContent(targetCanvas))
-                RenderChildren(targetCanvas);
+            var customRenderedChildren = false;
+            var childClipSaveCount = targetCanvas.Save();
+            targetCanvas.ClipRect(GetChildrenClipBounds(elementRect));
+            customRenderedChildren = TryRenderChildContent(targetCanvas);
+            if (!customRenderedChildren)
+                RenderChildren(targetCanvas, includeFlowChildren: true, includeAbsoluteChildren: false);
+            targetCanvas.RestoreToCount(childClipSaveCount);
+
+            if (shapeClipSaveCount >= 0)
+                targetCanvas.RestoreToCount(shapeClipSaveCount);
+
+            if (!customRenderedChildren)
+                RenderChildren(targetCanvas, includeFlowChildren: false, includeAbsoluteChildren: true);
 
             if (layerSaveCount >= 0)
                 targetCanvas.RestoreToCount(layerSaveCount);
@@ -2997,12 +3146,26 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private SKRoundRect GetScratchRoundRect(SKRect rect, Radius radius)
     {
+        radius = ClampRadius(radius, rect);
         _renderRoundRectRadiiScratch[0] = new SKPoint(radius.TopLeft, radius.TopLeft);
         _renderRoundRectRadiiScratch[1] = new SKPoint(radius.TopRight, radius.TopRight);
         _renderRoundRectRadiiScratch[2] = new SKPoint(radius.BottomRight, radius.BottomRight);
         _renderRoundRectRadiiScratch[3] = new SKPoint(radius.BottomLeft, radius.BottomLeft);
         _renderRoundRectScratch.SetRectRadii(rect, _renderRoundRectRadiiScratch);
         return _renderRoundRectScratch;
+    }
+
+    private static Radius ClampRadius(Radius radius, SKRect rect)
+    {
+        var maxRadius = MathF.Max(0f, MathF.Min(rect.Width, rect.Height) * 0.5f);
+        if (maxRadius <= 0f)
+            return Radius.Empty;
+
+        return new Radius(
+            MathF.Min(radius.TopLeft, maxRadius),
+            MathF.Min(radius.TopRight, maxRadius),
+            MathF.Min(radius.BottomLeft, maxRadius),
+            MathF.Min(radius.BottomRight, maxRadius));
     }
 
     private void RenderDefaultText(SKCanvas canvas)
@@ -3215,7 +3378,21 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         _lastMeasureConstraint = availableSize;
         _layoutPassId = s_globalLayoutPassId;
 
-        return desiredSize;
+        return IncludeAbsoluteChildrenInPreferredSize(desiredSize);
+    }
+
+    private SKSize IncludeAbsoluteChildrenInPreferredSize(SKSize desiredSize)
+    {
+        if (Controls.Count == 0)
+            return desiredSize;
+
+        var desiredWidth = desiredSize.Width;
+        var desiredHeight = desiredSize.Height;
+        var overflow = MeasureAbsoluteChildrenOverflow(SKRect.Create(0, 0, Math.Max(1f, desiredWidth), Math.Max(1f, desiredHeight)));
+
+        return new SKSize(
+            MathF.Ceiling(desiredWidth + overflow.Left + overflow.Right),
+            MathF.Ceiling(desiredHeight + overflow.Top + overflow.Bottom));
     }
 
     /// <summary>
@@ -4553,11 +4730,98 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     {
         Layout?.Invoke(this, e);
         Orivy.Layout.DefaultLayout.Instance.Layout(this, e);
+        PositionAbsoluteChildren();
 
         if (AutoSize && Parent == null)
             AdjustSize();
 
         UpdateScrollBars();
+    }
+
+    private void PositionAbsoluteChildren()
+    {
+        if (Controls.Count == 0)
+            return;
+
+        var bounds = ClientRectangle;
+
+        for (var i = 0; i < Controls.Count; i++)
+        {
+            if (Controls[i] is not ElementBase child || !child.Visible || child.PositionMode != ElementPositionMode.Absolute)
+                continue;
+
+            var size = GetAbsoluteChildLayoutSize(child);
+            var childBounds = GetAbsoluteChildBounds(bounds, child, size);
+            child._absoluteArrangedLocation = childBounds.Location;
+            child._hasAbsoluteArrangedLocation = true;
+
+            if (child.Size != childBounds.Size)
+                child.Size = childBounds.Size;
+        }
+    }
+
+    private Thickness MeasureAbsoluteChildrenOverflow(SKRect bounds)
+    {
+        if (Controls.Count == 0)
+            return Thickness.Empty;
+
+        float left = 0f;
+        float top = 0f;
+        float right = 0f;
+        float bottom = 0f;
+
+        for (var i = 0; i < Controls.Count; i++)
+        {
+            if (Controls[i] is not ElementBase child || !child.Visible || child.PositionMode != ElementPositionMode.Absolute)
+                continue;
+
+            var childSize = GetAbsoluteChildLayoutSize(child);
+            var childBounds = GetAbsoluteChildBounds(bounds, child, childSize);
+            left = MathF.Max(left, bounds.Left - childBounds.Left);
+            top = MathF.Max(top, bounds.Top - childBounds.Top);
+            right = MathF.Max(right, childBounds.Right - bounds.Right);
+            bottom = MathF.Max(bottom, childBounds.Bottom - bounds.Bottom);
+        }
+
+        return new Thickness(
+            (int)MathF.Ceiling(left),
+            (int)MathF.Ceiling(top),
+            (int)MathF.Ceiling(right),
+            (int)MathF.Ceiling(bottom));
+    }
+
+    private static SKSize GetAbsoluteChildLayoutSize(ElementBase child)
+    {
+        var size = child.Size;
+        if (!child.AutoSize && size.Width > 0f && size.Height > 0f)
+            return size;
+
+        var preferred = child.GetPreferredSize(new SKSize(short.MaxValue, short.MaxValue));
+        return new SKSize(
+            MathF.Ceiling(Math.Max(1f, preferred.Width)),
+            MathF.Ceiling(Math.Max(1f, preferred.Height)));
+    }
+
+    private static SKRect GetAbsoluteChildBounds(SKRect bounds, ElementBase child, SKSize size)
+    {
+        var x = child.AbsoluteAlignment switch
+        {
+            ContentAlignment.TopCenter or ContentAlignment.MiddleCenter or ContentAlignment.BottomCenter => bounds.MidX - size.Width / 2f,
+            ContentAlignment.TopRight or ContentAlignment.MiddleRight or ContentAlignment.BottomRight => bounds.Right - size.Width,
+            _ => bounds.Left
+        };
+        var y = child.AbsoluteAlignment switch
+        {
+            ContentAlignment.MiddleLeft or ContentAlignment.MiddleCenter or ContentAlignment.MiddleRight => bounds.MidY - size.Height / 2f,
+            ContentAlignment.BottomLeft or ContentAlignment.BottomCenter or ContentAlignment.BottomRight => bounds.Bottom - size.Height,
+            _ => bounds.Top
+        };
+
+        return SKRect.Create(
+            MathF.Round(x + child.Location.X),
+            MathF.Round(y + child.Location.Y),
+            size.Width,
+            size.Height);
     }
 
     internal virtual void OnControlAdded(ElementEventArgs e)

@@ -10,7 +10,7 @@ public abstract partial class ElementBase
     PropertyStore IArrangedElement.Properties => _properties ??= new PropertyStore();
     private PropertyStore? _properties;
 
-    protected virtual bool ParticipatesInParentLayout => Visible;
+    protected virtual bool ParticipatesInParentLayout => Visible && PositionMode != ElementPositionMode.Absolute;
 
     #region IArrangedElement Explicit Implementation
 
