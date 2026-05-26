@@ -558,8 +558,45 @@ public partial class Window : WindowBase
         if (_tabView == null)
             return;
 
+        CloseFloatingOverlays();
         _tabView.HandleTitleBarSelectionChanged(previousIndex);
         Invalidate();
+    }
+
+    internal void CloseFloatingOverlays()
+    {
+        CloseFloatingOverlays(this);
+    }
+
+    private static void CloseFloatingOverlays(ElementBase owner)
+    {
+        for (var i = owner.Controls.Count - 1; i >= 0; i--)
+        {
+            if (owner.Controls[i] is not ElementBase child)
+                continue;
+
+            switch (child)
+            {
+                case ComboBox { DroppedDown: true } comboBox:
+                    comboBox.HideDropDown();
+                    break;
+                case DatePicker { DroppedDown: true } datePicker:
+                    datePicker.HideDropDown();
+                    break;
+                case TimePicker { DroppedDown: true } timePicker:
+                    timePicker.HideDropDown();
+                    break;
+                case ContextMenuStrip { IsOpen: true } menu:
+                    menu.Hide();
+                    break;
+                default:
+                    if (child.IsFloatingOverlay && child.Visible)
+                        child.Visible = false;
+                    break;
+            }
+
+            CloseFloatingOverlays(child);
+        }
     }
 
     private void HandleTabViewStructureChanged(object sender, ElementEventArgs e)
@@ -1010,7 +1047,7 @@ public partial class Window : WindowBase
             return notificationTray.ParticipatesInHitTesting;
 
         // Floating popups must remain hit-testable even when they overlap the custom title area.
-        if (element is ContextMenuStrip contextMenu && contextMenu.Visible)
+        if (element.IsFloatingOverlay || element is ContextMenuStrip { Visible: true })
             return true;
 
         if (IsHostedTitleBarElement(element))
@@ -1042,9 +1079,36 @@ public partial class Window : WindowBase
         return popup;
     }
 
-    private bool TryRouteMouseEventToOpenPopup(MouseEventArgs e, Action<ContextMenuStrip, MouseEventArgs> route)
+    private ElementBase? FindTopmostFloatingOverlay(SKPoint location)
     {
-        var popup = FindTopmostOpenPopup(e.Location);
+        ElementBase? popup = null;
+        var bestZOrder = int.MinValue;
+
+        for (var i = 0; i < Controls.Count; i++)
+        {
+            if (Controls[i] is not ElementBase element || !element.Visible)
+                continue;
+
+            var isOpenContextMenu = element is ContextMenuStrip contextMenu && contextMenu.IsOpen;
+            if (!element.IsFloatingOverlay && !isOpenContextMenu)
+                continue;
+
+            if (!GetWindowRelativeBounds(element).Contains(location))
+                continue;
+
+            if (popup == null || element.ZOrder > bestZOrder)
+            {
+                popup = element;
+                bestZOrder = element.ZOrder;
+            }
+        }
+
+        return popup;
+    }
+
+    private bool TryRouteMouseEventToFloatingOverlay(MouseEventArgs e, Action<ElementBase, MouseEventArgs> route)
+    {
+        var popup = FindTopmostFloatingOverlay(e.Location);
         if (popup == null)
             return false;
 
@@ -1061,25 +1125,6 @@ public partial class Window : WindowBase
         return true;
     }
 
-    private bool TryRouteMouseWheelToOpenPopup(MouseEventArgs e)
-    {
-        var popup = FindTopmostOpenPopup(e.Location);
-        if (popup == null)
-            return false;
-
-        var popupBounds = popup.Bounds;
-        var localEvent = new MouseEventArgs(
-            e.Button,
-            e.Clicks,
-            (int)(e.X - popupBounds.Left),
-            (int)(e.Y - popupBounds.Top),
-            e.Delta,
-            e.IsHorizontalWheel);
-
-        popup.OnMouseWheel(localEvent);
-        return true;
-    }
-
     protected internal override void OnMouseClick(MouseEventArgs e)
     {
         if (_suppressNextPopupClick)
@@ -1088,7 +1133,7 @@ public partial class Window : WindowBase
             return;
         }
 
-        if (TryRouteMouseEventToOpenPopup(e, static (popup, localEvent) => popup.OnMouseClick(localEvent)))
+        if (TryRouteMouseEventToFloatingOverlay(e, static (popup, localEvent) => popup.OnMouseClick(localEvent)))
             return;
 
         base.OnMouseClick(e);
@@ -1169,7 +1214,7 @@ public partial class Window : WindowBase
         if (CanFocus && !IsFocusWithinHitElement(FocusedElement, hitElement))
             Focus();
 
-        if (TryRouteMouseEventToOpenPopup(e, static (popup, localEvent) => popup.OnMouseDown(localEvent)))
+        if (TryRouteMouseEventToFloatingOverlay(e, static (popup, localEvent) => popup.OnMouseDown(localEvent)))
         {
             _popupMouseInteractionActive = true;
             return;
@@ -1239,7 +1284,7 @@ public partial class Window : WindowBase
 
     internal override void OnMouseDoubleClick(MouseEventArgs e)
     {
-        if (TryRouteMouseEventToOpenPopup(e, static (popup, localEvent) => popup.OnMouseDoubleClick(localEvent)))
+        if (TryRouteMouseEventToFloatingOverlay(e, static (popup, localEvent) => popup.OnMouseDoubleClick(localEvent)))
             return;
 
         // Title bar maximize gesture has priority � check before child hit-testing.
@@ -1279,12 +1324,12 @@ public partial class Window : WindowBase
             _popupMouseInteractionActive = false;
             _suppressNextPopupClick = true;
 
-            TryRouteMouseEventToOpenPopup(e, static (popup, localEvent) => popup.OnMouseUp(localEvent));
+            TryRouteMouseEventToFloatingOverlay(e, static (popup, localEvent) => popup.OnMouseUp(localEvent));
             return;
         }
 
         if (!_formMoveMouseDown && _mouseCapturedElement == null &&
-            TryRouteMouseEventToOpenPopup(e, static (popup, localEvent) => popup.OnMouseUp(localEvent)))
+            TryRouteMouseEventToFloatingOverlay(e, static (popup, localEvent) => popup.OnMouseUp(localEvent)))
             return;
 
         // If an element captured the mouse, forward the mouse up to it and release capture if left button
@@ -1369,7 +1414,7 @@ public partial class Window : WindowBase
         var screenCursor = CursorScreenPosition;
 
         if (!_formMoveMouseDown && _mouseCapturedElement == null && 
-            TryRouteMouseEventToOpenPopup(e, static (popup, localEvent) => popup.OnMouseMove(localEvent)))
+            TryRouteMouseEventToFloatingOverlay(e, static (popup, localEvent) => popup.OnMouseMove(localEvent)))
             return;
 
         if (!_formMoveMouseDown && UsesTitleBarTabs && _tabView != null && 
@@ -1500,14 +1545,14 @@ public partial class Window : WindowBase
 
     internal override void OnMouseWheel(MouseEventArgs e)
     {
-        if (TryRouteMouseWheelToOpenPopup(e))
-            return;
+        CloseFloatingOverlays();
 
         base.OnMouseWheel(e);
 
         var mousePos = e.Location;
 
-        if (PropagateMouseWheel(Controls, mousePos, e))
+        var handled = PropagateMouseWheel(Controls, mousePos, e);
+        if (handled)
             return;
     }
 

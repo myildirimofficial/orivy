@@ -15,6 +15,9 @@ public class Button : ElementBase
     private readonly AnimationManager _dropDownChevronAnimation;
     private readonly SKPaint _dropDownTextPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _dropDownChevronPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round };
+    private readonly SKPaint _dropDownDividerPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round };
+    private readonly SKPaint _badgeFillPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _badgeTextPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPath _dropDownChevronPath = new();
 
     public Button()
@@ -108,6 +111,22 @@ public class Button : ElementBase
     [DefaultValue(true)]
     public bool OpenDropDownOnClick { get; set; } = true;
 
+    [DefaultValue(true)]
+    public bool SplitDropDownButton { get; set; } = true;
+
+    [DefaultValue(true)]
+    public bool ShowDropDownDivider { get; set; } = true;
+
+    [DefaultValue("")]
+    public string BadgeText { get; set; } = string.Empty;
+
+    public SKColor BadgeBackColor { get; set; } = SKColor.Empty;
+
+    public SKColor BadgeForeColor { get; set; } = SKColor.Empty;
+
+    [DefaultValue(typeof(ContentAlignment), nameof(ContentAlignment.TopRight))]
+    public ContentAlignment BadgeAlign { get; set; } = ContentAlignment.TopRight;
+
     public ContextMenuStrip? DropDownMenu
     {
         get => _dropDownMenu;
@@ -138,7 +157,7 @@ public class Button : ElementBase
 
         base.OnClick(e);
 
-        if (OpenDropDownOnClick)
+        if (OpenDropDownOnClick && !UseSplitDropDownHitTest)
             ShowDropDown();
     }
 
@@ -215,7 +234,10 @@ public class Button : ElementBase
         base.OnPaint(canvas);
 
         if (!ShouldDrawDropDownGlyph)
+        {
+            DrawBadge(canvas);
             return;
+        }
 
         var content = DisplayRectangle;
         var chevronWidth = GetDropDownGlyphWidth();
@@ -231,7 +253,26 @@ public class Button : ElementBase
             content.Bottom);
 
         DrawDropDownButtonText(canvas, textRect);
+        DrawDropDownDivider(canvas, chevronRect);
         DrawDropDownChevron(canvas, chevronRect);
+        DrawBadge(canvas);
+    }
+
+    protected internal override void OnMouseClick(MouseEventArgs e)
+    {
+        if (UseSplitDropDownHitTest && e.Button == MouseButtons.Left && GetDropDownChevronRect().Contains(e.Location))
+        {
+            ShowDropDown();
+            e.Handled = true;
+            return;
+        }
+
+        base.OnMouseClick(e);
+    }
+
+    internal override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
     }
 
     internal override void OnKeyDown(KeyEventArgs e)
@@ -282,6 +323,9 @@ public class Button : ElementBase
             _dropDownChevronAnimation.Dispose();
             _dropDownTextPaint.Dispose();
             _dropDownChevronPaint.Dispose();
+            _dropDownDividerPaint.Dispose();
+            _badgeFillPaint.Dispose();
+            _badgeTextPaint.Dispose();
             _dropDownChevronPath.Dispose();
         }
 
@@ -290,7 +334,28 @@ public class Button : ElementBase
 
     private bool ShouldDrawDropDownGlyph => ShowDropDownArrow || DropDownMenu != null;
 
-    private float GetDropDownGlyphWidth() => ShouldDrawDropDownGlyph ? Math.Max(18f, 22f * ScaleFactor) : 0f;
+    private float GetDropDownGlyphWidth()
+    {
+        if (!ShouldDrawDropDownGlyph)
+            return 0f;
+
+        return UseSplitDropDownHitTest || ShowDropDownDivider
+            ? Math.Max(32f, 34f * ScaleFactor)
+            : Math.Max(18f, 22f * ScaleFactor);
+    }
+
+    private bool UseSplitDropDownHitTest => SplitDropDownButton && ShouldDrawDropDownGlyph && DropDownMenu != null;
+
+    private SKRect GetDropDownChevronRect()
+    {
+        var content = DisplayRectangle;
+        var chevronWidth = GetDropDownGlyphWidth();
+        return new SKRect(
+            Math.Max(content.Left, content.Right - chevronWidth),
+            content.Top,
+            content.Right,
+            content.Bottom);
+    }
 
     private void DrawDropDownButtonText(SKCanvas canvas, SKRect textRect)
     {
@@ -324,6 +389,71 @@ public class Button : ElementBase
         canvas.RotateDegrees(rotation, centerX, centerY);
         canvas.DrawPath(_dropDownChevronPath, _dropDownChevronPaint);
         canvas.RestoreToCount(save);
+    }
+
+    private void DrawDropDownDivider(SKCanvas canvas, SKRect chevronRect)
+    {
+        if (!ShowDropDownDivider || chevronRect.Width <= 0f || chevronRect.Height <= 0f)
+            return;
+
+        var x = MathF.Round(chevronRect.Left) + 0.5f;
+        var inset = Math.Max(7f, 8f * ScaleFactor);
+        _dropDownDividerPaint.Color = ForeColor.WithAlpha((byte)Math.Clamp(ForeColor.Alpha * 0.32f, 72f, 150f));
+        _dropDownDividerPaint.StrokeWidth = Math.Max(1f, ScaleFactor);
+        canvas.DrawLine(x, chevronRect.Top + inset, x, chevronRect.Bottom - inset, _dropDownDividerPaint);
+    }
+
+    private void DrawBadge(SKCanvas canvas)
+    {
+        if (string.IsNullOrWhiteSpace(BadgeText))
+            return;
+
+        var content = ClientRectangle;
+        if (content.Width <= 0f || content.Height <= 0f)
+            return;
+
+        using var font = CreateRenderFont(Font);
+        var badgeFont = new SKFont(font.Typeface, Math.Max(8.5f, font.Size * 0.66f)) { Embolden = true };
+        var textWidth = badgeFont.MeasureText(BadgeText);
+        var height = MathF.Round(Math.Max(14f, 15f * ScaleFactor));
+        var width = MathF.Round(Math.Max(height, textWidth + 8f * ScaleFactor));
+        var edgeInset = MathF.Round(Math.Max(2f, 3f * ScaleFactor));
+        var sideInset = MathF.Round(Math.Max(3f, 4f * ScaleFactor));
+
+        var x = BadgeAlign switch
+        {
+            ContentAlignment.TopLeft or ContentAlignment.MiddleLeft or ContentAlignment.BottomLeft => content.Left + sideInset,
+            ContentAlignment.TopCenter or ContentAlignment.MiddleCenter or ContentAlignment.BottomCenter => content.MidX - width / 2f,
+            _ => content.Right - width - sideInset
+        };
+        var y = BadgeAlign switch
+        {
+            ContentAlignment.BottomLeft or ContentAlignment.BottomCenter or ContentAlignment.BottomRight => content.Bottom - height - edgeInset,
+            ContentAlignment.MiddleLeft or ContentAlignment.MiddleCenter or ContentAlignment.MiddleRight => content.MidY - height / 2f,
+            _ => content.Top + edgeInset
+        };
+
+        var rect = SKRect.Create(MathF.Round(x), MathF.Round(y), width, height);
+        var backColor = BadgeBackColor == SKColor.Empty ? ColorScheme.Primary : BadgeBackColor;
+        var foreColor = BadgeForeColor == SKColor.Empty ? SKColors.White : BadgeForeColor;
+        _badgeFillPaint.Color = backColor;
+        canvas.DrawRoundRect(rect, height / 2f, height / 2f, _badgeFillPaint);
+
+        using var outline = new SKPaint
+        {
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = Math.Max(1.25f, 1.5f * ScaleFactor),
+            Color = ColorScheme.Surface.WithAlpha(230)
+        };
+        canvas.DrawRoundRect(rect, height / 2f, height / 2f, outline);
+
+        _badgeTextPaint.Color = foreColor;
+        var metrics = badgeFont.Metrics;
+        var textX = rect.MidX - textWidth / 2f;
+        var textY = rect.MidY - (metrics.Ascent + metrics.Descent) / 2f;
+        canvas.DrawText(BadgeText, textX, textY, SKTextAlign.Left, badgeFont, _badgeTextPaint);
+        badgeFont.Dispose();
     }
 
     private void StartDropDownChevronAnimation(bool opening)

@@ -226,7 +226,7 @@ internal sealed partial class ModernControlsDemoPage
         AddCardContent(progressCard, segmentedProgress);
         AddCardContent(progressCard, linearProgress);
 
-        var inputCard = CreateCard("TrackBar and NumericUpDown", "NumericUpDown supports prefix/suffix formatting, wrapping, button visibility and animated value changes.");
+        var inputCard = CreateCard("Input controls", "NumericUpDown, DatePicker and TimePicker share compact field styling and controlled popup APIs.");
         progressTrack = new TrackBar
         {
             Name = "modernProgressTrack",
@@ -334,10 +334,33 @@ internal sealed partial class ModernControlsDemoPage
         advancedInputRow.Controls.Add(decimalNumeric);
         var editInputRow = CreateRow(48);
         editInputRow.Controls.Add(editableNumeric);
+        var pickerRow = CreateRow(48);
+        pickerRow.Controls.Add(new DatePicker
+        {
+            Name = "modernDatePicker",
+            Location = new SKPoint(0, 0),
+            Size = new SKSize(250, 38),
+            Value = DateTime.Today.AddDays(3).AddHours(9).AddMinutes(30),
+            ShowTimePicker = true,
+            DateTimeFormat = "MMM d, yyyy HH:mm",
+            TextBoxMode = true,
+            ToolTipText = "DatePicker can show or hide the time picker and supports direct TextBox input."
+        });
+        pickerRow.Controls.Add(new TimePicker
+        {
+            Name = "modernTimePicker",
+            Location = new SKPoint(264, 0),
+            Size = new SKSize(150, 38),
+            Value = new TimeSpan(14, 30, 0),
+            MinuteStep = 5,
+            TextBoxMode = true,
+            ToolTipText = "TimePicker selects hours one by one, minutes by MinuteStep, and supports TextBox input."
+        });
         progressTrack.ValueChanged += (_, _) => SetProgress(progressTrack.Value);
         progressNumeric.ValueChanged += (_, _) => SetProgress((float)progressNumeric.Value);
         advanceButton.Click += (_, _) => AdvanceProgress(17f);
 
+        AddCardContent(inputCard, pickerRow);
         AddCardContent(inputCard, editInputRow);
         AddCardContent(inputCard, advancedInputRow);
         AddCardContent(inputCard, inputRow);
@@ -373,9 +396,71 @@ internal sealed partial class ModernControlsDemoPage
             Size = new SKSize(172, 38),
             DropDownMenu = dropdownMenu,
             ShowDropDownArrow = true,
-            ToolTipText = "Click to open the context menu. Shortcut keys are shown inside the popup."
+            SplitDropDownButton = true,
+            ToolTipText = "Main click runs the button action; the chevron opens the context menu."
         };
+        dropdownButton.Click += (_, _) => AdvanceProgress(5f);
         AddCardContent(dropdownCard, dropdownButton);
+
+        var disclosureCard = CreateCard("Navigation and disclosure", "Breadcrumb, subtle badges and animated disclosure controls.");
+        var breadcrumb = new Breadcrumb
+        {
+            Dock = DockStyle.Top,
+            Height = 36,
+            Margin = new(0, 0, 0, 12)
+        };
+        breadcrumb.SetItems("Settings", "System", "Display", "Advanced");
+
+        var badgeRow = CreateRow(42);
+        badgeRow.Controls.Add(new Badge
+        {
+            Text = "Preview",
+            Variant = BadgeVariant.Primary,
+            Location = new SKPoint(0, 8),
+            Size = new SKSize(72, 24)
+        });
+        badgeRow.Controls.Add(new Badge
+        {
+            Text = "Stable",
+            Variant = BadgeVariant.Success,
+            Location = new SKPoint(86, 8),
+            Size = new SKSize(68, 24)
+        });
+        badgeRow.Controls.Add(new Button
+        {
+            Text = "Inbox",
+            BadgeText = "12",
+            Location = new SKPoint(170, 2),
+            Size = new SKSize(116, 36),
+            BadgeAlign = ContentAlignment.MiddleRight,
+            BadgeBackColor = new SKColor(239, 68, 68),
+            BadgeForeColor = SKColors.White,
+            Shadow = BoxShadow.None,
+            Controls = {
+                new Badge
+                {
+                    Text = "24",
+                    Variant = BadgeVariant.Danger,
+                    Size = new SKSize(24, 24),
+                    Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                    //Location = new SKPoint(100, -4)
+                }
+            }
+        });
+
+        var accordion = new Accordion
+        {
+            Dock = DockStyle.Top,
+            Height = 190,
+            Gap = 0,
+            AllowMultipleExpanded = false
+        };
+        accordion.Controls.Add(CreateCollapseItem("Advanced display", "Brightness, HDR and scale settings live in a compact animated section.", true));
+        accordion.Controls.Add(CreateCollapseItem("Optional features", "Collapse keeps content hidden until the user asks for detail.", false));
+
+        AddCardContent(disclosureCard, accordion);
+        AddCardContent(disclosureCard, badgeRow);
+        AddCardContent(disclosureCard, breadcrumb);
 
         var tooltipCard = CreateCard("ToolTip", "Every ElementBase derived control can expose the same lightweight tooltip overlay.");
         var tooltipRow = CreateRow(52);
@@ -573,6 +658,7 @@ internal sealed partial class ModernControlsDemoPage
 
         Controls.Add(tooltipCard);
         Controls.Add(dropdownCard);
+        Controls.Add(disclosureCard);
         Controls.Add(separatorCard);
         Controls.Add(inputCard);
         Controls.Add(progressCard);
@@ -632,5 +718,28 @@ internal sealed partial class ModernControlsDemoPage
     private static void AddCardContent(Card card, ElementBase content)
     {
         card.AddContent(content);
+    }
+
+    private static Collapse CreateCollapseItem(string title, string body, bool expanded)
+    {
+        var collapse = new Collapse
+        {
+            HeaderText = title,
+            IsExpanded = expanded,
+            Height = expanded ? 92 : 54,
+            Margin = new(0, 0, 0, 8)
+        };
+        collapse.Controls.Add(new Element
+        {
+            Text = body,
+            Dock = DockStyle.Top,
+            Height = 38,
+            BackColor = SKColors.Transparent,
+            Border = new(0),
+            ForeColor = ColorScheme.ForeColor.WithAlpha(180),
+            TextAlign = ContentAlignment.MiddleLeft,
+            WrapMode = TextWrap.WordWrap
+        });
+        return collapse;
     }
 }

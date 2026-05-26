@@ -150,8 +150,8 @@ public class Card : Container
 
     public override void OnPaint(SKCanvas canvas)
     {
-        RenderHeader(canvas);
         base.OnPaint(canvas);
+        RenderHeader(canvas);
     }
 
     protected override SKRect GetBackgroundImageRenderBounds(SKRect elementBounds)
@@ -174,6 +174,18 @@ public class Card : Container
             return size;
 
         return new SKSize(size.Width, MathF.Ceiling(size.Height + headerHeight));
+    }
+
+    internal override void OnControlAdded(ElementEventArgs e)
+    {
+        base.OnControlAdded(e);
+        InvalidateMeasure();
+    }
+
+    internal override void OnControlRemoved(ElementEventArgs e)
+    {
+        base.OnControlRemoved(e);
+        InvalidateMeasure();
     }
 
     protected override void Dispose(bool disposing)

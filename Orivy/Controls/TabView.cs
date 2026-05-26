@@ -679,6 +679,8 @@ public partial class TabView : ElementBase
 
             var previousSelectedIndex = _selectedIndex;
             _selectedIndex = value;
+            if (ParentWindow is Window window)
+                window.CloseFloatingOverlays();
             EnsureSelectedVerticalTabVisible();
             StartTabSelectionAnimation(previousSelectedIndex, _selectedIndex);
             StartTitleBarSelectionAnimation(previousSelectedIndex, _selectedIndex);

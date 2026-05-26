@@ -1,4 +1,5 @@
 using Orivy.Collections;
+using Orivy.Animation;
 using Orivy.Layout;
 using System;
 using System.Collections.Generic;
@@ -20,6 +21,7 @@ public sealed class ButtonGroup<TValue> : Container
     private ContentAlignment _alignment = ContentAlignment.MiddleLeft;
     private Orientation _orientation = Orientation.Horizontal;
     private int _gap = 8;
+    private bool _applySelectionStyle = true;
 
     public ButtonGroup()
     {
@@ -35,6 +37,26 @@ public sealed class ButtonGroup<TValue> : Container
     }
 
     public bool AllowEmptySelection { get; set; }
+
+    public bool ApplySelectionStyle
+    {
+        get => _applySelectionStyle;
+        set
+        {
+            if (_applySelectionStyle == value)
+                return;
+
+            _applySelectionStyle = value;
+            ApplySelectionStyleToButtons(this);
+            Invalidate();
+        }
+    }
+
+    public SKColor SelectedBackColor { get; set; } = SKColor.Empty;
+
+    public SKColor SelectedForeColor { get; set; } = SKColor.Empty;
+
+    public SKColor SelectedBorderColor { get; set; } = SKColor.Empty;
 
     public ItemCollection<TValue> Items => _items;
 
@@ -58,6 +80,7 @@ public sealed class ButtonGroup<TValue> : Container
             {
                 if (TryGetButtonValue(_autoButtons[i], out var itemValue))
                     value?.Invoke(_autoButtons[i], itemValue);
+                ApplyButtonSelectionStyle(_autoButtons[i]);
             }
             PerformLayout();
             Invalidate();
@@ -85,6 +108,7 @@ public sealed class ButtonGroup<TValue> : Container
             var text = _labelSelector != null ? _labelSelector(item) : item?.ToString() ?? string.Empty;
             var button = new Button { Text = text, Tag = item! };
             _configureButton?.Invoke(button, item);
+            ApplyButtonSelectionStyle(button);
             _autoButtons.Add(button);
             Controls.Add(button);
         }
@@ -215,11 +239,13 @@ public sealed class ButtonGroup<TValue> : Container
 
     internal override void OnControlAdded(ElementEventArgs e)
     {
-        if (e.Element is Button button && !_autoButtons.Contains(button))
+        if (e.Element is Button incomingButton && !_autoButtons.Contains(incomingButton))
             throw new InvalidOperationException("Use SetItems() or ConfigureButton to manage ButtonGroup contents.");
 
         base.OnControlAdded(e);
         RegisterElement(e.Element as ElementBase);
+        if (e.Element is Button addedButton)
+            ApplyButtonSelectionStyle(addedButton);
         InvalidateMeasure();
         PerformLayout();
         Invalidate();
@@ -682,6 +708,59 @@ public sealed class ButtonGroup<TValue> : Container
                 last ? maxRadius : 0,
                 first ? maxRadius : 0,
                 last ? maxRadius : 0);
+    }
+
+    private void ApplySelectionStyleToButtons(ElementBase parent)
+    {
+        for (var i = 0; i < parent.Controls.Count; i++)
+        {
+            if (parent.Controls[i] is Button button)
+                ApplyButtonSelectionStyle(button);
+            else
+                ApplySelectionStyleToButtons(parent.Controls[i]);
+        }
+    }
+
+    private void ApplyButtonSelectionStyle(Button button)
+    {
+        if (!ApplySelectionStyle)
+            return;
+
+        var selectedBack = SelectedBackColor == SKColor.Empty ? ColorScheme.Primary : SelectedBackColor;
+        var selectedFore = SelectedForeColor == SKColor.Empty ? SKColors.White : SelectedForeColor;
+        var selectedBorder = SelectedBorderColor == SKColor.Empty ? selectedBack.Brightness(-0.16f) : SelectedBorderColor;
+
+        button.ConfigureVisualStyles(styles => styles
+            .DefaultTransition(TimeSpan.FromMilliseconds(120), AnimationType.CubicEaseOut)
+            .Base(rule => rule
+                .Background(ColorScheme.Surface)
+                .Foreground(ColorScheme.ForeColor)
+                .Border(1)
+                .BorderColor(ColorScheme.Outline.WithAlpha(120))
+                .Radius(10)
+                .Shadow(BoxShadow.None))
+            .OnHover(rule => rule
+                .Background(ColorScheme.SurfaceContainerHigh)
+                .BorderColor(ColorScheme.Primary.WithAlpha(118)))
+            .OnPressed(rule => rule
+                .Background(ColorScheme.Primary.WithAlpha(38))
+                .BorderColor(ColorScheme.Primary.WithAlpha(160))
+                .Scale(0.99f))
+            .OnChecked(rule => rule
+                .Background(selectedBack)
+                .Foreground(selectedFore)
+                .BorderColor(selectedBorder)
+                .Shadow(new BoxShadow(0f, 6f, 14f, 0, selectedBack.WithAlpha(30))))
+            .OnFocused(rule => rule
+                .Border(2)
+                .BorderColor(ColorScheme.Primary.WithAlpha(210)))
+            .OnDisabled(rule => rule
+                .Background(ColorScheme.SurfaceVariant)
+                .Foreground(ColorScheme.ForeColor.WithAlpha(150))
+                .BorderColor(ColorScheme.Outline.WithAlpha(80))
+                .Opacity(0.72f)
+                .Shadow(BoxShadow.None)),
+            clearExisting: true);
     }
 
     private static List<Button> GetDirectButtons(ElementBase parent)

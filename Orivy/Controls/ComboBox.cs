@@ -314,6 +314,10 @@ public class ComboBox : ElementBase
     public bool DroppedDown => _dropDown is { IsOpen: true, IsClosing: false };
 
     [Category("Behavior")]
+    [DefaultValue(1000000)]
+    public int DropDownZIndex { get; set; } = 1_000_000;
+
+    [Category("Behavior")]
     [DefaultValue(typeof(OpeningEffectType), nameof(OpeningEffectType.PopFade))]
     public OpeningEffectType DropDownOpeningEffect
     {
@@ -1232,6 +1236,11 @@ public class ComboBox : ElementBase
         Invalidate();
     }
 
+    internal void HideDropDown()
+    {
+        CloseDropDown();
+    }
+
     private void CloseDropDown()
     {
         if (!DroppedDown)
@@ -1669,6 +1678,8 @@ public class ComboBox : ElementBase
                 return;
 
             ShowAnchoredBelow(_owner, _owner.ClientRectangle);
+            ZOrder = Math.Max(ZOrder, _owner.DropDownZIndex);
+            _owner.ParentWindow?.InvalidateRenderTree();
         }
 
         protected override void Dispose(bool disposing)

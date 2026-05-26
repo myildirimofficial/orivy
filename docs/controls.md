@@ -16,6 +16,11 @@ Primary source files referenced in this document:
 - `Orivy/Controls/ElementBase.VisualStyles.cs`
 - `Orivy/Controls/ElementBase.MotionEffects.cs`
 - `Orivy/Controls/Button.cs`
+- `Orivy/Controls/ButtonGroup.cs`
+- `Orivy/Controls/Card.cs`
+- `Orivy/Controls/Breadcrumb.cs`
+- `Orivy/Controls/DatePicker.cs`
+- `Orivy/Controls/TimePicker.cs`
 - `Orivy/Controls/GridList.cs`
 - `Orivy/Controls/ComboBox.cs`
 - `Orivy/Controls/WindowBase.cs`
@@ -93,6 +98,22 @@ See `Orivy/Controls/ElementBase.cs` for exact dispatch code (`OnMouseDown`, `OnM
   - Supports toggle behavior through `CheckOnClick`, `Checked`, and `CheckedChanged`.
   - Configures default visual styles in the constructor, including the `OnChecked(...)` state.
   - `ButtonGroup<TValue>` is a `Container` that watches its child buttons, reads each button value from `Tag`, aligns buttons with `ContentAlignment`, supports horizontal/vertical `Orientation`, and keeps a single checked item for segmented/radio-like toolbars. Set `Gap = 0` for joined Bootstrap/Tailwind-style button groups.
+  - Split dropdown buttons use `DropDownMenu`, `ShowDropDownArrow`, and `SplitDropDownButton`. With split mode enabled, the main button area raises `Click`; the chevron area opens the context menu and is separated by a divider.
+
+- `DatePicker` and `TimePicker` (`Orivy/Controls/DatePicker.cs`, `Orivy/Controls/TimePicker.cs`)
+  - Compact field-style controls with theme-aware popup panels.
+  - Both expose `Value`, `Format`, `ValueChanged`, `DroppedDown`, `ShowDropDown()`, `HideDropDown()`, and `ToggleDropDown()`.
+  - Both support `TextBoxMode`; direct text edits first try exact `Format` / `DateTimeFormat` parsing, then fall back to `CultureInfo.CurrentCulture`.
+  - `DatePicker` adds `MinDate`, `MaxDate`, `ShowTimePicker`, `TimeFormat`, `DateTimeFormat`, `MinuteStep`, and a month grid popup with previous/next navigation.
+  - When `ShowTimePicker = true`, selecting a date keeps the popup open and the lower time section uses compact hour/minute steppers with hover and pressed feedback.
+  - `TimePicker` adds `MinuteStep` and `Use24HourClock`, and uses separate hour/minute selection groups. Hours are always selected one by one; `MinuteStep` only affects minute choices.
+  - Keyboard behavior: Enter/Space toggles the popup, Escape hides it. DatePicker arrow keys move by day/week; TimePicker arrow keys step by `MinuteStep`.
+
+- `Card`, `Badge`, `Breadcrumb`, `Accordion`, and `Collapse`
+  - `Card` is a theme-aware container with `Title`, `Description`, `HeaderGap`, optional image/media placement, and normal `Controls` composition.
+  - `Breadcrumb` is a `Container`; add any `ElementBase` child to `Controls` and it will arrange items with chevron separators. `SetItems(...)` is only a convenience helper.
+  - `Badge` provides small status labels and button badge support is available through `Button.BadgeText`.
+  - `Accordion` coordinates multiple `Collapse` items; `Collapse` provides a single animated disclosure region.
 
 - `GridList` (`Orivy/Controls/GridList.cs` + `GridList.Models.cs`)
   - Data-driven list with virtualization-friendly patterns. Consult `GridList` source for model binding and cell measurement points.

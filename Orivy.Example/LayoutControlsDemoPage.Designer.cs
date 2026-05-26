@@ -36,7 +36,6 @@ internal sealed partial class LayoutControlsDemoPage
 
         var details = new Element
         {
-            Text = "Node details\nSelect items from the tree. This panel is a normal Element hosted inside Panel2.",
             Dock = DockStyle.Fill,
             Padding = new(18),
             Radius = new(12),
@@ -46,10 +45,50 @@ internal sealed partial class LayoutControlsDemoPage
             ForeColor = ColorScheme.ForeColor,
             TextAlign = ContentAlignment.MiddleLeft
         };
+        var detailsTitle = new Element
+        {
+            Text = "Node details",
+            Dock = DockStyle.Top,
+            Height = 34,
+            BackColor = SKColors.Transparent,
+            Border = new(0),
+            ForeColor = ColorScheme.ForeColor,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font = new SKFont(SKTypeface.Default, 15) { Embolden = true }
+        };
+        var detailsBody = new Element
+        {
+            Text = "Select a tree item to update this preview area.",
+            Dock = DockStyle.Top,
+            Height = 48,
+            BackColor = SKColors.Transparent,
+            Border = new(0),
+            ForeColor = ColorScheme.ForeColor.WithAlpha(165),
+            TextAlign = ContentAlignment.MiddleLeft,
+            WrapMode = TextWrap.WordWrap
+        };
+        var detailsStatus = new Element
+        {
+            Text = "Selected: Workspace",
+            Dock = DockStyle.Top,
+            Height = 38,
+            Margin = new(0, 10, 0, 0),
+            Padding = new(12, 0, 12, 0),
+            Radius = new(9),
+            Border = new(1),
+            BorderColor = ColorScheme.Primary.WithAlpha(80),
+            BackColor = ColorScheme.Primary.WithAlpha(20),
+            ForeColor = ColorScheme.ForeColor,
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        details.Controls.Add(detailsStatus);
+        details.Controls.Add(detailsBody);
+        details.Controls.Add(detailsTitle);
         tree.SelectedNodeChanged += (_, _) =>
         {
             var selected = tree.SelectedNode?.Text ?? "None";
-            details.Text = $"Node details\nSelected: {selected}";
+            detailsStatus.Text = $"Selected: {selected}";
+            detailsStatus.Invalidate();
         };
         split.Panel2.Controls.Add(details);
         AddCardContent(splitCard, split);

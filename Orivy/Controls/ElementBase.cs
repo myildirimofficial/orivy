@@ -1993,9 +1993,12 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         return control is ScrollBar;
     }
 
+    protected internal virtual bool IsFloatingOverlay => false;
+
     private static bool IsFloatingPopup(ElementBase control)
     {
-        return (control is ContextMenuStrip contextMenu && contextMenu.Visible && contextMenu.IsOpen)
+        return control.IsFloatingOverlay
+            || (control is ContextMenuStrip contextMenu && contextMenu.Visible && contextMenu.IsOpen)
             || (control is NotificationTray tray && tray.Visible);
     }
 

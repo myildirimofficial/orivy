@@ -105,14 +105,6 @@ internal sealed partial class EmbeddedTabsDemoPage
             Alignment   = ContentAlignment.MiddleCenter,
             Orientation = Orientation.Horizontal,
             Gap         = 0,
-            ConfigureButton = (btn, _) =>
-            {
-                //btn.Width  = 88;
-                //btn.Height = 36;
-                //btn.Margin = new Thickness(0, 0, 8, 0);
-                //btn.Radius = new Radius(8);
-                ApplyToolButtonVisualStyles(btn);
-            }
         };
 
         var customStyleLabel = new Element
@@ -132,11 +124,7 @@ internal sealed partial class EmbeddedTabsDemoPage
             Margin              = new Thickness(0, 0, 0, 12),
             Alignment           = ContentAlignment.MiddleLeft,
             AllowEmptySelection = true,
-            Gap = 0,
-            ConfigureButton     = (btn, _) =>
-            {
-                ApplyToolButtonVisualStyles(btn);
-            }
+            Gap = 0
         };
 
         // Row 2 label
@@ -161,10 +149,6 @@ internal sealed partial class EmbeddedTabsDemoPage
             Alignment       = ContentAlignment.MiddleLeft,
             BackColor       = SKColors.Transparent,
             Border          = new Thickness(0),
-            ConfigureButton = (btn, _) =>
-            {
-                ApplyToolButtonVisualStyles(btn);
-            }
         };
 
         var layoutLabel = new Element
@@ -186,11 +170,7 @@ internal sealed partial class EmbeddedTabsDemoPage
             Margin          = new Thickness(0, 0, 0, 10),
             Alignment       = ContentAlignment.MiddleLeft,
             BackColor       = SKColors.Transparent,
-            Border          = new Thickness(0),
-            ConfigureButton = (btn, _) =>
-            {
-                ApplyToolButtonVisualStyles(btn);
-            }
+            Border          = new Thickness(0)
         };
 
         // Row 4 label
@@ -217,7 +197,6 @@ internal sealed partial class EmbeddedTabsDemoPage
             ConfigureButton = (btn, val) =>
             {
                 btn.Text   = SplitPascalCase(val.ToString());
-                ApplyToolButtonVisualStyles(btn);
             }
         };
 
@@ -247,7 +226,6 @@ internal sealed partial class EmbeddedTabsDemoPage
             ConfigureButton = (btn, val) =>
             {
                 btn.Text   = SplitPascalCase(val.ToString());
-                ApplyToolButtonVisualStyles(btn);
             }
         };
 
@@ -261,35 +239,6 @@ internal sealed partial class EmbeddedTabsDemoPage
                 sb.Append(s[i]);
             }
             return sb.ToString();
-        }
-
-        static void ApplyToolButtonVisualStyles(Button button)
-        {
-            button.ConfigureVisualStyles(styles => styles
-                .DefaultTransition(TimeSpan.FromMilliseconds(110), AnimationType.CubicEaseOut)
-                .Base(rule => rule
-                    .Background(ColorScheme.Surface)
-                    .Foreground(ColorScheme.ForeColor)
-                    .Border(1)
-                    .BorderColor(ColorScheme.Outline.WithAlpha(100))
-                    .Radius(8)
-                    .Shadow(BoxShadow.None))
-                .OnHover(rule => rule
-                    .Background(ColorScheme.SurfaceContainerHigh)
-                    .BorderColor(ColorScheme.Primary.WithAlpha(80)))
-                .OnChecked(rule => rule
-                    .Background(ColorScheme.Primary)
-                    .Foreground(SKColors.White)
-                    .BorderColor(ColorScheme.Primary)
-                    .Shadow(new BoxShadow(0f, 4f, 10f, 0, ColorScheme.Primary.WithAlpha(24))))
-                .OnPressed(rule => rule
-                    .Background(ColorScheme.Primary.Brightness(-0.08f))
-                    .Foreground(SKColors.White)
-                    .BorderColor(ColorScheme.Primary.Brightness(-0.12f))
-                    .Opacity(0.96f))
-                .OnFocused(rule => rule
-                    .BorderColor(ColorScheme.Primary.Brightness(0.16f))),
-                clearExisting: true);
         }
 
         embeddedModeButtons.SetItems(new[]

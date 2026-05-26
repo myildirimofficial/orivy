@@ -791,6 +791,7 @@ public class NumericUpDown : ElementBase
         };
         textBox.ClearVisualStyles();
         textBox.AutoSize = false;
+        textBox.Shadow = BoxShadow.None;
         textBox.MinimumSize = new SKSize(0, 0);
         textBox.Border = new Thickness(0);
         textBox.Radius = new Radius(0);
