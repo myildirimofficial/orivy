@@ -70,7 +70,16 @@ public class RadioButton : ElementBase
     public string GroupName
     {
         get => _groupName;
-        set => _groupName = value ?? string.Empty;
+        set
+        {
+            var normalized = value ?? string.Empty;
+            if (_groupName == normalized)
+                return;
+
+            _groupName = normalized;
+            if (Checked)
+                SynchronizeRadioGroup();
+        }
     }
 
     [DefaultValue(typeof(ContentAlignment), nameof(ContentAlignment.MiddleLeft))]
@@ -233,12 +242,24 @@ public class RadioButton : ElementBase
         _synchronizingGroup = true;
         try
         {
-            SynchronizeRadioGroup(Parent);
+            SynchronizeRadioGroup(GetRadioGroupRoot());
         }
         finally
         {
             _synchronizingGroup = false;
         }
+    }
+
+    private ElementBase GetRadioGroupRoot()
+    {
+        if (string.IsNullOrEmpty(GroupName))
+            return Parent!;
+
+        var root = Parent!;
+        while (root.Parent is ElementBase parent)
+            root = parent;
+
+        return root;
     }
 
     private void SynchronizeRadioGroup(ElementBase parent)

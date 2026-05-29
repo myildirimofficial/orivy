@@ -112,7 +112,7 @@ See `Orivy/Controls/ElementBase.cs` for exact dispatch code (`OnMouseDown`, `OnM
 - `Card`, `Badge`, `Breadcrumb`, `Accordion`, and `Collapse`
   - `Card` is a theme-aware container with `Title`, `Description`, `HeaderGap`, optional image/media placement, and normal `Controls` composition.
   - `Breadcrumb` is a `Container`; add any `ElementBase` child to `Controls` and it will arrange items with chevron separators. `SetItems(...)` is only a convenience helper.
-  - `Badge` provides small status labels. To place a badge on a button, add it to `button.Controls` with `PositionMode = ElementPositionMode.Absolute`, choose `AbsoluteAlignment`, and use `Location` as the alignment offset. Absolute children stay out of normal flow, but their visual bounds are included in preferred-size calculations so auto-sized parents do not cut overlays.
+  - `Badge` provides small status labels. To place a badge on a button, add it to `button.Controls`, use `Anchor` for the reference edge, and use `Location` for the offset. Negative or overflowing child bounds are included in visual overflow calculations so auto-sized parents do not cut overlays.
   - `Accordion` coordinates multiple `Collapse` items; `Collapse` provides a single animated disclosure region.
 
 - `GridList` (`Orivy/Controls/GridList.cs` + `GridList.Models.cs`)

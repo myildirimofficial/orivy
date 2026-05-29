@@ -12,12 +12,6 @@ using System.Runtime.InteropServices;
 
 namespace Orivy.Controls;
 
-public enum ElementPositionMode
-{
-    Normal,
-    Absolute
-}
-
 public abstract partial class ElementBase : IElement, IArrangedElement, IDisposable
 {
     private static int s_globalLayoutPassId;
@@ -813,10 +807,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     #region Properties
 
     private SKPoint _location;
-    private SKPoint _absoluteArrangedLocation;
-    private bool _hasAbsoluteArrangedLocation;
-    private ElementPositionMode _positionMode;
-    private ContentAlignment _absoluteAlignment = ContentAlignment.TopLeft;
+    private SKPoint _renderLocationOverride;
+    private bool _hasRenderLocationOverride;
 
     public virtual SKPoint Location
     {
@@ -828,43 +820,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
             _location = value;
 
-            if (PositionMode == ElementPositionMode.Absolute)
-                Parent?.PerformLayout(this, nameof(Location));
+            Parent?.PerformLayout(this, nameof(Location));
 
             OnLocationChanged(EventArgs.Empty);
-        }
-    }
-
-    [DefaultValue(ElementPositionMode.Normal)]
-    public virtual ElementPositionMode PositionMode
-    {
-        get => _positionMode;
-        set
-        {
-            if (_positionMode == value)
-                return;
-
-            _positionMode = value;
-            if (_positionMode != ElementPositionMode.Absolute)
-                _hasAbsoluteArrangedLocation = false;
-
-            Parent?.PerformLayout(this, nameof(PositionMode));
-            Parent?.Invalidate();
-        }
-    }
-
-    [DefaultValue(typeof(ContentAlignment), nameof(ContentAlignment.TopLeft))]
-    public virtual ContentAlignment AbsoluteAlignment
-    {
-        get => _absoluteAlignment;
-        set
-        {
-            if (_absoluteAlignment == value)
-                return;
-
-            _absoluteAlignment = value;
-            Parent?.PerformLayout(this, nameof(AbsoluteAlignment));
-            Parent?.Invalidate();
         }
     }
 
@@ -2064,6 +2022,18 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         return parent.UseAutoScrollTranslation && parent.AutoScroll && !IsScrollBar(child) && !IsFloatingPopup(child);
     }
 
+    private static bool UsesAnchorOverflowLayout(ElementBase element)
+    {
+        var anchor = element.Anchor;
+        return element.Dock == DockStyle.None &&
+               (((anchor & AnchorStyles.Right) == AnchorStyles.Right &&
+                 (anchor & AnchorStyles.Left) != AnchorStyles.Left &&
+                 element.Location.X < 0f) ||
+                ((anchor & AnchorStyles.Bottom) == AnchorStyles.Bottom &&
+                 (anchor & AnchorStyles.Top) != AnchorStyles.Top &&
+                 element.Location.Y < 0f));
+    }
+
     private static SKPoint GetRenderedChildLocation(ElementBase parent, ElementBase child)
     {
         var location = child.GetRenderLocation();
@@ -2077,8 +2047,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private SKPoint GetRenderLocation()
     {
-        return PositionMode == ElementPositionMode.Absolute && _hasAbsoluteArrangedLocation
-            ? _absoluteArrangedLocation
+        return _hasRenderLocationOverride
+            ? _renderLocationOverride
             : Location;
     }
 
@@ -2089,7 +2059,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     private readonly List<ElementBase> _renderNormalChildren = new();
     private readonly List<ElementBase> _renderScrollBarChildren = new();
     private readonly List<ElementBase> _renderFloatingChildren = new();
-    private readonly List<ElementBase> _renderAbsoluteChildren = new();
+    private readonly List<ElementBase> _renderOverflowChildren = new();
 
     private static int CompareChildRenderOrder(ElementBase a, ElementBase b)
     {
@@ -2495,10 +2465,21 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     protected void RenderChildren(SKCanvas canvas)
     {
-        RenderChildren(canvas, includeFlowChildren: true, includeAbsoluteChildren: true);
+        RenderChildren(canvas, ChildRenderKind.Normal);
     }
 
-    private void RenderChildren(SKCanvas canvas, bool includeFlowChildren, bool includeAbsoluteChildren)
+    private void RenderOverflowChildren(SKCanvas canvas)
+    {
+        RenderChildren(canvas, ChildRenderKind.OverflowOnly);
+    }
+
+    private enum ChildRenderKind
+    {
+        Normal,
+        OverflowOnly
+    }
+
+    private void RenderChildren(SKCanvas canvas, ChildRenderKind renderKind)
     {
         EnsureChildRenderBuffer();
 
@@ -2532,22 +2513,30 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         _renderNormalChildren.Clear();
         _renderScrollBarChildren.Clear();
         _renderFloatingChildren.Clear();
-        _renderAbsoluteChildren.Clear();
+        _renderOverflowChildren.Clear();
         for (var i = 0; i < _childRenderBuffer.Count; i++)
         {
             var child = _childRenderBuffer[i];
             if (!IsRenderableChild(child))
                 continue;
-            if (child.PositionMode == ElementPositionMode.Absolute)
+
+            var isOverflowChild = UsesAnchorOverflowLayout(child);
+            if (isOverflowChild)
             {
-                if (includeAbsoluteChildren)
-                    _renderAbsoluteChildren.Add(child);
+                if (renderKind == ChildRenderKind.OverflowOnly && IntersectsViewport(child, viewport))
+                    _renderOverflowChildren.Add(child);
+
+                continue;
             }
-            else if (IsScrollBar(child))
+
+            if (renderKind == ChildRenderKind.OverflowOnly)
+                continue;
+
+            if (IsScrollBar(child))
                 _renderScrollBarChildren.Add(child);
             else if (IsFloatingPopup(child))
                 _renderFloatingChildren.Add(child);
-            else if (includeFlowChildren && IntersectsViewport(child, viewport))
+            else if (IntersectsViewport(child, viewport))
                 _renderNormalChildren.Add(child);
         }
 
@@ -2573,8 +2562,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         for (var i = 0; i < _renderFloatingChildren.Count; i++)
             _renderFloatingChildren[i].Render(canvas);
 
-        for (var i = 0; i < _renderAbsoluteChildren.Count; i++)
-            _renderAbsoluteChildren[i].Render(canvas);
+        for (var i = 0; i < _renderOverflowChildren.Count; i++)
+            _renderOverflowChildren[i].Render(canvas);
+
     }
 
     public void Render(SKCanvas targetCanvas)
@@ -2727,14 +2717,13 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             targetCanvas.ClipRect(GetChildrenClipBounds(elementRect));
             customRenderedChildren = TryRenderChildContent(targetCanvas);
             if (!customRenderedChildren)
-                RenderChildren(targetCanvas, includeFlowChildren: true, includeAbsoluteChildren: false);
+                RenderChildren(targetCanvas);
             targetCanvas.RestoreToCount(childClipSaveCount);
 
             if (shapeClipSaveCount >= 0)
                 targetCanvas.RestoreToCount(shapeClipSaveCount);
 
-            if (!customRenderedChildren)
-                RenderChildren(targetCanvas, includeFlowChildren: false, includeAbsoluteChildren: true);
+            RenderOverflowChildren(targetCanvas);
 
             if (layerSaveCount >= 0)
                 targetCanvas.RestoreToCount(layerSaveCount);
@@ -3378,17 +3367,17 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         _lastMeasureConstraint = availableSize;
         _layoutPassId = s_globalLayoutPassId;
 
-        return IncludeAbsoluteChildrenInPreferredSize(desiredSize);
+        return IncludeChildVisualOverflowInPreferredSize(desiredSize);
     }
 
-    private SKSize IncludeAbsoluteChildrenInPreferredSize(SKSize desiredSize)
+    private SKSize IncludeChildVisualOverflowInPreferredSize(SKSize desiredSize)
     {
         if (Controls.Count == 0)
             return desiredSize;
 
         var desiredWidth = desiredSize.Width;
         var desiredHeight = desiredSize.Height;
-        var overflow = MeasureAbsoluteChildrenOverflow(SKRect.Create(0, 0, Math.Max(1f, desiredWidth), Math.Max(1f, desiredHeight)));
+        var overflow = MeasureChildVisualOverflow(SKRect.Create(0, 0, Math.Max(1f, desiredWidth), Math.Max(1f, desiredHeight)));
 
         return new SKSize(
             MathF.Ceiling(desiredWidth + overflow.Left + overflow.Right),
@@ -4730,7 +4719,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     {
         Layout?.Invoke(this, e);
         Orivy.Layout.DefaultLayout.Instance.Layout(this, e);
-        PositionAbsoluteChildren();
+        ResolveChildOverflowLocations();
 
         if (AutoSize && Parent == null)
             AdjustSize();
@@ -4738,7 +4727,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         UpdateScrollBars();
     }
 
-    private void PositionAbsoluteChildren()
+    private void ResolveChildOverflowLocations()
     {
         if (Controls.Count == 0)
             return;
@@ -4747,20 +4736,60 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
         for (var i = 0; i < Controls.Count; i++)
         {
-            if (Controls[i] is not ElementBase child || !child.Visible || child.PositionMode != ElementPositionMode.Absolute)
+            if (Controls[i] is not ElementBase child)
                 continue;
 
-            var size = GetAbsoluteChildLayoutSize(child);
-            var childBounds = GetAbsoluteChildBounds(bounds, child, size);
-            child._absoluteArrangedLocation = childBounds.Location;
-            child._hasAbsoluteArrangedLocation = true;
-
-            if (child.Size != childBounds.Size)
-                child.Size = childBounds.Size;
+            EnsureChildOverflowLayoutSize(child);
+            child._hasRenderLocationOverride = TryResolveAnchoredOverflowLocation(bounds, child, out child._renderLocationOverride);
         }
     }
 
-    private Thickness MeasureAbsoluteChildrenOverflow(SKRect bounds)
+    private static void EnsureChildOverflowLayoutSize(ElementBase child)
+    {
+        if (!UsesAnchorOverflowLayout(child) || !child.AutoSize)
+            return;
+
+        var preferred = child.GetPreferredSize(SKSize.Empty);
+        if (preferred.Width <= 0f || preferred.Height <= 0f)
+            return;
+
+        if (child.Size != preferred)
+            child.Size = preferred;
+    }
+
+    private static bool TryResolveAnchoredOverflowLocation(SKRect bounds, ElementBase child, out SKPoint location)
+    {
+        location = GetChildOverflowLocation(bounds, child);
+        return child.Visible && location != child.Location;
+    }
+
+    private static SKPoint GetChildOverflowLocation(SKRect bounds, ElementBase child)
+    {
+        if (!child.Visible || !UsesAnchorOverflowLayout(child))
+            return child.GetRenderLocation();
+
+        var anchor = child.Anchor;
+        var location = child.Location;
+        var resolved = location;
+
+        if ((anchor & AnchorStyles.Right) == AnchorStyles.Right &&
+            (anchor & AnchorStyles.Left) != AnchorStyles.Left &&
+            location.X < 0f)
+        {
+            resolved.X = bounds.Right - child.Width - location.X;
+        }
+
+        if ((anchor & AnchorStyles.Bottom) == AnchorStyles.Bottom &&
+            (anchor & AnchorStyles.Top) != AnchorStyles.Top &&
+            location.Y < 0f)
+        {
+            resolved.Y = bounds.Bottom - child.Height - location.Y;
+        }
+
+        return resolved;
+    }
+
+    private Thickness MeasureChildVisualOverflow(SKRect bounds)
     {
         if (Controls.Count == 0)
             return Thickness.Empty;
@@ -4772,11 +4801,12 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
         for (var i = 0; i < Controls.Count; i++)
         {
-            if (Controls[i] is not ElementBase child || !child.Visible || child.PositionMode != ElementPositionMode.Absolute)
+            if (Controls[i] is not ElementBase child || !child.Visible)
                 continue;
 
-            var childSize = GetAbsoluteChildLayoutSize(child);
-            var childBounds = GetAbsoluteChildBounds(bounds, child, childSize);
+            var childBounds = child.GetLocalVisualBounds();
+            var childLocation = GetChildOverflowLocation(bounds, child);
+            childBounds.Offset(childLocation.X, childLocation.Y);
             left = MathF.Max(left, bounds.Left - childBounds.Left);
             top = MathF.Max(top, bounds.Top - childBounds.Top);
             right = MathF.Max(right, childBounds.Right - bounds.Right);
@@ -4788,40 +4818,6 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             (int)MathF.Ceiling(top),
             (int)MathF.Ceiling(right),
             (int)MathF.Ceiling(bottom));
-    }
-
-    private static SKSize GetAbsoluteChildLayoutSize(ElementBase child)
-    {
-        var size = child.Size;
-        if (!child.AutoSize && size.Width > 0f && size.Height > 0f)
-            return size;
-
-        var preferred = child.GetPreferredSize(new SKSize(short.MaxValue, short.MaxValue));
-        return new SKSize(
-            MathF.Ceiling(Math.Max(1f, preferred.Width)),
-            MathF.Ceiling(Math.Max(1f, preferred.Height)));
-    }
-
-    private static SKRect GetAbsoluteChildBounds(SKRect bounds, ElementBase child, SKSize size)
-    {
-        var x = child.AbsoluteAlignment switch
-        {
-            ContentAlignment.TopCenter or ContentAlignment.MiddleCenter or ContentAlignment.BottomCenter => bounds.MidX - size.Width / 2f,
-            ContentAlignment.TopRight or ContentAlignment.MiddleRight or ContentAlignment.BottomRight => bounds.Right - size.Width,
-            _ => bounds.Left
-        };
-        var y = child.AbsoluteAlignment switch
-        {
-            ContentAlignment.MiddleLeft or ContentAlignment.MiddleCenter or ContentAlignment.MiddleRight => bounds.MidY - size.Height / 2f,
-            ContentAlignment.BottomLeft or ContentAlignment.BottomCenter or ContentAlignment.BottomRight => bounds.Bottom - size.Height,
-            _ => bounds.Top
-        };
-
-        return SKRect.Create(
-            MathF.Round(x + child.Location.X),
-            MathF.Round(y + child.Location.Y),
-            size.Width,
-            size.Height);
     }
 
     internal virtual void OnControlAdded(ElementEventArgs e)

@@ -301,46 +301,11 @@ internal sealed partial class SettingsPreviewWindow
 
     private Grid BuildControlsGrid()
     {
-        var grid = CreateSectionGrid("controlsGrid", 2, 2, rowHeight: 396, marginBottom: 18);
-        grid.Add(BuildControlsCard(), 0, 0);
-        grid.Add(BuildInputCard(), 0, 1);
-        grid.Add(BuildPersonalizationCard(), 1, 0);
-        grid.Add(BuildProgressCard(), 1, 1);
+        var grid = CreateSectionGrid("controlsGrid", 1, 3, rowHeight: 372, marginBottom: 18);
+        grid.Add(BuildInputCard(), 0, 0);
+        grid.Add(BuildPersonalizationCard(), 0, 1);
+        grid.Add(BuildProgressCard(), 0, 2);
         return grid;
-    }
-
-    private Card BuildControlsCard()
-    {
-        var card = CreateCard("Recommended settings", "Common choices with a calm Settings-style layout.", 356);
-        card.HeaderGap = 16;
-        var batteryRow = CreateSettingRow("Battery saver", "Reduce background activity", new SwitchButton
-        {
-            Checked = true,
-            Size = new SKSize(58, 28),
-            TransitionMode = SwitchButtonTransitionMode.Cupertino,
-            PressStretch = 1.18f
-        });
-        var suggestionsRow = CreateSettingRow("Show suggestions", "Tips and recommended actions", new CheckBox
-        {
-            Checked = true,
-            Size = new SKSize(32, 30)
-        });
-        var balancedRow = CreateSettingRow("Balanced", "Recommended power mode", new RadioButton
-        {
-            Checked = true,
-            GroupName = "powerMode",
-            Size = new SKSize(32, 30)
-        });
-        var performanceRow = CreateSettingRow("Best performance", "Use more power for speed", new RadioButton
-        {
-            GroupName = "powerMode",
-            Size = new SKSize(32, 30)
-        });
-        card.Controls.Add(performanceRow);
-        card.Controls.Add(balancedRow);
-        card.Controls.Add(suggestionsRow);
-        card.Controls.Add(batteryRow);
-        return card;
     }
 
     private Card BuildInputCard()
@@ -455,69 +420,6 @@ internal sealed partial class SettingsPreviewWindow
         card.Controls.Add(colorRow);
         card.Controls.Add(group);
         return card;
-    }
-
-    private static Element CreateSettingRow(string title, string description, ElementBase editor)
-    {
-        var row = new Element
-        {
-            Dock = DockStyle.Top,
-            Height = 58,
-            Margin = new Thickness(0, 0, 0, 12),
-            BackColor = ColorScheme.SurfaceContainer,
-            Border = new Thickness(1),
-            BorderColor = ColorScheme.Outline.WithAlpha(70),
-            Radius = new Radius(10),
-            Padding = new Thickness(14, 7, 12, 7)
-        };
-        var editorHost = new Element
-        {
-            Dock = DockStyle.Right,
-            Width = 96,
-            BackColor = SKColors.Transparent,
-            Border = new Thickness(0),
-            CanSelect = false,
-            TabStop = false
-        };
-        editor.Dock = DockStyle.None;
-        editor.Anchor = AnchorStyles.None;
-        editor.Location = new SKPoint(
-            Math.Max(0f, (editorHost.Width - editor.Width) / 2f),
-            Math.Max(0f, (58f - editor.Height) / 2f));
-        editor.Shadow = BoxShadow.None;
-        editorHost.Controls.Add(editor);
-
-        row.Controls.Add(new Element
-        {
-            Text = title,
-            Location = new SKPoint(14, 8),
-            Size = new SKSize(470, 20),
-            BackColor = SKColors.Transparent,
-            Border = new Thickness(0),
-            CanSelect = false,
-            TabStop = false,
-            ForeColor = ColorScheme.ForeColor,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Font = new SKFont(SKTypeface.Default, 13) { Embolden = true },
-            WrapMode = TextWrap.None
-        });
-        row.Controls.Add(new Element
-        {
-            Text = description,
-            Location = new SKPoint(14, 31),
-            Size = new SKSize(470, 18),
-            BackColor = SKColors.Transparent,
-            Border = new Thickness(0),
-            CanSelect = false,
-            TabStop = false,
-            ForeColor = ColorScheme.ForeColor.WithAlpha(145),
-            TextAlign = ContentAlignment.MiddleLeft,
-            Font = new SKFont(SKTypeface.Default, 11),
-            WrapMode = TextWrap.None
-        });
-
-        row.Controls.Add(editorHost);
-        return row;
     }
 
     private Card BuildProgressCard()
@@ -786,13 +688,12 @@ internal sealed partial class SettingsPreviewWindow
         {
             openButton.Controls.Add(new Badge
             {
-                Text = "!",
+                Text = "24",
                 Variant = BadgeVariant.Danger,
                 MinimumSize = new SKSize(20, 20),
                 Padding = new Thickness(7, 2, 7, 2),
-                PositionMode = ElementPositionMode.Absolute,
-                AbsoluteAlignment = ContentAlignment.TopRight,
-                Location = new SKPoint(-4, 4),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                Location = new SKPoint(-4, -4),
                 CanSelect = false,
                 TabStop = false,
                 Shadow = BoxShadow.None

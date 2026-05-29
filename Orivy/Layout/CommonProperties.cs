@@ -433,11 +433,14 @@ internal partial class CommonProperties
     internal static bool GetNeedsAnchorLayout(IArrangedElement element)
     {
         BitVector32 state = GetLayoutState(element);
-        bool result = (state[s_dockAndAnchorNeedsLayoutSection] != 0) && (state[s_dockModeSection] == (int)DockAnchorMode.Anchor);
+        bool result = element.ParticipatesInLayout &&
+                      (state[s_dockAndAnchorNeedsLayoutSection] != 0) &&
+                      (state[s_dockModeSection] == (int)DockAnchorMode.Anchor);
 
         Debug.Assert(
+            (element.ParticipatesInLayout &&
             (xGetAnchor(element) != DefaultAnchor
-            || (GetAutoSize(element) != DefaultAutoSize && xGetDock(element) == DockStyle.None)) == result,
+            || (GetAutoSize(element) != DefaultAutoSize && xGetDock(element) == DockStyle.None))) == result,
             "Individual values of Anchor/Dock/AutoRelocate/Autosize contradict GetNeedsAnchorLayout().");
 
         return result;
@@ -552,8 +555,10 @@ internal partial class CommonProperties
             return false;
         }
 
-        bool result = (state[s_autoSizeSection] != 0) && (state[s_dockModeSection] == (int)DockAnchorMode.Anchor);
-        Debug.Assert(result == (GetAutoSize(element) && xGetDock(element) == DockStyle.None),
+        bool result = element.ParticipatesInLayout &&
+                      (state[s_autoSizeSection] != 0) &&
+                      (state[s_dockModeSection] == (int)DockAnchorMode.Anchor);
+        Debug.Assert(result == (element.ParticipatesInLayout && GetAutoSize(element) && xGetDock(element) == DockStyle.None),
             "Error detected in xGetAutoSizeAndAnchored.");
 
         return result;

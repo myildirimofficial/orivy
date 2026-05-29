@@ -81,8 +81,7 @@ inbox.Controls.Add(new Badge
 {
     Text = "12",
     Variant = BadgeVariant.Danger,
-    PositionMode = ElementPositionMode.Absolute,
-    AbsoluteAlignment = ContentAlignment.TopRight,
+    Anchor = AnchorStyles.Top | AnchorStyles.Right,
     Location = new SKPoint(-4, -4),
     CanSelect = false,
     TabStop = false
