@@ -42,7 +42,7 @@ internal sealed class OpenGLRenderer : IWindowRenderer
             // Setup pixel format for OpenGL
             var pfd = new PIXELFORMATDESCRIPTOR
             {
-                nSize = (short)Marshal.SizeOf<PIXELFORMATDESCRIPTOR>(),
+                nSize = (ushort)Marshal.SizeOf<PIXELFORMATDESCRIPTOR>(),
                 nVersion = 1,
                 // PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER
                 dwFlags = 0x00000004 | 0x00000020 | 0x00000001,
@@ -104,7 +104,7 @@ internal sealed class OpenGLRenderer : IWindowRenderer
         }
         finally
         {
-            // Context current durumda kalır, rendering için hazır
+            
         }
     }
 

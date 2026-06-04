@@ -2,11 +2,14 @@ using System.Runtime.InteropServices;
 
 namespace Orivy.Native.Windows;
 
+[UnmanagedFunctionPointer(CallingConvention.Winapi)]
+public delegate int wglSwapIntervalEXTDelegate(int interval);
+
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 internal struct PIXELFORMATDESCRIPTOR
 {
-    public short nSize;
-    public short nVersion;
+    public ushort nSize;
+    public ushort nVersion;
     public uint dwFlags;
     public byte iPixelType;
     public byte cColorBits;
@@ -59,7 +62,7 @@ internal static class WglNativeMethods
 
     [DllImport(Opengl32, SetLastError = true)]
     public static extern bool wglMakeCurrent(nint hdc, nint hglrc);
-    
+
     [DllImport(Opengl32, SetLastError = true)]
     public static extern void glViewport(int x, int y, int width, int height);
 
@@ -68,4 +71,7 @@ internal static class WglNativeMethods
 
     [DllImport(Gdi32, SetLastError = true)]
     public static extern bool SwapBuffers(nint hdc);
+
+    [DllImport(Opengl32, CharSet = CharSet.Ansi, SetLastError = true)]
+    public static extern nint wglGetProcAddress(string lpszProc);
 }
