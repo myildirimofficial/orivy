@@ -5,10 +5,6 @@ using Orivy.Native.Windows;
 
 namespace Orivy.Rendering;
 
-/// <summary>
-/// OpenGL-based GPU renderer using SkiaSharp's GRContext for hardware-accelerated rendering.
-/// Provides high-performance rendering when OpenGL is available and enabled.
-/// </summary>
 internal sealed class OpenGLRenderer : IWindowRenderer
 {
     private nint _hwnd;
@@ -20,6 +16,7 @@ internal sealed class OpenGLRenderer : IWindowRenderer
     private int _height;
     private bool _disposed;
     private bool _isInitialized;
+
     public bool IsSkiaGpuActive => _grContext != null && !_disposed;
     public RenderBackend Backend => RenderBackend.OpenGL;
     public GRContext? GrContext => _grContext;
@@ -39,19 +36,17 @@ internal sealed class OpenGLRenderer : IWindowRenderer
 
         try
         {
-            // Setup pixel format for OpenGL
             var pfd = new PIXELFORMATDESCRIPTOR
             {
                 nSize = (ushort)Marshal.SizeOf<PIXELFORMATDESCRIPTOR>(),
                 nVersion = 1,
-                // PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER
                 dwFlags = 0x00000004 | 0x00000020 | 0x00000001,
-                iPixelType = 0, // PFD_TYPE_RGBA
+                iPixelType = 0,
                 cColorBits = 32,
-                cAlphaBits = 8,  // request alpha channel so DWM can composite correctly
+                cAlphaBits = 8,
                 cDepthBits = 24,
                 cStencilBits = 8,
-                iLayerType = 0 // PFD_MAIN_PLANE
+                iLayerType = 0
             };
 
             int pixelFormat = WglNativeMethods.ChoosePixelFormat(_deviceContext, ref pfd);
@@ -61,7 +56,6 @@ internal sealed class OpenGLRenderer : IWindowRenderer
             if (!WglNativeMethods.SetPixelFormat(_deviceContext, pixelFormat, ref pfd))
                 throw new InvalidOperationException("Failed to set OpenGL pixel format.");
 
-            // Create temporary OpenGL context for function loading
             nint tempRc = WglNativeMethods.wglCreateContext(_deviceContext);
             if (tempRc == IntPtr.Zero)
                 throw new InvalidOperationException("Failed to create temporary OpenGL context.");
@@ -72,7 +66,6 @@ internal sealed class OpenGLRenderer : IWindowRenderer
                 throw new InvalidOperationException("Failed to make temporary OpenGL context current.");
             }
 
-            // Create the actual OpenGL context
             _glContext = WglNativeMethods.wglCreateContext(_deviceContext);
             if (_glContext == IntPtr.Zero)
             {
@@ -80,7 +73,6 @@ internal sealed class OpenGLRenderer : IWindowRenderer
                 throw new InvalidOperationException("Failed to create OpenGL rendering context.");
             }
 
-            // Make the new context current
             if (!WglNativeMethods.wglMakeCurrent(_deviceContext, _glContext))
             {
                 WglNativeMethods.wglDeleteContext(_glContext);
@@ -88,10 +80,8 @@ internal sealed class OpenGLRenderer : IWindowRenderer
                 throw new InvalidOperationException("Failed to make OpenGL context current.");
             }
 
-            // Clean up temporary context
             WglNativeMethods.wglDeleteContext(tempRc);
 
-            // Create SkiaSharp GRContext for OpenGL
             var glInterface = GRGlInterface.Create();
             if (glInterface == null)
                 throw new InvalidOperationException("Failed to assemble OpenGL interface for SkiaSharp.");
@@ -102,9 +92,10 @@ internal sealed class OpenGLRenderer : IWindowRenderer
 
             _isInitialized = true;
         }
-        finally
+        catch
         {
-            
+            Dispose();
+            throw;
         }
     }
 
@@ -116,24 +107,18 @@ internal sealed class OpenGLRenderer : IWindowRenderer
         if (width <= 0 || height <= 0)
             return;
 
-        // Update OpenGL viewport
         if (_glContext != IntPtr.Zero && _deviceContext != IntPtr.Zero)
         {
             WglNativeMethods.wglMakeCurrent(_deviceContext, _glContext);
             WglNativeMethods.glViewport(0, 0, width, height);
         }
 
-        // Invalidate existing surface - recreated on next Render call
         _surface?.Dispose();
         _surface = null;
         _width = width;
         _height = height;
     }
 
-    /// <summary>
-    /// Renders a frame using OpenGL and SkiaSharp GPU backend.
-    /// Returns true if the frame was successfully rendered and presented, false otherwise.
-    /// </summary>
     public bool Render(int width, int height, Action<SKCanvas, SKImageInfo> draw)
     {
         if (_disposed || !_isInitialized || _hwnd == IntPtr.Zero)
@@ -142,30 +127,23 @@ internal sealed class OpenGLRenderer : IWindowRenderer
         if (width <= 0 || height <= 0 || _grContext == null)
             return false;
 
-        // Ensure OpenGL context is current
         if (!WglNativeMethods.wglMakeCurrent(_deviceContext, _glContext))
             return false;
 
         try
         {
-            // Set the viewport every frame so the first rendered frame is never empty
-            // even when Resize() was not called before the first Render() invocation.
             WglNativeMethods.glViewport(0, 0, width, height);
 
-            // Recreate surface if needed (size changed or first render)
             if (_surface == null || _width != width || _height != height)
             {
                 _surface?.Dispose();
                 _surface = null;
 
-                // Query the actual framebuffer, stencil bits, and MSAA sample count from
-                // the driver instead of assuming values of 0.  Assuming wrong values is
-                // brittle and can produce a blank first frame on some GPU/driver combinations.
-                WglNativeMethods.glGetIntegerv(0x8CA6 /* GL_FRAMEBUFFER_BINDING */, out int fboId);
-                WglNativeMethods.glGetIntegerv(0x0D57 /* GL_STENCIL_BITS */, out int stencilBits);
-                WglNativeMethods.glGetIntegerv(0x80A9 /* GL_SAMPLES */, out int sampleCount);
+                WglNativeMethods.glGetIntegerv(0x8CA6, out int fboId);
+                WglNativeMethods.glGetIntegerv(0x0D57, out int stencilBits);
+                WglNativeMethods.glGetIntegerv(0x80A9, out int sampleCount);
 
-                var framebufferInfo = new GRGlFramebufferInfo((uint)fboId, 0x8058); // GL_RGBA8
+                var framebufferInfo = new GRGlFramebufferInfo((uint)fboId, 0x8058);
                 var backendRenderTarget = new GRBackendRenderTarget(
                     width,
                     height,
@@ -186,42 +164,31 @@ internal sealed class OpenGLRenderer : IWindowRenderer
                 _height = height;
             }
 
-            // Execute user drawing code
             var canvas = _surface.Canvas;
             canvas.Clear(SKColors.Transparent);
             draw(canvas, new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul));
             canvas.Flush();
 
-            // Present the frame by swapping buffers
             WglNativeMethods.SwapBuffers(_deviceContext);
-
-            // Flush GRContext for resource management
             _grContext.Flush();
 
             return true;
         }
         catch
         {
-            // On rendering error, clean up surface to force recreation
             _surface?.Dispose();
             _surface = null;
             return false;
         }
     }
 
-    /// <summary>
-    /// Trims GPU resources managed by SkiaSharp's GRContext.
-    /// Call this when the application is backgrounded or memory pressure is high.
-    /// </summary>
     public void TrimCaches()
     {
         if (_disposed || _grContext == null)
             return;
 
-        // Trim SkiaSharp's GPU resource cache (soft trim)
         _grContext.PurgeResources();
         
-        // Dispose surface to force recreation with fresh resources
         _surface?.Dispose();
         _surface = null;
     }
@@ -231,13 +198,11 @@ internal sealed class OpenGLRenderer : IWindowRenderer
         if (_disposed)
             return;
 
-        // Clean up SkiaSharp resources
         _surface?.Dispose();
         _surface = null;
         _grContext?.Dispose();
         _grContext = null;
 
-        // Clean up OpenGL context
         if (_glContext != IntPtr.Zero)
         {
             if (_deviceContext != IntPtr.Zero)
@@ -248,7 +213,6 @@ internal sealed class OpenGLRenderer : IWindowRenderer
             _glContext = IntPtr.Zero;
         }
 
-        // Release device context
         if (_deviceContext != IntPtr.Zero && _hwnd != IntPtr.Zero)
         {
             WglNativeMethods.ReleaseDC(_hwnd, _deviceContext);

@@ -1262,8 +1262,6 @@ public partial class WindowBase : ElementBase
 
     protected virtual void OnHandleCreated(EventArgs e)
     {
-        RecreateRenderer();
-
         ApplyNativeWindowStyles();
         Orivy.Native.Windows.Helpers.ApplyRoundCorner(Handle);
         UpdateNativeWindowText();
@@ -1284,9 +1282,8 @@ public partial class WindowBase : ElementBase
             DwmExtendFrameIntoClientArea(Handle, ref margins);
         }
 
-        SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0,
-            SetWindowPosFlags.SWP_FRAMECHANGED | SetWindowPosFlags.SWP_NOSIZE | SetWindowPosFlags.SWP_NOMOVE |
-            SetWindowPosFlags.SWP_NOZORDER | SetWindowPosFlags.SWP_NOOWNERZORDER | SetWindowPosFlags.SWP_NOACTIVATE);
+        SetWindowPos(Handle, IntPtr.Zero, (int)ClientRectangle.Left, (int)ClientRectangle.Top, (int)ClientRectangle.Width, (int)ClientRectangle.Height,
+            SetWindowPosFlags.SWP_FRAMECHANGED | SetWindowPosFlags.SWP_NOZORDER | SetWindowPosFlags.SWP_NOOWNERZORDER | SetWindowPosFlags.SWP_NOACTIVATE);
 
         ApplyThemeToNativeWindow();
 
@@ -1298,6 +1295,8 @@ public partial class WindowBase : ElementBase
         {
             float windowDpi = Screen.GetDpiForWindowHandle(Handle);
             InitializeDpi(windowDpi);
+
+            RecreateRenderer();
         }
         catch
         {
