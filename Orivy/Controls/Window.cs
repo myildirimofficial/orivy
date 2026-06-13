@@ -1545,6 +1545,9 @@ public partial class Window : WindowBase
 
     internal override void OnMouseWheel(MouseEventArgs e)
     {
+        if (TryRouteMouseEventToFloatingOverlay(e, static (popup, localEvent) => popup.OnMouseWheel(localEvent)))
+            return;
+
         CloseFloatingOverlays();
 
         base.OnMouseWheel(e);

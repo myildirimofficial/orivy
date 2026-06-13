@@ -149,7 +149,6 @@ internal partial class MainWindow
         this.ContextMenuStrip = this.extendMenu;
         this.TabView = tabView;
         this.FormStartPosition = Orivy.FormStartPosition.CenterScreen;
-        this.RenderBackend = Orivy.Rendering.RenderBackend.Software;
         this.ShowPerfOverlay = true;
         this.Controls.Add(tabView);
         this.Controls.Add(this.menuStrip);

@@ -828,9 +828,6 @@ public partial class TabView : ElementBase
     {
         FinalizeCompletedTransitionIfPending();
         base.OnPaint(canvas);
-
-        if (ShouldDrawTabStrip)
-            DrawTabStrip(canvas);
     }
 
     internal override void OnMouseDown(MouseEventArgs e)
@@ -1026,6 +1023,7 @@ public partial class TabView : ElementBase
         if (!IsTransitioning)
         {
             var selectedPage = GetPageAt(_selectedIndex);
+            var contentViewport = DisplayRectangle;
 
             for (var i = 0; i < Controls.Count; i++)
             {
@@ -1043,15 +1041,30 @@ public partial class TabView : ElementBase
                 if (NeedsFullChildRedraw)
                     child.InvalidateRenderTree();
 
-                child.Render(canvas);
+                if (IsTabViewPage(child))
+                {
+                    var saved = canvas.Save();
+                    canvas.ClipRect(contentViewport);
+                    child.Render(canvas);
+                    canvas.RestoreToCount(saved);
+                }
+                else
+                {
+                    child.Render(canvas);
+                }
             }
 
             NeedsFullChildRedraw = false;
+            if (ShouldDrawTabStrip)
+                DrawTabStrip(canvas);
             return true;
         }
 
         if (!EnsureTransitionSnapshots())
-            return false;
+        {
+            CommitSelectedPageVisibility();
+            return TryRenderChildContent(canvas);
+        }
 
         var viewport = GetTransitionViewport();
         if (viewport.Width <= 0 || viewport.Height <= 0)
@@ -1070,6 +1083,9 @@ public partial class TabView : ElementBase
             canvas.ClipRect(viewport);
             DrawTransitionEffect(canvas, fromSnapshot, toSnapshot, viewport, progress);
             canvas.RestoreToCount(saved);
+
+            if (ShouldDrawTabStrip)
+                DrawTabStrip(canvas);
             return true;
         }
     }
@@ -1372,13 +1388,10 @@ public partial class TabView : ElementBase
 
         var canvas = surface.Canvas;
         canvas.Clear(SKColors.Transparent);
+        canvas.Translate(-bounds.Left, -bounds.Top);
 
         var originalVisible = page.Visible;
-        var originalLocation = page.Location;
-        var originalBounds = page.Bounds;
-
         page.Visible = true;
-        page.Location = SKPoint.Empty;
 
         try
         {
@@ -1386,8 +1399,6 @@ public partial class TabView : ElementBase
         }
         finally
         {
-            page.Bounds = originalBounds;
-            page.Location = originalLocation;
             page.Visible = originalVisible;
         }
 
@@ -2112,6 +2123,19 @@ public partial class TabView : ElementBase
         {
             if (activeTabsRect.IsEmpty) activeTabsRect = _tabRects[i];
             else activeTabsRect.Union(_tabRects[i]);
+        }
+
+        if (UsesVerticalTabLayout && _verticalTabScrollableExtent > 0.01f)
+        {
+            var axisPadding = Math.Max(4f * ScaleFactor, GetTabVerticalContentPadding());
+            var newTabReserve = ShouldDrawNewTabButton
+                ? (NewTabButtonSize * ScaleFactor) + tabGap
+                : 0f;
+            activeTabsRect = new SKRect(
+                headerRect.Left + axisPadding,
+                headerRect.Top + axisPadding,
+                headerRect.Right - axisPadding,
+                Math.Max(headerRect.Top + axisPadding, headerRect.Bottom - axisPadding - newTabReserve));
         }
 
         DrawTabHeaderSurface(canvas, headerRect,
