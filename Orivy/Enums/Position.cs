@@ -1,3 +1,5 @@
+namespace Orivy.Enums;
+
 public enum Position
 {
     Auto,

@@ -1,5 +1,6 @@
 using Orivy.Binding;
 using Orivy.Collections;
+using Orivy.Enums;
 using Orivy.Helpers;
 using Orivy.Layout;
 using Orivy.Validations;

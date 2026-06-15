@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using Orivy.Controls;
+using Orivy.Enums;
 using SkiaSharp;
 
 public sealed class ToolTipRenderEventArgs : EventArgs
