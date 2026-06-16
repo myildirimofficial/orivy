@@ -71,6 +71,20 @@ public struct Thickness
     /// </summary>
     public bool IsEmpty => Left == 0 && Top == 0 && Right == 0 && Bottom == 0;
 
+
+    /// <summary>
+    /// Initializes a new instance of the Thickness structure with the specified left, top, right, and bottom values.
+    /// </summary>
+    /// <param name="left">The thickness, in pixels, for the left side.</param>
+    /// <param name="top">The thickness, in pixels, for the top side.</param>
+    public Thickness(int left, int top)
+    {
+        Left = left;
+        Top = top;
+        Right = left;
+        Bottom = top;
+    }
+
     /// <summary>
     /// Initializes a new instance of the Thickness structure with the specified left, top, right, and bottom values.
     /// </summary>
