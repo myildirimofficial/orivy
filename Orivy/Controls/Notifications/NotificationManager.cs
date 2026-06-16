@@ -95,8 +95,8 @@ internal sealed class NotificationManager : IDisposable
 		{
 			DurationMs = durationMs,
 			ShowProgressBar = durationMs > 0,
-			Actions = actions ?? Array.Empty<NotificationAction>()
-		});
+			Actions = actions ?? []
+        });
 
 	public NotificationHandle Show(
 		string title,

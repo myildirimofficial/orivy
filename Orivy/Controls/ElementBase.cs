@@ -251,6 +251,12 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
+
+    public bool InvokeRequired;
+
+    [Browsable(false)]
+    public ElementCollection Controls { get; }
+
     public bool HasParent => _parent != null;
     public object Tag { get; set; }
 
@@ -701,9 +707,6 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         ZOrder = max + 1;
         Parent.InvalidateRenderTree();
     }
-
-    [Browsable(false)]
-    public ElementCollection Controls { get; }
 
     public void BeginInvoke(Delegate method)
     {
@@ -4515,7 +4518,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         return char.ToUpper(text[index + 1]) == char.ToUpper(charCode);
     }
 
-    protected virtual void PerformClick()
+    public virtual void PerformClick()
     {
         if (CanSelect)
             OnClick(EventArgs.Empty);

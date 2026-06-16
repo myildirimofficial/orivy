@@ -382,6 +382,8 @@ public partial class WindowBase : ElementBase
         }
     }
 
+    public event EventHandler<FormClosingEventArgs> FormClosing;
+    public event EventHandler<FormClosedEventArgs> FormClosed;
     public event EventHandler Activated;
     public event EventHandler Deactivated;
 
@@ -444,6 +446,10 @@ public partial class WindowBase : ElementBase
             }
         }
     }
+
+    public Button AcceptButton { get; set; }
+
+    public Button CancelButton { get; set; }
 
     public void CreateHandle()
     {
@@ -529,6 +535,15 @@ public partial class WindowBase : ElementBase
                 return false;
             }
 
+            if (commandKeyData == Keys.Enter)
+            {
+                if (AcceptButton != null && AcceptButton.Enabled && AcceptButton.Visible)
+                {
+                    AcceptButton.PerformClick();
+                    return true;
+                }
+            }
+
             // Tab navigation
             if (commandKeyData == Keys.Tab || commandKeyData == (Keys.Tab | Keys.Shift))
             {
@@ -567,7 +582,17 @@ public partial class WindowBase : ElementBase
         if (HasOpenEscapeOverlay(Controls))
             return false;
 
-        return _notifications?.TryDismissActiveDialog() == true;
+        if (_notifications?.TryDismissActiveDialog() == true)
+            return true;
+
+        if (CancelButton != null && CancelButton.Enabled && CancelButton.Visible)
+        {
+            CancelButton.PerformClick();
+            return true;
+        }
+
+        Close(DialogResult.Cancel);
+        return true;
     }
 
     private static bool HasOpenEscapeOverlay(ElementCollection elements)
@@ -635,16 +660,17 @@ public partial class WindowBase : ElementBase
     /// <remarks>This method shows the dialog associated with the current window handle and processes window
     /// messages until the dialog is closed. The calling thread will not continue until the dialog is dismissed. This
     /// method should be called from a thread that can safely run a message loop, such as the main UI thread.</remarks>
-    public void ShowDialog()
+    public DialogResult ShowDialog()
     {
         if (!IsHandleCreated)
             CreateHandle();
 
         if (_hWnd == IntPtr.Zero)
-            return;
+            return DialogResult.None;
 
         _closeRequested = false;
         _formClosed = false;
+        DialogResult = DialogResult.None;
         Application.RegisterForm(this);
         ShowWindow(_hWnd, 5);
         Application.SetActiveForm(this);
@@ -655,6 +681,8 @@ public partial class WindowBase : ElementBase
             TranslateMessage(ref msg);
             DispatchMessage(ref msg);
         }
+
+        return DialogResult;
     }
 
     /// <summary>
@@ -671,17 +699,34 @@ public partial class WindowBase : ElementBase
 
     public void Close()
     {
+        Close(DialogResult.None);
+    }
+
+    public void Close(DialogResult dialogResult)
+    {
         if (_hWnd != IntPtr.Zero && !_closeRequested)
         {
+            DialogResult = dialogResult;
             _closeRequested = true;
             nint param = 0;
             PostMessage(_hWnd, (int)WindowMessage.WM_CLOSE, 0, ref param);
         }
     }
 
+    internal void CloseDialog(DialogResult dialogResult)
+    {
+        Close(dialogResult);
+    }
+
+    protected virtual void OnFormClosing(FormClosingEventArgs e)
+    {
+        FormClosing?.Invoke(this, e);
+    }
+
     protected virtual void OnFormClosed(FormClosedEventArgs e)
     {
-        // Unload all child elements now the window is closed
+        FormClosed?.Invoke(this, e);
+
         foreach (var c in Controls)
             if (c is ElementBase child)
                 child.EnsureUnloadedRecursively();
@@ -1162,8 +1207,19 @@ public partial class WindowBase : ElementBase
                     return IntPtr.Zero;
                 }
             case WindowMessage.WM_CLOSE:
-                _closeRequested = true;
-                return DefWindowProc(hWnd, msg, wParam, lParam);
+                {
+                    if (_closeRequested)
+                        return DefWindowProc(hWnd, msg, wParam, lParam);
+
+                    var args = new FormClosingEventArgs(CloseReason.UserClosing);
+                    OnFormClosing(args);
+
+                    if (args.Cancel)
+                        return IntPtr.Zero;
+
+                    _closeRequested = true;
+                    return DefWindowProc(hWnd, msg, wParam, lParam);
+                }
             case WindowMessage.WM_SHOWWINDOW:
                 {
                     // wParam: TRUE if the window is being shown, FALSE if being hidden
@@ -1188,6 +1244,7 @@ public partial class WindowBase : ElementBase
                     _formClosed = true;
                     Application.UnregisterForm(this);
                     OnFormClosed(new FormClosedEventArgs(CloseReason.UserClosing));
+                    FormClosed?.Invoke(this, new FormClosedEventArgs(CloseReason.UserClosing));
                 }
 
                 _closeRequested = false;

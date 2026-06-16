@@ -10,13 +10,14 @@ namespace Orivy.Controls;
 public class Button : ElementBase
 {
     private bool _checked;
-    private bool _keyboardPressArmed;  
+    private bool _keyboardPressArmed;
     private ContextMenuStrip? _dropDownMenu;
     private readonly AnimationManager _dropDownChevronAnimation;
     private readonly SKPaint _dropDownTextPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _dropDownChevronPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round };
     private readonly SKPaint _dropDownDividerPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round };
     private readonly SKPath _dropDownChevronPath = new();
+    public DialogResult DialogResult { get; set; }
 
     public Button()
     {
@@ -294,6 +295,19 @@ public class Button : ElementBase
     {
         _keyboardPressArmed = false;
         base.OnLostFocus(e);
+    }
+
+    public override void PerformClick()
+    {
+        OnClick(EventArgs.Empty);
+
+        if (Parent is WindowBase window && window.IsHandleCreated)
+        {
+            if (DialogResult != DialogResult.None)
+            {
+                window.CloseDialog(DialogResult);
+            }
+        }
     }
 
     protected override void Dispose(bool disposing)
