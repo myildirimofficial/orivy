@@ -62,6 +62,11 @@ public class Application
         }
     }
 
+    internal static IntPtr GetNotifyIconWindowHandle()
+    {
+        return _activeForm?.Handle ?? IntPtr.Zero;
+    }
+
     /// <summary>
     /// Sets the process DPI awareness to Per-Monitor V2 (Win10 1703+),
     /// falling back to Per-Monitor (Win8.1+).
@@ -189,5 +194,16 @@ public class Application
         {
             _openForms[i].HandleDefaultFontChanged();
         }
+    }
+
+    public static void Restart()
+    {
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = Environment.ProcessPath,
+            Arguments = Environment.CommandLine,
+            UseShellExecute = true
+        });
+        Environment.Exit(0);
     }
 }

@@ -14,11 +14,9 @@ public partial class WindowBase : ElementBase
     private const uint WM_APP_THEMECHANGED = 0x8000 + 0x250;
     private const uint WM_APP_IDLEMAINTENANCE = 0x8000 + 0x251;
 
-    private IntPtr _hWnd;
+private IntPtr _hWnd;
     private IntPtr _hInstance;
     private bool _disposed;
-
-    private bool _updatingFromNative;
 
     private WndProc _wndProcDelegate;
 
@@ -32,6 +30,7 @@ public partial class WindowBase : ElementBase
     private bool _mouseInClient;
     private bool _closeRequested;
     private bool _formClosed;
+    private bool _updatingFromNative;
     protected bool enableFullDraggable;
 
     // element which currently has native mouse capture; used by derived classes
@@ -129,7 +128,7 @@ public partial class WindowBase : ElementBase
     }
 
     private FormStartPosition _formStartPosition = FormStartPosition.WindowsDefaultLocation;
-    public FormStartPosition FormStartPosition
+    public FormStartPosition StartPosition
     {
         get => _formStartPosition;
         set
@@ -221,6 +220,47 @@ public partial class WindowBase : ElementBase
     /// <remarks>A value of -1 typically indicates that the default system margin should be used. Adjusting
     /// this property can affect how window shadows and glass effects are rendered.</remarks>
     public int DwmMargin { get; set; } = -1;
+
+    private bool _topMost;
+    public bool TopMost
+    {
+        get => _topMost;
+        set
+        {
+            if (_topMost == value) return;
+            _topMost = value;
+            if (IsHandleCreated)
+                SetWindowPos(Handle, value ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+                    SetWindowPosFlags.SWP_NOMOVE | SetWindowPosFlags.SWP_NOSIZE | SetWindowPosFlags.SWP_NOACTIVATE);
+        }
+    }
+
+    private bool _showInTaskbar = true;
+    public bool ShowInTaskbar
+    {
+        get => _showInTaskbar;
+        set
+        {
+            if (_showInTaskbar == value) return;
+            _showInTaskbar = value;
+            if (IsHandleCreated)
+            {
+                var exStyle = GetWindowLong(Handle, -16);
+                if (value)
+                    exStyle &= ~(int)0x00000080;
+                else
+                    exStyle |= 0x00000080;
+                SetWindowLong(Handle, -16, exStyle);
+            }
+        }
+    }
+
+    public void Activate()
+    {
+        if (!IsHandleCreated) return;
+        SetForegroundWindow(Handle);
+        SetFocus(Handle);
+    }
 
     /// <summary>
     ///     Has aero enabled by windows <c>true</c>; otherwise <c>false</c>
@@ -384,6 +424,9 @@ public partial class WindowBase : ElementBase
 
     public event EventHandler<FormClosingEventArgs> FormClosing;
     public event EventHandler<FormClosedEventArgs> FormClosed;
+    public event EventHandler Shown;
+    public event EventHandler Load;
+    public event EventHandler Resize;
     public event EventHandler Activated;
     public event EventHandler Deactivated;
 
@@ -394,8 +437,8 @@ public partial class WindowBase : ElementBase
 
     public WindowBase()
     {
-        // Set default window size (ElementBase default is 100x23 which is too small for a window)
         Size = new SKSize(800, 600);
+        _formStartPosition = FormStartPosition.CenterScreen;
 
         _hInstance = Methods.GetModuleHandle(null);
         _wndProcDelegate = new WndProc(WndProc);
@@ -491,11 +534,6 @@ public partial class WindowBase : ElementBase
             throw new Exception("Failed to create window.");
 
         IsHandleCreated = true;
-
-        if (_formStartPosition == FormStartPosition.CenterScreen)
-        {
-            CenterToScreen();
-        }
 
         OnHandleCreated(EventArgs.Empty);
     }
@@ -625,10 +663,9 @@ public partial class WindowBase : ElementBase
     {
         base.OnLoad(e);
 
-        // Mark window as loaded so dynamically added controls can trigger their Load immediately
         IsLoaded = true;
+        Load?.Invoke(this, e);
 
-        // Ensure all child elements receive Load before the window is shown
         foreach (var c in Controls)
             if (c is ElementBase child)
                 child.EnsureLoadedRecursively();
@@ -651,6 +688,10 @@ public partial class WindowBase : ElementBase
         _formClosed = false;
         Application.RegisterForm(this);
         ShowWindow(_hWnd, 5);
+
+        if (_formStartPosition == FormStartPosition.CenterScreen)
+            CenterToScreen();
+
         Application.SetActiveForm(this);
     }
 
@@ -674,6 +715,9 @@ public partial class WindowBase : ElementBase
         Application.RegisterForm(this);
         ShowWindow(_hWnd, 5);
         Application.SetActiveForm(this);
+
+        if (_formStartPosition == FormStartPosition.CenterScreen)
+            CenterToScreen();
 
         MSG msg;
         while (!_formClosed && GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
@@ -1195,10 +1239,9 @@ public partial class WindowBase : ElementBase
                     _updatingFromNative = true;
                     try
                     {
-                        // Size setter already triggers OnSizeChanged internally.
-                        // No need to call OnSizeChanged again.
                         Size = new SKSize(width, height);
                         InvalidateWindow();
+                        OnResize(EventArgs.Empty);
                     }
                     finally
                     {
@@ -1525,7 +1568,12 @@ public partial class WindowBase : ElementBase
     /// </summary>
     protected virtual void OnShown(EventArgs e)
     {
-        // Default implementation does nothing; derived classes can override
+        Shown?.Invoke(this, e);
+    }
+
+    protected virtual void OnResize(EventArgs e)
+    {
+        Resize?.Invoke(this, e);
     }
 
     /// <summary>

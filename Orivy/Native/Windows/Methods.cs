@@ -152,4 +152,44 @@ public partial class Methods
     public static readonly IntPtr DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = (IntPtr)(-4);
 
     public delegate bool MonitorEnumDelegate(IntPtr hMonitor, IntPtr hdcMonitor, ref Rect lprcMonitor, IntPtr dwData);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetFocus(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll")]
+    public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Auto)]
+    public static extern bool Shell_NotifyIcon(int dwMessage, ref NOTIFYICONDATA lpData);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    public struct NOTIFYICONDATA
+    {
+        public uint cbSize;
+        public IntPtr hWnd;
+        public uint uID;
+        public uint uFlags;
+        public uint uCallbackMessage;
+        public IntPtr hIcon;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string szTip;
+        public uint uIcon;
+        public uint uInfoFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+        public string szInfo;
+        public uint uTimeout;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+        public string szInfoTitle;
+        public uint dwState;
+        public uint dwStateMask;
+    }
+
+    public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
 }
