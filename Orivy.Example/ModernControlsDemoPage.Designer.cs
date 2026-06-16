@@ -1,5 +1,6 @@
 using Orivy;
 using Orivy.Controls;
+using Orivy.Enums;
 using SkiaSharp;
 using System;
 
@@ -234,7 +235,7 @@ internal sealed partial class ModernControlsDemoPage
             Height = 48,
             Margin = new(0, 0, 0, 12),
             Value = 62,
-            ShowValue = true,
+            ShowText = true,
             ToolTipText = "Drag or use the mouse wheel to update the progress value."
         };
         progressNumeric = new NumericUpDown

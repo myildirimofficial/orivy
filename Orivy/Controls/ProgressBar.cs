@@ -150,7 +150,7 @@ public class ProgressBar : ElementBase
     }
 
     [DefaultValue(false)]
-    public bool ShowText
+    public bool ShowValue
     {
         get => _textMode != ProgressBarTextMode.None;
         set => TextMode = value ? ProgressBarTextMode.Percent : ProgressBarTextMode.None;
@@ -169,6 +169,8 @@ public class ProgressBar : ElementBase
             Invalidate();
         }
     }
+
+    public int PercentIndices { get; set; } = 0;
 
     [DefaultValue(false)]
     public bool UseHatchFill { get; set; }
@@ -419,8 +421,8 @@ public class ProgressBar : ElementBase
 
         var text = TextMode switch
         {
-            ProgressBarTextMode.Percent => $"{MathF.Round(GetFraction() * 100f):0}%",
-            ProgressBarTextMode.PercentWhenWide => $"{MathF.Round(GetFraction() * 100f):0}%",
+            ProgressBarTextMode.Percent => $"{MathF.Round(GetFraction() * 100f, PercentIndices)}%",
+            ProgressBarTextMode.PercentWhenWide => $"{MathF.Round(GetFraction() * 100f, PercentIndices)}%",
             ProgressBarTextMode.Value => $"{_displayValue:0}",
             ProgressBarTextMode.ValueRange => $"{_displayValue:0} / {Maximum:0}",
             _ => string.Empty
