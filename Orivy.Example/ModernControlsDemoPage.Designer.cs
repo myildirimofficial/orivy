@@ -235,7 +235,7 @@ internal sealed partial class ModernControlsDemoPage
             Height = 48,
             Margin = new(0, 0, 0, 12),
             Value = 62,
-            ShowText = true,
+            ShowValue = true,
             ToolTipText = "Drag or use the mouse wheel to update the progress value."
         };
         progressNumeric = new NumericUpDown
