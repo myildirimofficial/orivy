@@ -400,6 +400,26 @@ internal sealed partial class DesignerControlsDemoPage
         designerNotesSection.Controls.Add(designerCaretModeCombo);
         designerNotesSection.Controls.Add(designerNotesHeader);
 
+        var rtfSampleButton = new Button
+        {
+            Name = "designerRtfSampleButton",
+            Text = "Load RTF Sample",
+            Dock = Orivy.DockStyle.Top,
+            Height = 36,
+            Margin = new(0, 0, 0, 10),
+        };
+        rtfSampleButton.Click += (_, _) =>
+        {
+            var rtf = @"{\rtf1\ansi\deff0{\fonttbl{\f0\fnil\fcharset0 Segoe UI;}}"
+                + @"{\colortbl;\red0\green0\blue0;\red255\green255\blue0;\red56\green189\blue248;}"
+                + @"\viewkind4\uc1\pard\cf1 Normal text. "
+                + @"\cf2 \b Highlighted bold text\cf0\b0  and "
+                + @"\cf3 \i accent colored italic text\cf0\i0 .\par}"
+                + "\r\nMore plain text below the RTF sample.";
+            designerNotesTextBox.Rtf = rtf;
+        };
+        designerNotesSection.Controls.Add(rtfSampleButton);
+
         designerAccentSection.Controls.Add(designerAccentPicker);
         designerAccentSection.Controls.Add(designerAccentHeader);
 

@@ -35,6 +35,7 @@ internal sealed partial class NotificationsDemoPage
     private Button notifBtnCenter = null!;
     private Button notifBtnStackMode = null!;
     private Button notifBtnDialog = null!;
+    private Button notifBtnMessageBox = null!;
 
     private void InitializeComponent()
     {
@@ -63,6 +64,7 @@ internal sealed partial class NotificationsDemoPage
         var topPositionRow = CreateRow(out notifBtnTopLeft, "Top Left", 112, out notifBtnTopCenter, "Top Center", 120, out notifBtnTopRight, "Top Right", 112);
         var bottomPositionRow = CreateRow(out notifBtnBottomLeft, "Bottom Left", 120, out notifBtnBottomCenter, "Bottom Center", 134, out notifBtnBottomRight, "Bottom Right", 128);
         var layoutRow = CreateRow(out notifBtnCenter, "Center", 112, out notifBtnStackMode, "Stack Mode: Off", 144, out notifBtnDialog, "Dialog Toast", 128);
+        var messageBoxRow = CreateRow(out notifBtnMessageBox, "MessageBox", 148, out notifBtnDismissAll, "Dismiss All", 120);
 
         ConfigureSemanticButton(notifBtnSuccess, new SKColor(22, 163, 74), new SKColor(34, 197, 94));
         ConfigureSemanticButton(notifBtnWarning, new SKColor(202, 138, 4), new SKColor(234, 179, 8));
@@ -72,8 +74,10 @@ internal sealed partial class NotificationsDemoPage
         ConfigurePrimaryButton(notifBtnBottomRight);
         ConfigureStackButton(notifBtnStackMode);
         ConfigureDialogButton(notifBtnDialog);
+        ConfigureSurfaceButton(notifBtnMessageBox);
 
         AddTopDown(notificationPage,
+            messageBoxRow,
             layoutRow,
             bottomPositionRow,
             topPositionRow,
@@ -286,5 +290,6 @@ internal sealed partial class NotificationsDemoPage
         notifBtnCenter.Click += NotifBtnCenter_Click;
         notifBtnStackMode.Click += NotifBtnStackMode_Click;
         notifBtnDialog.Click += NotifBtnDialog_Click;
+        notifBtnMessageBox.Click += NotifBtnMessageBox_Click;
     }
 }

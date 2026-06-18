@@ -68,7 +68,7 @@ internal sealed partial class NotificationsDemoPage : Container
     private void NotifBtnLongMessage_Click(object sender, EventArgs e)
         => NotificationToast.Show(
             "Audit Trail Delayed",
-            "The retention sweep has been postponed because the archive lane is warming up.\nEstimated completion: 3–5 minutes.\nNo data will be lost during this window.",
+            "The retention sweep has been postponed because the archive lane is warming up.\nEstimated completion: 3ï¿½5 minutes.\nNo data will be lost during this window.",
             NotificationKind.Warning,
             6000);
 
@@ -101,7 +101,7 @@ internal sealed partial class NotificationsDemoPage : Container
             NotificationKind.Info,
             0,
             new NotificationAction("Install Now", () =>
-            NotificationToast.Show("Installing", "Updating to v2.4.1 in the background…", NotificationKind.Info, 3000)),
+            NotificationToast.Show("Installing", "Updating to v2.4.1 in the backgroundï¿½", NotificationKind.Info, 3000)),
             new NotificationAction("Later"));
 
     private async void NotifBtnManualProgress_Click(object sender, EventArgs e)
@@ -314,5 +314,9 @@ internal sealed partial class NotificationsDemoPage : Container
             NotificationKind.Info,
             3200);
     }
-}
 
+    private void NotifBtnMessageBox_Click(object sender, EventArgs e)
+    {
+        var result = MessageBox.Show("Hello from MessageBox!", "Test", MessageBoxButtons.OKCancel, MessageBoxIcon.Information);
+    }
+}

@@ -22,7 +22,7 @@ internal sealed partial class SettingsPreviewWindow
         Width = 1180;
         Height = 760;
         MinimumSize = new SKSize(920, 620);
-        FormStartPosition = FormStartPosition.CenterScreen;
+        StartPosition = FormStartPosition.CenterScreen;
         WindowThemeType = WindowThemeType.Mica;
         RenderBackend = Rendering.RenderBackend.Software;
         DrawTitleBorder = false;

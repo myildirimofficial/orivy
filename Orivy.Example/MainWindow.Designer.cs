@@ -148,7 +148,7 @@ internal partial class MainWindow
         RefreshWindowThemeMenuChecks();
         this.ContextMenuStrip = this.extendMenu;
         this.TabView = tabView;
-        this.FormStartPosition = Orivy.FormStartPosition.CenterScreen;
+        this.StartPosition = Orivy.FormStartPosition.CenterScreen;
         this.ShowPerfOverlay = true;
         this.Controls.Add(tabView);
         this.Controls.Add(this.menuStrip);
