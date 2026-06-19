@@ -121,7 +121,99 @@ internal sealed class NotificationManager : IDisposable
 		return ShowCore(title, message, kind, resolvedOptions, null);
 	}
 
-	public Task<string> ConfirmAsync(
+    public Task<string> ConfirmAsync(
+        string title,
+        string message,
+        NotificationKind kind = NotificationKind.Info,
+        int durationMs = 0,
+        params string[] buttonLabels)
+    {
+        if (buttonLabels.Length == 0)
+            buttonLabels = ["OK"];
+
+        var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var actions = new NotificationAction[buttonLabels.Length];
+
+        for (var i = 0; i < buttonLabels.Length; i++)
+        {
+            var label = buttonLabels[i];
+            actions[i] = new NotificationAction(label, () => tcs.TrySetResult(label));
+        }
+
+        ShowCore(title, message, kind, new NotificationOptions
+        {
+            DurationMs = durationMs,
+            ShowProgressBar = false,
+            Actions = actions,
+            LayoutMode = NotificationToastLayoutMode.List,
+            Position = ContentAlignment.MiddleCenter,
+            PresentationMode = NotificationToastPresentationMode.Dialog,
+        }, () => tcs.TrySetResult(string.Empty));
+        return tcs.Task;
+    }
+
+    public DialogResult ShowDialog(
+        string title,
+        string message,
+        MessageBoxButtons messageBoxButtons = MessageBoxButtons.OK,
+        MessageBoxIcon messageBoxIcon = MessageBoxIcon.None,
+        MessageBoxDefaultButton defaultButton = MessageBoxDefaultButton.Button1, // TODO: Try set focus to the default button
+        int durationMs = 0)
+    {
+        var kind = messageBoxIcon switch
+        {
+            MessageBoxIcon.Error => NotificationKind.Error,
+            MessageBoxIcon.Warning => NotificationKind.Warning,
+            MessageBoxIcon.Question => NotificationKind.Info,
+            MessageBoxIcon.Information => NotificationKind.Info,
+            _ => NotificationKind.Info
+        };
+
+		DialogResult result = DialogResult.None;
+        Action<DialogResult> setResult = value => result = value;
+        NotificationAction[] actions = messageBoxButtons switch
+        {
+            MessageBoxButtons.OK => [
+                new NotificationAction("OK", () => setResult(DialogResult.OK))
+            ],
+            MessageBoxButtons.OKCancel => [
+                new NotificationAction("OK",     () => setResult(DialogResult.OK)),
+            new NotificationAction("Cancel", () => setResult(DialogResult.Cancel))
+            ],
+            MessageBoxButtons.AbortRetryIgnore => [
+                new NotificationAction("Abort",  () => setResult(DialogResult.Abort)),
+            new NotificationAction("Retry",  () => setResult(DialogResult.Retry)),
+            new NotificationAction("Ignore", () => setResult(DialogResult.Ignore))
+            ],
+            MessageBoxButtons.YesNoCancel => [
+                new NotificationAction("Yes",    () => setResult(DialogResult.Yes)),
+            new NotificationAction("No",     () => setResult(DialogResult.No)),
+            new NotificationAction("Cancel", () => setResult(DialogResult.Cancel))
+            ],
+            MessageBoxButtons.YesNo => [
+                new NotificationAction("Yes", () => setResult(DialogResult.Yes)),
+            new NotificationAction("No",  () => setResult(DialogResult.No))
+            ],
+            MessageBoxButtons.RetryCancel => [
+                new NotificationAction("Retry",  () => setResult(DialogResult.Retry)),
+            new NotificationAction("Cancel", () => setResult(DialogResult.Cancel))
+            ],
+            _ => [new NotificationAction("OK", () => setResult(DialogResult.OK))]
+        };
+
+        ShowCore(title, message, kind, new NotificationOptions
+        {
+            DurationMs = durationMs,
+            ShowProgressBar = false,
+            Actions = actions,
+            LayoutMode = NotificationToastLayoutMode.List,
+            Position = ContentAlignment.MiddleCenter,
+            PresentationMode = NotificationToastPresentationMode.Dialog,
+        }, () => setResult(DialogResult.None));
+        return result;
+    }
+
+    public Task<string> ShowDialogAsync(
 		string title,
 		string message,
 		NotificationKind kind = NotificationKind.Info,
@@ -150,9 +242,69 @@ internal sealed class NotificationManager : IDisposable
 			PresentationMode = NotificationToastPresentationMode.Dialog,
 		}, () => tcs.TrySetResult(string.Empty));
 		return tcs.Task;
-	}
+    }
 
-	public void DismissAll()
+    public Task<DialogResult> ShowDialogAsync(
+        string title,
+        string message,
+        MessageBoxButtons messageBoxButtons = MessageBoxButtons.OK,
+        MessageBoxIcon messageBoxIcon = MessageBoxIcon.None,
+		MessageBoxDefaultButton defaultButton = MessageBoxDefaultButton.Button1, // TODO: Try set focus to the default button
+        int durationMs = 0)
+    {
+		var kind = messageBoxIcon switch
+        {
+            MessageBoxIcon.Error => NotificationKind.Error,
+            MessageBoxIcon.Warning => NotificationKind.Warning,
+            MessageBoxIcon.Question => NotificationKind.Info,
+            MessageBoxIcon.Information => NotificationKind.Info,
+            _ => NotificationKind.Info
+        };
+
+        var tcs = new TaskCompletionSource<DialogResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        NotificationAction[] actions = messageBoxButtons switch
+		{
+			MessageBoxButtons.OK => [
+				new NotificationAction("OK", () => tcs.TrySetResult(DialogResult.OK))
+			],
+			MessageBoxButtons.OKCancel => [
+				new NotificationAction("OK",     () => tcs.TrySetResult(DialogResult.OK)),
+			new NotificationAction("Cancel", () => tcs.TrySetResult(DialogResult.Cancel))
+			],
+			MessageBoxButtons.AbortRetryIgnore => [
+				new NotificationAction("Abort",  () => tcs.TrySetResult(DialogResult.Abort)),
+			new NotificationAction("Retry",  () => tcs.TrySetResult(DialogResult.Retry)),
+			new NotificationAction("Ignore", () => tcs.TrySetResult(DialogResult.Ignore))
+			],
+			MessageBoxButtons.YesNoCancel => [
+				new NotificationAction("Yes",    () => tcs.TrySetResult(DialogResult.Yes)),
+			new NotificationAction("No",     () => tcs.TrySetResult(DialogResult.No)),
+			new NotificationAction("Cancel", () => tcs.TrySetResult(DialogResult.Cancel))
+			],
+			MessageBoxButtons.YesNo => [
+				new NotificationAction("Yes", () => tcs.TrySetResult(DialogResult.Yes)),
+			new NotificationAction("No",  () => tcs.TrySetResult(DialogResult.No))
+			],
+			MessageBoxButtons.RetryCancel => [
+				new NotificationAction("Retry",  () => tcs.TrySetResult(DialogResult.Retry)),
+			new NotificationAction("Cancel", () => tcs.TrySetResult(DialogResult.Cancel))
+			],
+			_ => [new NotificationAction("OK", () => tcs.TrySetResult(DialogResult.OK))]
+		};
+
+        ShowCore(title, message, kind, new NotificationOptions
+        {
+            DurationMs = durationMs,
+            ShowProgressBar = false,
+            Actions = actions,
+            LayoutMode = NotificationToastLayoutMode.List,
+            Position = ContentAlignment.MiddleCenter,
+            PresentationMode = NotificationToastPresentationMode.Dialog,
+        }, () => tcs.TrySetResult(DialogResult.None));
+        return tcs.Task;
+    }
+
+    public void DismissAll()
 	{
 		foreach (var list in _activeByAlignment.Values)
 			for (var i = list.Count - 1; i >= 0; i--)

@@ -8,8 +8,6 @@ namespace Orivy.Example;
 
 internal sealed partial class NotificationsDemoPage
 {
-    private Container notificationPage = null!;
-
     private Button notifBtnInfo = null!;
     private Button notifBtnSuccess = null!;
     private Button notifBtnWarning = null!;
@@ -40,18 +38,13 @@ internal sealed partial class NotificationsDemoPage
     private void InitializeComponent()
     {
         Text = "Notifications";
-        _tabIcon = ExampleHelper.CreateIcon(new SKColor(0xEF, 0x44, 0x44), ExampleIconKind.Warning);
-        Image = _tabIcon;
-
-        notificationPage = new Container
-        {
-            Name = "notificationsPage",
-            Text = "Notifications",
-            Padding = new Thickness(28),
-            Dock = DockStyle.Fill,
-            Radius = new Radius(0),
-            Border = new Thickness(0),
-        };
+        Image = ExampleHelper.CreateIcon(new SKColor(0xEF, 0x44, 0x44), ExampleIconKind.Warning);
+        Padding = new Thickness(28);
+        Dock = DockStyle.Fill;
+        Radius = new Radius(0);
+        Border = new Thickness(0);
+        Text = "Notifications";
+        AutoScroll = true;
 
         var header = CreateHeader();
         var basicsRow = CreateRow(out notifBtnInfo, "Info", 120, out notifBtnSuccess, "Success", 120, out notifBtnWarning, "Warning", 120, out notifBtnError, "Error", 120);
@@ -76,8 +69,7 @@ internal sealed partial class NotificationsDemoPage
         ConfigureDialogButton(notifBtnDialog);
         ConfigureSurfaceButton(notifBtnMessageBox);
 
-        AddTopDown(notificationPage,
-            messageBoxRow,
+        AddTopDown(messageBoxRow,
             layoutRow,
             bottomPositionRow,
             topPositionRow,
@@ -90,8 +82,6 @@ internal sealed partial class NotificationsDemoPage
             basicsRow,
             header);
 
-        Controls.Add(notificationPage);
-        notificationPage.BringToFront();
         RefreshNotificationStackModeButton();
         PerformLayout();
         Invalidate();
@@ -190,13 +180,13 @@ internal sealed partial class NotificationsDemoPage
             row.Controls.Add(buttons[i]);
     }
 
-    private static void AddTopDown(Container parent, params ElementBase[] controls)
+    private void AddTopDown(params ElementBase[] controls)
     {
         for (var i = 0; i < controls.Length; i++)
-            parent.Controls.Add(controls[i]);
+            Controls.Add(controls[i]);
     }
 
-    private static void ConfigureSemanticButton(Button button, SKColor baseColor, SKColor hoverColor)
+    private void ConfigureSemanticButton(Button button, SKColor baseColor, SKColor hoverColor)
     {
         button.ConfigureVisualStyles(s => s
             .DefaultTransition(TimeSpan.FromMilliseconds(140), AnimationType.CubicEaseOut)

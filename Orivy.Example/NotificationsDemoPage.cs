@@ -232,8 +232,8 @@ internal sealed partial class NotificationsDemoPage : Container
             3200);
     }
 
-    private void NotifBtnDialog_Click(object sender, EventArgs e)
-        => NotificationToast.ShowDialog(
+    private void NotifBtnDialog_Click(object sender, EventArgs e){
+        var toast = NotificationToast.ShowDialog(
             "Dialog Presentation",
             "Dialog mode centers the notification, adds a scrim and keeps the action area readable for confirm-style flows.",
             NotificationKind.Info,
@@ -247,6 +247,7 @@ internal sealed partial class NotificationsDemoPage : Container
                 new NotificationAction("Close")
             ]
             });
+    }
 
     private void ShowNotificationAtPosition(
         ContentAlignment position,
@@ -317,6 +318,11 @@ internal sealed partial class NotificationsDemoPage : Container
 
     private void NotifBtnMessageBox_Click(object sender, EventArgs e)
     {
-        var result = MessageBox.Show("Hello from MessageBox!", "Test", MessageBoxButtons.OKCancel, MessageBoxIcon.Information);
+        var result = MessageBox.Show("Hello from MessageBox!", "Test", MessageBoxButtons.AbortRetryIgnore, MessageBoxIcon.Information);
+        NotificationToast.Show(
+            "MessageBox Result",
+            $"You clicked {result}. MessageBox is modal and blocks interaction with the underlying window until dismissed.",
+            NotificationKind.Info,
+            4000);
     }
 }

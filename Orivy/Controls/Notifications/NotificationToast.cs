@@ -65,7 +65,28 @@ public sealed class NotificationToast : ElementBase
 		params string[] buttonLabels)
 		=> ResolveCurrentManager().ConfirmAsync(title, message, kind, durationMs, buttonLabels);
 
-	public static void DismissAll()
+    public static DialogResult Show(
+        string title,
+        string message,
+        MessageBoxButtons messageBoxButtons = MessageBoxButtons.OK,
+        MessageBoxIcon messageBoxIcon = MessageBoxIcon.None,
+        MessageBoxDefaultButton defaultButton = MessageBoxDefaultButton.Button1,
+		int durationMs = 0
+        )
+        => ResolveCurrentManager().ShowDialog(title, message, messageBoxButtons, messageBoxIcon, defaultButton, durationMs);
+
+    public static Task<DialogResult> ShowAsync(
+        string title,
+        string message,
+        MessageBoxButtons messageBoxButtons = MessageBoxButtons.OK,
+        MessageBoxIcon messageBoxIcon = MessageBoxIcon.None,
+        MessageBoxDefaultButton defaultButton = MessageBoxDefaultButton.Button1,
+        int durationMs = 0
+        )
+        => ResolveCurrentManager().ShowDialogAsync(title, message, messageBoxButtons, messageBoxIcon, defaultButton, durationMs);
+
+
+    public static void DismissAll()
 		=> ResolveCurrentManager().DismissAll();
 
 	private static NotificationManager ResolveCurrentManager()

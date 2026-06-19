@@ -129,6 +129,10 @@ internal partial class MainWindow
         var cardDemoTabIcon = CreateExampleIcon(new SKColor(0xF9, 0x73, 0x16), ExampleIconKind.Healthy);
         cardDemoPage.Image = cardDemoTabIcon;
         tabView.Controls.Add(cardDemoPage);
+        var markdownViewerPage = new MarkdownViewerDemoPage();
+        var markdownViewerTabIcon = CreateExampleIcon(new SKColor(0x10, 0xB9, 0x81), ExampleIconKind.Pulse);
+        markdownViewerPage.Image = markdownViewerTabIcon;
+        tabView.Controls.Add(markdownViewerPage);
 
 
 
@@ -143,6 +147,7 @@ internal partial class MainWindow
         this.Width = 1100;
         this.Height = 650;
         this.DwmMargin = 1000;
+        this.tabView.HorizontalTabOverflowScrolling = true;
         //this.Padding = new(10);
         this.WindowThemeType = WindowThemeType.Tabbed;
         RefreshWindowThemeMenuChecks();
