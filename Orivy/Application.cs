@@ -156,6 +156,15 @@ public class Application
 		}
     }
 
+    public static void DoEvents()
+    {
+        while (PeekMessage(out var msg, IntPtr.Zero, 0, 0, 0x0001)) // PM_REMOVE
+        {
+            TranslateMessage(ref msg);
+            DispatchMessage(ref msg);
+        }
+    }
+
     private static SKFont CreateDefaultFont()
     {
         return CreateUiFont(ResolveDefaultTypeface(), 9.75f);

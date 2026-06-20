@@ -101,7 +101,7 @@ internal sealed partial class NotificationsDemoPage : Container
             NotificationKind.Info,
             0,
             new NotificationAction("Install Now", () =>
-            NotificationToast.Show("Installing", "Updating to v2.4.1 in the background�", NotificationKind.Info, 3000)),
+            NotificationToast.Show("Installing", "Updating to v2.4.1 in the background!", NotificationKind.Info, 3000)),
             new NotificationAction("Later"));
 
     private async void NotifBtnManualProgress_Click(object sender, EventArgs e)
