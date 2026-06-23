@@ -146,13 +146,12 @@ internal partial class MainWindow
         this.Text = "Orivy Example";
         this.Width = 1100;
         this.Height = 650;
-        this.DwmMargin = 1000;
-        this.tabView.HorizontalTabOverflowScrolling = true;
-        //this.Padding = new(10);
+        this.DwmMargin = -1;
         this.WindowThemeType = WindowThemeType.Tabbed;
         RefreshWindowThemeMenuChecks();
         this.ContextMenuStrip = this.extendMenu;
         this.TabView = tabView;
+        this.TabView.TabOverflowMode = TabOverflowMode.Scroll;
         this.StartPosition = Orivy.FormStartPosition.CenterScreen;
         this.ShowPerfOverlay = true;
         this.Controls.Add(tabView);

@@ -50,7 +50,7 @@ public class TextBox : ElementBase
     private float _contentHeight;
     private string _displayText = string.Empty;
     private bool _multiline;
-    private bool _readOnly;
+    protected bool _readOnly;
     private bool _acceptsReturn = true;
     private bool _acceptsTab;
     private bool _passwordMode;
@@ -1870,7 +1870,7 @@ public class TextBox : ElementBase
         return Math.Clamp(index, 0, Text.Length);
     }
 
-    private void InvalidateTextLayout()
+    protected void InvalidateTextLayout()
     {
         _layoutDirty = true;
         InvalidateMeasure();

@@ -48,6 +48,23 @@ public partial class TabView : ElementBase
     private const float TitleBarTabFontSize = 8.5f;
     private const float TitleBarTabFontSizeWithIcon = 9.25f;
 
+    // NEW: overflow mode fields
+    private TabOverflowMode _tabOverflowMode = TabOverflowMode.Collapse;
+    private float _scrollOffset;
+    private float _maxScrollOffset;
+    private SKRect _leftChevronRect = SKRect.Empty;
+    private SKRect _rightChevronRect = SKRect.Empty;
+    private bool _chevronHoverLeft;
+    private bool _chevronHoverRight;
+    private const float ChevronSize = 28f;
+    private const float ChevronFadeWidth = 30f;
+
+    // Optimization: pre-allocated arrays + reusable paint for the fade
+    // gradient, avoiding per-frame GC allocations in DrawFadeGradient.
+    private readonly SKColor[] _fadeColors = new SKColor[2];
+    private readonly float[] _fadePositions = { 0f, 1f };
+    private readonly SKPaint _fadePaint;
+
     private readonly AnimationManager _transitionAnimation;
     private readonly AnimationManager _tabSelectionAnimation;
     private readonly AnimationManager _tabStripResizerAnimation;
@@ -206,6 +223,7 @@ public partial class TabView : ElementBase
         };
         _tabPath = new SKPath();
         _tabFont = new SKFont();
+        _fadePaint = new SKPaint { IsAntialias = true };
 
         _tabSelectionAnimation = new AnimationManager
         {
@@ -282,6 +300,33 @@ public partial class TabView : ElementBase
         };
         _transitionAnimation.OnAnimationProgress += HandleTransitionProgress;
         _transitionAnimation.OnAnimationFinished += HandleTransitionFinished;
+    }
+
+    // =========================================================================
+    // NEW: TabOverflowMode property
+    // =========================================================================
+    [Category("Behavior")]
+    [DefaultValue(TabOverflowMode.Collapse)]
+    [Description("Defines how tabs behave when they exceed the available space: Collapse (scale down) or Scroll (chevron navigation).")]
+    public TabOverflowMode TabOverflowMode
+    {
+        get => _tabOverflowMode;
+        set
+        {
+            if (_tabOverflowMode == value)
+                return;
+
+            _tabOverflowMode = value;
+            _scrollOffset = 0f;
+            _maxScrollOffset = 0f;
+            _leftChevronRect = SKRect.Empty;
+            _rightChevronRect = SKRect.Empty;
+            _chevronHoverLeft = false;
+            _chevronHoverRight = false;
+            Cursor = Cursors.Default;
+            InvalidateTabChrome();
+            Invalidate();
+        }
     }
 
     [Category("Behavior")]
@@ -682,6 +727,8 @@ public partial class TabView : ElementBase
             if (ParentWindow is Window window)
                 window.CloseFloatingOverlays();
             EnsureSelectedVerticalTabVisible();
+            EnsureSelectedHorizontalTabVisible();
+            EnsureSelectedTitleBarTabVisible();
             StartTabSelectionAnimation(previousSelectedIndex, _selectedIndex);
             StartTitleBarSelectionAnimation(previousSelectedIndex, _selectedIndex);
 
@@ -832,6 +879,25 @@ public partial class TabView : ElementBase
 
     internal override void OnMouseDown(MouseEventArgs e)
     {
+        // Ensure chevron rects and scroll metrics are current before any
+        // hit-testing. Without this the chevron rects can be stale after a
+        // resize / mode switch.
+        if (IsHorizontalScrollOverflowActive)
+        {
+            UpdateTabRects();
+
+            if (CanScrollLeft && _leftChevronRect.Contains(e.Location))
+            {
+                ScrollTabs(-GetScrollStep());
+                return;
+            }
+            if (CanScrollRight && _rightChevronRect.Contains(e.Location))
+            {
+                ScrollTabs(GetScrollStep());
+                return;
+            }
+        }
+
         if (e.Button == MouseButtons.Left && TryBeginTabStripResize(e.Location))
         {
             base.OnMouseDown(e);
@@ -894,6 +960,25 @@ public partial class TabView : ElementBase
         }
 
         base.OnMouseMove(e);
+
+        // Chevron hover state â€” only register hover when the chevron is
+        // actually visible (i.e. scrolling is still possible in that
+        // direction). This prevents the cursor from flipping to Hand and
+        // confusing the user when hovering over a hidden chevron slot.
+        if (IsHorizontalScrollOverflowActive)
+        {
+            UpdateTabRects();
+
+            var leftHover = CanScrollLeft && _leftChevronRect.Contains(e.Location);
+            var rightHover = CanScrollRight && _rightChevronRect.Contains(e.Location);
+            if (_chevronHoverLeft != leftHover || _chevronHoverRight != rightHover)
+            {
+                _chevronHoverLeft = leftHover;
+                _chevronHoverRight = rightHover;
+                Cursor = (leftHover || rightHover) ? Cursors.Hand : Cursors.Default;
+                Invalidate();
+            }
+        }
 
         if (!ShouldDrawTabStrip)
         {
@@ -980,6 +1065,19 @@ public partial class TabView : ElementBase
             }
         }
 
+        // Horizontal scroll overflow: ONLY horizontal mouse wheel (trackpad
+        // horizontal gesture / tilt wheel) scrolls the tab strip. Vertical
+        // wheel is intentionally ignored so it keeps its default behaviour
+        // (e.g. scrolling the page content under the tab strip).
+        if (IsAnyHorizontalScrollOverflowActive && e.IsHorizontalWheel)
+        {
+            if (_maxScrollOffset > 0f)
+            {
+                ScrollTabs(-e.Delta);
+                return;
+            }
+        }
+
         base.OnMouseWheel(e);
     }
 
@@ -1007,6 +1105,17 @@ public partial class TabView : ElementBase
             if (_hoveredTabStripResizer)
                 _tabStripResizerAnimation.StartNewAnimation(AnimationDirection.Out);
             _hoveredTabStripResizer = false;
+            if (!_isResizingTabStrip)
+                Cursor = Cursors.Default;
+            invalidate = true;
+        }
+
+        // Reset chevron hover on mouse leave so the cursor does not
+        // stay as Hand when the pointer exits the control.
+        if (_chevronHoverLeft || _chevronHoverRight)
+        {
+            _chevronHoverLeft = false;
+            _chevronHoverRight = false;
             if (!_isResizingTabStrip)
                 Cursor = Cursors.Default;
             invalidate = true;
@@ -1126,6 +1235,7 @@ public partial class TabView : ElementBase
             _tabPath.Dispose();
             _tabFont.Dispose();
             _transitionPaint.Dispose();
+            _fadePaint.Dispose();
             ReleaseTransitionSnapshots();
         }
 
@@ -1569,8 +1679,8 @@ public partial class TabView : ElementBase
     private void DrawFlip(SKCanvas canvas, SKImage fromSnapshot, SKImage toSnapshot, SKRect viewport, float progress)
     {
         // Horizontal card flip via horizontal squash
-        // 0›0.5: from squashes from full width to zero
-        // 0.5›1: to expands from zero to full width
+        // 0â€º0.5: from squashes from full width to zero
+        // 0.5â€º1: to expands from zero to full width
         // dark overlay peaks at the flip midpoint
         var darkness = 1f - Math.Abs(progress - 0.5f) * 2f;
 
@@ -1706,7 +1816,7 @@ public partial class TabView : ElementBase
     private void DrawMorph(SKCanvas canvas, SKImage fromSnapshot, SKImage toSnapshot, SKRect viewport, float progress)
     {
         // Both pages cross-fade while simultaneously counter-scaling:
-        // from shrinks 1.0 › 0.96, to grows 1.04 › 1.0, giving a soft dissolve-morph feel.
+        // from shrinks 1.0 â€º 0.96, to grows 1.04 â€º 1.0, giving a soft dissolve-morph feel.
         var fromScale = 1f - 0.04f * progress;
         var toScale   = 1.04f - 0.04f * progress;
 
@@ -1741,9 +1851,9 @@ public partial class TabView : ElementBase
     private void DrawCrossZoom(SKCanvas canvas, SKImage fromSnapshot, SKImage toSnapshot, SKRect viewport, float progress)
     {
         // Two-phase transition with a brief mid-point gap (like a lens blink):
-        //   0.0 › 0.55 : FROM shrinks (1.0 › 0.6) and fades completely out.
-        //   0.45 › 1.0 : TO grows (0.6 › 1.0) and fades fully in.
-        // The overlap zone (0.45–0.55) lets both briefly coexist at the crossover.
+        //   0.0 â€º 0.55 : FROM shrinks (1.0 â€º 0.6) and fades completely out.
+        //   0.45 â€º 1.0 : TO grows (0.6 â€º 1.0) and fades fully in.
+        // The overlap zone (0.45â€“0.55) lets both briefly coexist at the crossover.
         var fromAlpha = (byte)(255f * Math.Max(0f, 1f - progress / 0.55f));
         var fromScale = 1f - 0.4f * (progress / 0.55f);
         fromScale = Math.Clamp(fromScale, 0.6f, 1f);
@@ -1943,6 +2053,9 @@ public partial class TabView : ElementBase
         CancelTransitionPreservingSelection();
     }
 
+    // =========================================================================
+    // NEW: DrawTabStrip with chevron and fade support
+    // =========================================================================
     private void DrawTabStrip(SKCanvas canvas)
     {
         UpdateTabRects();
@@ -1961,128 +2074,129 @@ public partial class TabView : ElementBase
         var closeButtonSpacing = TabCloseButtonSpacing * ScaleFactor;
         var isDark = ColorScheme.IsDarkMode;
 
-        // --- Unified, clean color palette per design mode ---
+        // --- Unified color palette (unchanged) ---
         SKColor headerBackground, headerBorderColor,
                 inactiveBackground, hoverBackground, selectedBackground,
                 inactiveBorderColor, selectedBorderColor,
                 activeTextColor, inactiveTextColor;
 
+        // Use the theme-aware foreground color for text. The control's
+        // ForeColor property may not always reflect the active theme (it can
+        // be stale after a theme switch or never set by the parent), which is
+        // why text was invisible in every design mode except the fully
+        // transparent Rectangle / "Plain" mode. ColorScheme.ForeColor is
+        // guaranteed to contrast with the theme's surface palette.
+        var themeForeColor = ColorScheme.ForeColor;
+
         switch (TabDesignMode)
         {
             case TabViewDesignMode.Rectangle:
-                // Tailwind underline tabs: zero fill, bold primary indicator, subtle hover ghost
                 headerBackground    = SKColors.Transparent;
                 headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)72 : (byte)52);
                 inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = ForeColor.WithAlpha(isDark ? (byte)12 : (byte)8);
+                hoverBackground     = themeForeColor.WithAlpha(isDark ? (byte)18 : (byte)12);
                 selectedBackground  = SKColors.Transparent;
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = SKColors.Transparent;
-                activeTextColor     = Enabled ? ForeColor : ForeColor.WithAlpha(170);
-                inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)165 : (byte)148) : ForeColor.WithAlpha(110);
+                activeTextColor     = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
+                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)190 : (byte)175) : themeForeColor.WithAlpha(110);
                 break;
 
             case TabViewDesignMode.Rounded:
-                // Segmented control / pill tabs: muted container, solid tinted fill on selected
                 headerBackground    = ColorScheme.SurfaceContainerHigh;
                 headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)60 : (byte)44);
                 inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = ForeColor.WithAlpha(isDark ? (byte)14 : (byte)9);
+                hoverBackground     = themeForeColor.WithAlpha(isDark ? (byte)18 : (byte)12);
                 selectedBackground  = ColorScheme.Surface;
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)90 : (byte)68);
-                activeTextColor     = Enabled ? ForeColor : ForeColor.WithAlpha(170);
-                inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)162 : (byte)148) : ForeColor.WithAlpha(110);
+                activeTextColor     = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
+                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)185 : (byte)170) : themeForeColor.WithAlpha(110);
                 break;
 
             case TabViewDesignMode.RoundedCompact:
-                // bg-muted container, bg-background card on selected, crisp border
                 headerBackground    = ColorScheme.SurfaceVariant;
                 headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)48 : (byte)36);
                 inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = ForeColor.WithAlpha(isDark ? (byte)10 : (byte)7);
+                hoverBackground     = themeForeColor.WithAlpha(isDark ? (byte)16 : (byte)10);
                 selectedBackground  = ColorScheme.Surface;
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)88 : (byte)68);
-                activeTextColor     = Enabled ? ForeColor : ForeColor.WithAlpha(170);
-                inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)158 : (byte)142) : ForeColor.WithAlpha(110);
+                activeTextColor     = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
+                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)185 : (byte)168) : themeForeColor.WithAlpha(110);
                 break;
 
             case TabViewDesignMode.Pill:
-                // GitHub/Vercel pill nav: filled Primary pill on selected, no container background
                 headerBackground    = SKColors.Transparent;
                 headerBorderColor   = SKColors.Transparent;
                 inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = ColorScheme.Primary.WithAlpha(isDark ? (byte)18 : (byte)13);
+                hoverBackground     = ColorScheme.Primary.WithAlpha(isDark ? (byte)24 : (byte)18);
                 selectedBackground  = ColorScheme.Primary;
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = SKColors.Transparent;
                 activeTextColor     = Enabled ? ColorScheme.Primary.Determine() : ColorScheme.Primary.Determine().WithAlpha(170);
-                inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)160 : (byte)144) : ForeColor.WithAlpha(110);
+                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)190 : (byte)175) : themeForeColor.WithAlpha(110);
                 break;
 
             case TabViewDesignMode.Outlined:
-                // Classic 3-sided tab: open bottom, selected sits on the bottom divider
                 headerBackground    = SKColors.Transparent;
                 headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)72 : (byte)52);
                 inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = ForeColor.WithAlpha(isDark ? (byte)11 : (byte)7);
+                hoverBackground     = themeForeColor.WithAlpha(isDark ? (byte)16 : (byte)10);
                 selectedBackground  = ColorScheme.Surface;
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)96 : (byte)72);
-                activeTextColor     = Enabled ? ForeColor : ForeColor.WithAlpha(170);
-                inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)160 : (byte)144) : ForeColor.WithAlpha(110);
+                activeTextColor     = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
+                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)185 : (byte)170) : themeForeColor.WithAlpha(110);
                 break;
 
             case TabViewDesignMode.Minimal:
-                // Linear/Raycast sidebar: minimal surface, Primary left-accent bar on selected
                 headerBackground    = SKColors.Transparent;
                 headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)38 : (byte)28);
                 inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = ForeColor.WithAlpha(isDark ? (byte)9 : (byte)6);
-                selectedBackground  = ColorScheme.Primary.WithAlpha(isDark ? (byte)12 : (byte)9);
+                hoverBackground     = themeForeColor.WithAlpha(isDark ? (byte)14 : (byte)8);
+                selectedBackground  = ColorScheme.Primary.WithAlpha(isDark ? (byte)16 : (byte)12);
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = ColorScheme.Primary;
                 activeTextColor     = Enabled ? ColorScheme.Primary : ColorScheme.Primary.WithAlpha(170);
-                inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)155 : (byte)138) : ForeColor.WithAlpha(110);
+                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)185 : (byte)168) : themeForeColor.WithAlpha(110);
                 break;
 
             case TabViewDesignMode.Fluent:
                 headerBackground    = (isDark ? ColorScheme.SurfaceContainerHigh : ColorScheme.SurfaceContainer).WithAlpha(isDark ? (byte)184 : (byte)218);
                 headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)44 : (byte)34);
                 inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = ColorScheme.Primary.WithAlpha(isDark ? (byte)22 : (byte)14);
+                hoverBackground     = ColorScheme.Primary.WithAlpha(isDark ? (byte)28 : (byte)20);
                 selectedBackground  = (isDark ? ColorScheme.SurfaceContainerHigh : ColorScheme.Surface).WithAlpha(isDark ? (byte)232 : (byte)242);
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = SKColors.White.WithAlpha(isDark ? (byte)36 : (byte)144);
-                activeTextColor     = Enabled ? ForeColor : ForeColor.WithAlpha(170);
-                inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)166 : (byte)150) : ForeColor.WithAlpha(110);
+                activeTextColor     = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
+                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)190 : (byte)175) : themeForeColor.WithAlpha(110);
                 break;
 
             case TabViewDesignMode.MacOS:
                 headerBackground    = ColorScheme.SurfaceContainer.WithAlpha(isDark ? (byte)150 : (byte)178);
                 headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)54 : (byte)42);
                 inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = SKColors.White.WithAlpha(isDark ? (byte)16 : (byte)70);
-                selectedBackground  = SKColors.White.WithAlpha(isDark ? (byte)34 : (byte)232);
+                hoverBackground     = themeForeColor.WithAlpha(isDark ? (byte)20 : (byte)14);
+                selectedBackground  = SKColors.White.WithAlpha(isDark ? (byte)40 : (byte)235);
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)70 : (byte)46);
-                activeTextColor     = Enabled ? ForeColor : ForeColor.WithAlpha(170);
-                inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)164 : (byte)146) : ForeColor.WithAlpha(110);
+                activeTextColor     = Enabled ? (isDark ? SKColors.White : themeForeColor) : themeForeColor.WithAlpha(170);
+                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)190 : (byte)170) : themeForeColor.WithAlpha(110);
                 break;
 
             case TabViewDesignMode.Chromed:
             default:
-                // Browser-style tabs: surface strip, elevated selected card, divider line
                 headerBackground    = ColorScheme.SurfaceContainer;
                 headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)96 : (byte)70);
                 inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = ForeColor.WithAlpha(isDark ? (byte)13 : (byte)9);
+                hoverBackground     = themeForeColor.WithAlpha(isDark ? (byte)18 : (byte)12);
                 selectedBackground  = ColorScheme.Surface;
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)110 : (byte)82);
-                activeTextColor     = Enabled ? ForeColor : ForeColor.WithAlpha(170);
-                inactiveTextColor   = Enabled ? ForeColor.WithAlpha(isDark ? (byte)168 : (byte)152) : ForeColor.WithAlpha(110);
+                activeTextColor     = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
+                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)190 : (byte)175) : themeForeColor.WithAlpha(110);
                 break;
         }
 
@@ -2149,6 +2263,26 @@ public partial class TabView : ElementBase
         {
             clippedTabContentSave = canvas.Save();
             canvas.ClipRect(headerRect);
+        }
+
+        // In horizontal scroll mode, clip tab content to the visible region
+        // between the chevrons. Without this, scrolled tabs bleed over the
+        // chevron area and get drawn on top of (or under) the chevrons,
+        // which is one of the main causes of the "unstable" rendering.
+        var scrollClipActive = IsHorizontalScrollOverflowActive && _maxScrollOffset > 0f;
+        var scrollClipSave = 0;
+        if (scrollClipActive)
+        {
+            var visibleBounds = GetScrollVisibleBounds();
+            if (visibleBounds.Width > 0f && visibleBounds.Height > 0f)
+            {
+                scrollClipSave = canvas.Save();
+                canvas.ClipRect(visibleBounds);
+            }
+            else
+            {
+                scrollClipActive = false;
+            }
         }
 
         float ComputeDragTabTarget(int tIdx)
@@ -2308,6 +2442,265 @@ public partial class TabView : ElementBase
 
         if (clippedTabContent)
             canvas.RestoreToCount(clippedTabContentSave);
+
+        // Restore the scroll clip BEFORE drawing chevrons and fade gradients
+        // so that the chevrons and fades are never clipped by the visible
+        // tab area (they live in the chevron zone by definition).
+        if (scrollClipActive)
+            canvas.RestoreToCount(scrollClipSave);
+
+        // =========================================================================
+        // Chevron buttons and fade effect (horizontal scroll mode only).
+        // Chevrons are ONLY drawn when scrolling is still possible in that
+        // direction. When you reach the scroll boundary the chevron
+        // disappears, giving the edge tab full visibility â€” no more
+        // "tab hidden behind chevron" at scroll ends.
+        // =========================================================================
+        if (IsHorizontalScrollOverflowActive && _maxScrollOffset > 0f)
+        {
+            var canScrollLeft = CanScrollLeft;
+            var canScrollRight = CanScrollRight;
+
+            var chevronSize = ChevronSize * ScaleFactor;
+            var chevronMargin = 4f * ScaleFactor;
+            var fadeWidth = 40f * ScaleFactor;
+
+            // Shadow starts FROM the chevron â€” the opaque part is right
+            // behind the chevron (masking tabs that scroll under it), and
+            // the fade extends into the visible tab area. The chevron is
+            // drawn on top, so the shadow reads as a soft mask behind it.
+            var leftChevronLeft = headerRect.Left + chevronMargin;
+            var rightChevronRight = headerRect.Right - chevronMargin;
+
+            // Shadow-based fade: ColorScheme.ShadowColor provides a
+            // theme-aware soft shadow that works in both light and dark
+            // modes without looking like a solid coloured band.
+            var fadeColor = ColorScheme.ShadowColor;
+
+            if (canScrollLeft)
+            {
+                // Left fade: from chevron left edge â†’ into tab area
+                DrawFadeGradient(canvas, new SKRect(leftChevronLeft, headerRect.Top, leftChevronLeft + chevronSize + fadeWidth, headerRect.Bottom), true, fadeColor);
+                DrawChevron(canvas, _leftChevronRect, _chevronHoverLeft, true);
+            }
+            if (canScrollRight)
+            {
+                // Right fade: from tab area â†’ chevron right edge
+                DrawFadeGradient(canvas, new SKRect(rightChevronRight - chevronSize - fadeWidth, headerRect.Top, rightChevronRight, headerRect.Bottom), false, fadeColor);
+                DrawChevron(canvas, _rightChevronRect, _chevronHoverRight, false);
+            }
+        }
+    }
+
+    // =========================================================================
+    // NEW: Chevron and fade helpers
+    // =========================================================================
+    private void DrawFadeGradient(SKCanvas canvas, SKRect rect, bool leftSide, SKColor fadeColor)
+    {
+        if (rect.Width <= 0f || rect.Height <= 0f)
+            return;
+
+        // Use the full width of the passed rect â€” the caller controls how
+        // wide the fade should be (e.g. chevronSize + fadeWidth so the
+        // shadow starts behind the chevron and extends into the tab area).
+        var actualRect = rect;
+
+        // Optimization: reuse pre-allocated arrays + class-level paint to
+        // avoid per-frame GC pressure (this runs every paint tick).
+        _fadeColors[0] = fadeColor.WithAlpha(50);
+        _fadeColors[1] = fadeColor.WithAlpha(0);
+
+        var start = leftSide ? new SKPoint(actualRect.Left, 0) : new SKPoint(actualRect.Right, 0);
+        var end = leftSide ? new SKPoint(actualRect.Right, 0) : new SKPoint(actualRect.Left, 0);
+
+        using var shader = SKShader.CreateLinearGradient(
+            start, end, _fadeColors, _fadePositions, SKShaderTileMode.Clamp);
+
+        _fadePaint.Shader = shader;
+        canvas.DrawRect(actualRect, _fadePaint);
+        _fadePaint.Shader = null; // release shader reference
+    }
+
+    private void DrawChevron(SKCanvas canvas, SKRect rect, bool hovered, bool left)
+    {
+        if (rect.Width <= 0 || rect.Height <= 0) return;
+
+        var sf = ScaleFactor;
+        var isDark = ColorScheme.IsDarkMode;
+        var foreColor = ColorScheme.ForeColor;
+
+        // Win11 / Fluent scroll-button style: a soft rounded-rectangle
+        // background that lifts on hover, with a thin, geometric chevron
+        // arrow. No heavy border in the resting state.
+        var bgRect = new SKRect(
+            rect.Left + 2f * sf,
+            rect.Top + 2f * sf,
+            rect.Right - 2f * sf,
+            rect.Bottom - 2f * sf);
+        var radius = MathF.Min(bgRect.Width, bgRect.Height) * 0.35f;
+
+        // Optimization: reuse class-level paints instead of allocating
+        // new SKPaint objects every frame.
+        _tabBackgroundPaint.Style = SKPaintStyle.Fill;
+        _tabBackgroundPaint.Color = hovered
+            ? ColorScheme.Primary.WithAlpha(isDark ? (byte)38 : (byte)28)
+            : foreColor.WithAlpha(isDark ? (byte)18 : (byte)12);
+        //canvas.DrawRoundRect(bgRect, radius, radius, _tabBackgroundPaint);
+
+        // Arrow via the class-level path (reset + rebuild, no alloc).
+        _tabGlyphPaint.Style = SKPaintStyle.Stroke;
+        _tabGlyphPaint.StrokeWidth = MathF.Max(1.25f, 1.5f * sf);
+        _tabGlyphPaint.Color = hovered
+            ? foreColor.WithAlpha(isDark ? (byte)245 : (byte)210)
+            : foreColor.WithAlpha(isDark ? (byte)200 : (byte)150);
+
+        var cx = bgRect.MidX;
+        var cy = bgRect.MidY;
+        var arrowSize = Math.Min(bgRect.Width, bgRect.Height) * 0.2f;
+        var ax = arrowSize * 0.6f;
+
+        _tabPath.Reset();
+        if (left)
+        {
+            _tabPath.MoveTo(cx + ax, cy - arrowSize);
+            _tabPath.LineTo(cx - ax, cy);
+            _tabPath.LineTo(cx + ax, cy + arrowSize);
+        }
+        else
+        {
+            _tabPath.MoveTo(cx - ax, cy - arrowSize);
+            _tabPath.LineTo(cx + ax, cy);
+            _tabPath.LineTo(cx - ax, cy + arrowSize);
+        }
+        canvas.DrawPath(_tabPath, _tabGlyphPaint);
+    }
+
+    private void ScrollTabs(float delta)
+    {
+        if (_maxScrollOffset <= 0)
+            return;
+
+        var newOffset = _scrollOffset + delta;
+        newOffset = Math.Clamp(newOffset, 0f, _maxScrollOffset);
+        if (Math.Abs(newOffset - _scrollOffset) < 0.5f)
+            return;
+
+        _scrollOffset = newOffset;
+        Invalidate();
+    }
+
+    private float GetScrollStep()
+    {
+        // One visible tab width or at least 40px
+        if (_tabRects.Count == 0)
+            return 40f * ScaleFactor;
+
+        var avgWidth = 0f;
+        var count = Math.Min(_tabRects.Count, 5);
+        for (var i = 0; i < count; i++)
+            avgWidth += _tabRects[i].Width;
+        avgWidth /= count;
+
+        return Math.Max(40f * ScaleFactor, avgWidth * 0.8f);
+    }
+
+    /// <summary>
+    /// Whether the horizontal scroll overflow mode is currently active
+    /// for the EMBEDDED tab strip (Top/Bottom layout, Scroll overflow).
+    /// </summary>
+    private bool IsHorizontalScrollOverflowActive =>
+        TabOverflowMode == TabOverflowMode.Scroll &&
+        ShouldDrawTabStrip &&
+        !UsesVerticalTabLayout;
+
+    /// <summary>
+    /// Whether the scroll overflow mode is active for the TITLE BAR tab strip.
+    /// TitleBar tabs use a separate layout / hit-test pipeline, so we keep
+    /// this distinct from the embedded flag.
+    /// </summary>
+    private bool IsTitleBarScrollOverflowActive =>
+        TabOverflowMode == TabOverflowMode.Scroll &&
+        TabMode == TabViewMode.TitleBar;
+
+    /// <summary>
+    /// True when ANY horizontal scroll overflow is currently active
+    /// (embedded or title bar). Used by shared code paths like mouse wheel.
+    /// </summary>
+    private bool IsAnyHorizontalScrollOverflowActive =>
+        IsHorizontalScrollOverflowActive || IsTitleBarScrollOverflowActive;
+
+    /// <summary>
+    /// True when there is overflow content and the scroll position can move left.
+    /// </summary>
+    private bool CanScrollLeft => _maxScrollOffset > 0f && _scrollOffset > 0.5f;
+
+    /// <summary>
+    /// True when there is overflow content and the scroll position can move right.
+    /// </summary>
+    private bool CanScrollRight => _maxScrollOffset > 0f && _scrollOffset < _maxScrollOffset - 0.5f;
+
+    /// <summary>
+    /// Returns the visible tab content area (the region between the two chevrons)
+    /// for hit-testing and clipping. Returns SKRect.Empty when scroll overflow is
+    /// not active, in which case callers should fall back to the header rect.
+    /// </summary>
+    private SKRect GetScrollVisibleBounds()
+    {
+        if (!IsHorizontalScrollOverflowActive)
+            return SKRect.Empty;
+
+        var headerRect = GetTabHeaderRect();
+        if (headerRect.Width <= 0f || headerRect.Height <= 0f)
+            return SKRect.Empty;
+
+        var chevronSize = ChevronSize * ScaleFactor;
+        var chevronMargin = 4f * ScaleFactor;
+        var left = headerRect.Left + chevronMargin + chevronSize;
+        var right = headerRect.Right - chevronMargin - chevronSize;
+
+        // Account for the new-tab button which is pinned just inside the
+        // right chevron area.
+        if (ShouldDrawNewTabButton)
+        {
+            var gap = ResolvedTabGap * ScaleFactor;
+            var newTabButtonSize = NewTabButtonSize * ScaleFactor;
+            right -= newTabButtonSize + gap;
+        }
+
+        if (right <= left)
+            return headerRect;
+
+        return new SKRect(left, headerRect.Top, right, headerRect.Bottom);
+    }
+
+    /// <summary>
+    /// Visible bounds for the TITLE BAR scroll overflow mode. Mirrors
+    /// <see cref="GetScrollVisibleBounds"/> but uses the title bar layout
+    /// context. Returns SKRect.Empty when title bar scroll is not active.
+    /// </summary>
+    private SKRect GetTitleBarScrollVisibleBounds(TabViewTitleBarLayoutContext context)
+    {
+        if (!IsTitleBarScrollOverflowActive || context.AvailableWidth <= 0f)
+            return SKRect.Empty;
+
+        var chevronSize = ChevronSize * ScaleFactor;
+        // Match the tighter margin used in UpdateTitleBarLayout.
+        var chevronMargin = 2f * ScaleFactor;
+        var left = context.StartX + chevronMargin + chevronSize;
+        var right = context.StartX + context.AvailableWidth - chevronMargin - chevronSize;
+
+        // Account for the new-tab button at the right edge.
+        if (NewTabButton)
+        {
+            var size = 24f * ScaleFactor;
+            var gap = Math.Max(ResolvedTabGap * ScaleFactor, size / 2f);
+            right -= size + gap;
+        }
+
+        if (right <= left)
+            return new SKRect(context.StartX, context.Top, context.StartX + context.AvailableWidth, context.Bottom);
+
+        return new SKRect(left, context.Top, right, context.Bottom);
     }
 
     internal void HandleTitleBarSelectionChanged(int previousSelectedIndex)
@@ -2332,6 +2725,26 @@ public partial class TabView : ElementBase
 
         UpdateTitleBarLayout(context);
         UpdateTitleBarAuxiliaryRects();
+
+        // In scroll mode with overflow, clip tab content to the visible area
+        // (between chevrons). The clip is restored BEFORE drawing chevrons
+        // and fades so those are never clipped. Tabs scroll under the fade,
+        // the fade itself stays fixed at the chevron edge.
+        var scrollClipActive = IsTitleBarScrollOverflowActive && _maxScrollOffset > 0f;
+        var scrollClipSave = 0;
+        if (scrollClipActive)
+        {
+            var visible = GetTitleBarScrollVisibleBounds(context);
+            if (visible.Width > 0f && visible.Height > 0f)
+            {
+                scrollClipSave = canvas.Save();
+                canvas.ClipRect(visible);
+            }
+            else
+            {
+                scrollClipActive = false;
+            }
+        }
 
         DrawTitleBarTabDividers(canvas, context, titleColor);
 
@@ -2379,7 +2792,11 @@ public partial class TabView : ElementBase
         }
 
         if (_selectedIndex < 0 || _selectedIndex >= _titleBarTabRects.Count)
+        {
+            if (scrollClipActive)
+                canvas.RestoreToCount(scrollClipSave);
             return;
+        }
 
         var effectiveHoverColor = titleColor != SKColor.Empty && !titleColor.IsDark()
             ? foreColor.WithAlpha(60)
@@ -2469,11 +2886,50 @@ public partial class TabView : ElementBase
             canvas.RestoreToCount(layerSaved);
         }
 
+        if (scrollClipActive)
+            canvas.RestoreToCount(scrollClipSave);
+
         if (_titleBarCloseButtonRect.Width > 0)
             DrawTitleBarCloseButton(canvas, _titleBarCloseButtonRect, _hoveredTitleBarCloseButton, foreColor, effectiveHoverColor);
 
         if (_titleBarNewTabButtonRect.Width > 0)
             DrawTitleBarNewTabButton(canvas, _titleBarNewTabButtonRect, _hoveredTitleBarNewTabButton, foreColor, effectiveHoverColor);
+
+        // Chevron buttons and fade (title bar scroll mode). Drawn AFTER the
+        // clip is restored so they are never clipped. Fade stays fixed at
+        // the chevron edge; only tabs scroll under it.
+        if (IsTitleBarScrollOverflowActive && _maxScrollOffset > 0f)
+        {
+            var canScrollLeft = CanScrollLeft;
+            var canScrollRight = CanScrollRight;
+
+            var chevronSize = ChevronSize * ScaleFactor;
+            // Tighter margin in the title bar so the right chevron sits
+            // close to the window caption buttons (minimize/maximize/close),
+            // avoiding a large gap on the right.
+            var chevronMargin = 2f * ScaleFactor;
+            var fadeWidth = 0f * ScaleFactor;
+
+            // Shadow starts FROM the chevron â€” opaque behind the chevron,
+            // fading into the visible tab area. Consistent with the
+            // embedded strip.
+            var leftChevronLeft = context.StartX + chevronMargin;
+            var rightChevronRight = context.StartX + context.AvailableWidth - chevronMargin;
+
+            // Shadow-based fade â€” consistent with the embedded strip.
+            var fadeColor = ColorScheme.ShadowColor;
+
+            if (canScrollLeft)
+            {
+                DrawFadeGradient(canvas, new SKRect(leftChevronLeft, context.Top, leftChevronLeft + chevronSize + fadeWidth, context.Bottom), true, fadeColor);
+                DrawChevron(canvas, _leftChevronRect, _chevronHoverLeft, true);
+            }
+            if (canScrollRight)
+            {
+                DrawFadeGradient(canvas, new SKRect(rightChevronRight - chevronSize - fadeWidth, context.Top, rightChevronRight, context.Bottom), false, fadeColor);
+                DrawChevron(canvas, _rightChevronRect, _chevronHoverRight, false);
+            }
+        }
     }
 
     internal bool TryGetTitleBarTabIndexAtPoint(SKPoint point, TabViewTitleBarLayoutContext context, out int tabIndex)
@@ -2484,6 +2940,16 @@ public partial class TabView : ElementBase
             return false;
 
         UpdateTitleBarLayout(context);
+
+        // In scroll mode, clip hit-testing to the visible area so that a
+        // tab scrolled under a chevron cannot be selected.
+        if (IsTitleBarScrollOverflowActive && _maxScrollOffset > 0f)
+        {
+            var visible = GetTitleBarScrollVisibleBounds(context);
+            if (visible.Width > 0f && !visible.Contains(point))
+                return false;
+        }
+
         for (var i = 0; i < _titleBarTabRects.Count; i++)
         {
             if (_titleBarTabRects[i].Contains(point))
@@ -2524,13 +2990,33 @@ public partial class TabView : ElementBase
         UpdateTitleBarLayout(context);
         UpdateTitleBarAuxiliaryRects();
 
+        // Chevron hover (title bar scroll mode).
+        if (IsTitleBarScrollOverflowActive)
+        {
+            var leftHover = CanScrollLeft && _leftChevronRect.Contains(point);
+            var rightHover = CanScrollRight && _rightChevronRect.Contains(point);
+            if (_chevronHoverLeft != leftHover || _chevronHoverRight != rightHover)
+            {
+                _chevronHoverLeft = leftHover;
+                _chevronHoverRight = rightHover;
+                Invalidate();
+            }
+        }
+        else if (_chevronHoverLeft || _chevronHoverRight)
+        {
+            _chevronHoverLeft = false;
+            _chevronHoverRight = false;
+            Invalidate();
+        }
+
         var hoveredTabIndex = TryGetTitleBarTabIndexAtPoint(point, context, out var tabIndex) ? tabIndex : -1;
         var hoveredCloseButton = _titleBarCloseButtonRect.Contains(point);
         var hoveredNewTabButton = _titleBarNewTabButtonRect.Contains(point);
 
         if (_hoveredTitleBarTabIndex == hoveredTabIndex &&
             _hoveredTitleBarCloseButton == hoveredCloseButton &&
-            _hoveredTitleBarNewTabButton == hoveredNewTabButton)
+            _hoveredTitleBarNewTabButton == hoveredNewTabButton &&
+            !(_chevronHoverLeft || _chevronHoverRight))
             return false;
 
         if (_hoveredTitleBarTabIndex != hoveredTabIndex)
@@ -2561,6 +3047,21 @@ public partial class TabView : ElementBase
             return false;
 
         UpdateTitleBarLayout(context);
+
+        // Chevron click handling for title bar scroll mode.
+        if (e.Button == MouseButtons.Left && IsTitleBarScrollOverflowActive)
+        {
+            if (CanScrollLeft && _leftChevronRect.Contains(e.Location))
+            {
+                ScrollTabs(-GetScrollStep());
+                return true;
+            }
+            if (CanScrollRight && _rightChevronRect.Contains(e.Location))
+            {
+                ScrollTabs(GetScrollStep());
+                return true;
+            }
+        }
 
         if (e.Button == MouseButtons.Left)
         {
@@ -2656,9 +3157,44 @@ public partial class TabView : ElementBase
         return handled;
     }
 
+    /// <summary>
+    /// Handles mouse wheel events when the pointer is over the title bar tab
+    /// strip. The parent window must forward horizontal wheel events here
+    /// because the title bar area is outside the TabView's own bounds, so
+    /// <see cref="OnMouseWheel"/> never fires for it.
+    /// Only horizontal wheel (<see cref="MouseEventArgs.IsHorizontalWheel"/>)
+    /// triggers scrolling; vertical wheel is ignored.
+    /// </summary>
+    internal bool ProcessTitleBarMouseWheel(MouseEventArgs e, TabViewTitleBarLayoutContext context)
+    {
+        if (TabMode != TabViewMode.TitleBar || Count <= 0)
+            return false;
+
+        if (!IsTitleBarScrollOverflowActive || !e.IsHorizontalWheel)
+            return false;
+
+        UpdateTitleBarLayout(context);
+
+        if (_maxScrollOffset > 0f)
+        {
+            ScrollTabs(-e.Delta);
+            return true;
+        }
+
+        return false;
+    }
+
     internal bool ResetTitleBarHoverState()
     {
-        if (_hoveredTitleBarTabIndex < 0 && !_hoveredTitleBarCloseButton && !_hoveredTitleBarNewTabButton)
+        var changed = false;
+
+        if (_hoveredTitleBarTabIndex >= 0 || _hoveredTitleBarCloseButton || _hoveredTitleBarNewTabButton)
+            changed = true;
+
+        if (_chevronHoverLeft || _chevronHoverRight)
+            changed = true;
+
+        if (!changed)
             return false;
 
         _hoveredTitleBarTabIndex = -1;
@@ -2676,6 +3212,9 @@ public partial class TabView : ElementBase
             _titleBarNewTabHoverAnimation.StartNewAnimation(AnimationDirection.Out);
         }
 
+        _chevronHoverLeft = false;
+        _chevronHoverRight = false;
+
         Invalidate();
         return true;
     }
@@ -2688,7 +3227,11 @@ public partial class TabView : ElementBase
             return;
         }
 
-        if (_hasTitleBarLayoutContext && _lastTitleBarLayoutContext == context && _titleBarLayoutPageCount == Count)
+        // In scroll mode the scroll offset changes the tab positions, so we
+        // must recompute every time. In collapse mode the original cache
+        // optimisation is preserved.
+        var scrollMode = IsTitleBarScrollOverflowActive;
+        if (!scrollMode && _hasTitleBarLayoutContext && _lastTitleBarLayoutContext == context && _titleBarLayoutPageCount == Count)
             return;
 
         _titleBarTabWidthBuffer.Clear();
@@ -2734,25 +3277,107 @@ public partial class TabView : ElementBase
         for (var i = 0; i < _titleBarTabWidthBuffer.Count; i++)
             totalDesiredWidth += _titleBarTabWidthBuffer[i];
         totalDesiredWidth += gap * MathF.Max(0f, _titleBarTabWidthBuffer.Count - 1);
-        
-        var clampedTotalWidth = MathF.Min(totalDesiredWidth, availableWidth);
-        var startX = context.StartX;
-        
-        if (TabAlignment == TabViewAlignment.Center)
-            startX += (availableWidth - clampedTotalWidth) / 2f;
-        else if (TabAlignment == TabViewAlignment.End)
-            startX += (availableWidth - clampedTotalWidth);
 
-        TabViewTabGeometry.LayoutTabs(
-            _titleBarTabWidthBuffer,
-            startX,
-            context.Top,
-            context.Height,
-            availableWidth,
-            gap,
-            maxTabWidth,
-            false,
-            _titleBarTabRects);
+        if (scrollMode)
+        {
+            // ---- SCROLL MODE (TitleBar) ----
+            // Optimization: first check if tabs fit in the full available
+            // width WITHOUT reserving chevron space. Only when they actually
+            // overflow do we reserve chevron areas. This avoids the "too
+            // much empty space on the right" when there are few tabs.
+            var chevronSize = ChevronSize * ScaleFactor;
+            // Tighter margin so the right chevron sits close to the window
+            // caption buttons, avoiding a large gap.
+            var chevronMargin = 2f * ScaleFactor;
+
+            // Full available width (already minus new-tab button reserve).
+            var fullTabAreaLeft = context.StartX;
+            var fullTabAreaRight = context.StartX + availableWidth;
+            var fullTabAreaWidth = Math.Max(0f, fullTabAreaRight - fullTabAreaLeft);
+
+            var needsChevrons = totalDesiredWidth > fullTabAreaWidth + 0.5f;
+
+            float tabAreaLeft, tabAreaRight;
+            if (needsChevrons)
+            {
+                tabAreaLeft = context.StartX + chevronMargin + chevronSize;
+                tabAreaRight = context.StartX + context.AvailableWidth - chevronMargin - chevronSize;
+                if (NewTabButton)
+                    tabAreaRight -= newTabButtonSize + newTabButtonGap;
+
+                _maxScrollOffset = Math.Max(0f, totalDesiredWidth - Math.Max(0f, tabAreaRight - tabAreaLeft));
+            }
+            else
+            {
+                // No overflow: use full width, no chevron reserve, reset scroll.
+                tabAreaLeft = fullTabAreaLeft;
+                tabAreaRight = fullTabAreaRight;
+                _maxScrollOffset = 0f;
+                _scrollOffset = 0f;
+            }
+
+            _scrollOffset = Math.Clamp(_scrollOffset, 0f, _maxScrollOffset);
+
+            var startX = tabAreaLeft - _scrollOffset;
+
+            _titleBarTabRects.Clear();
+            var currentX = startX;
+            for (var i = 0; i < _titleBarTabWidthBuffer.Count; i++)
+            {
+                var width = _titleBarTabWidthBuffer[i];
+                var rect = SKRect.Create(currentX, context.Top, width, context.Height);
+                _titleBarTabRects.Add(rect);
+                currentX += width + gap;
+            }
+
+            // Chevron positions â€” only meaningful when needsChevrons is true.
+            if (needsChevrons)
+            {
+                var chevronY = context.Top + (context.Height - chevronSize) * 0.5f;
+                _leftChevronRect = SKRect.Create(
+                    context.StartX + chevronMargin,
+                    chevronY,
+                    chevronSize,
+                    chevronSize);
+                _rightChevronRect = SKRect.Create(
+                    context.StartX + context.AvailableWidth - chevronSize - chevronMargin,
+                    chevronY,
+                    chevronSize,
+                    chevronSize);
+            }
+            else
+            {
+                _leftChevronRect = SKRect.Empty;
+                _rightChevronRect = SKRect.Empty;
+            }
+        }
+        else
+        {
+            // ---- COLLAPSE MODE (original behaviour) ----
+            _maxScrollOffset = 0f;
+            _scrollOffset = 0f;
+            _leftChevronRect = SKRect.Empty;
+            _rightChevronRect = SKRect.Empty;
+
+            var clampedTotalWidth = MathF.Min(totalDesiredWidth, availableWidth);
+            var startX = context.StartX;
+
+            if (TabAlignment == TabViewAlignment.Center)
+                startX += (availableWidth - clampedTotalWidth) / 2f;
+            else if (TabAlignment == TabViewAlignment.End)
+                startX += (availableWidth - clampedTotalWidth);
+
+            TabViewTabGeometry.LayoutTabs(
+                _titleBarTabWidthBuffer,
+                startX,
+                context.Top,
+                context.Height,
+                availableWidth,
+                gap,
+                maxTabWidth,
+                false,
+                _titleBarTabRects);
+        }
 
         _lastTitleBarLayoutContext = context;
         _hasTitleBarLayoutContext = true;
@@ -2811,14 +3436,32 @@ public partial class TabView : ElementBase
                 1f);
         }
 
-        if (NewTabButton && _titleBarTabRects.Count > 0)
+        if (NewTabButton && _titleBarTabRects.Count > 0 && _hasTitleBarLayoutContext)
         {
             var size = 24f * ScaleFactor;
             var gap = Math.Max(ResolvedTabGap * ScaleFactor, size / 2f);
-            var lastTabRect = _titleBarTabRects[_titleBarTabRects.Count - 1];
+            var context = _lastTitleBarLayoutContext;
+
+            float newButtonLeft;
+            if (IsTitleBarScrollOverflowActive && _maxScrollOffset > 0f)
+            {
+                // In scroll mode WITH overflow, pin the new-tab button just
+                // inside the right chevron area so it never overlaps the
+                // chevron. Match the tighter 2px margin.
+                var chevronSize = ChevronSize * ScaleFactor;
+                var chevronMargin = 2f * ScaleFactor;
+                newButtonLeft = context.StartX + context.AvailableWidth
+                                - chevronMargin - chevronSize - size - gap;
+            }
+            else
+            {
+                var lastTabRect = _titleBarTabRects[_titleBarTabRects.Count - 1];
+                newButtonLeft = lastTabRect.Right + gap;
+            }
+
             _titleBarNewTabButtonRect = SKRect.Create(
-                lastTabRect.Right + gap,
-                _lastTitleBarLayoutContext.CenterY - size / 2f,
+                newButtonLeft,
+                context.CenterY - size / 2f,
                 size,
                 size);
         }
@@ -3764,13 +4407,9 @@ public partial class TabView : ElementBase
         var iconSpacing = TabIconSpacing * ScaleFactor;
         var vertInset   = GetTabVerticalContentPadding();
 
-        // blockH = iconSize + iconSpacing + textH via MeasureContentBlockSize (text=null › just font metrics)
         var (_, blockH) = TabViewTabGeometry.MeasureContentBlockSize(
             null, true, _tabFont, iconSize, iconSpacing, ContentAlignment.TopCenter);
 
-        // Header height = blockH + 4*vertInset
-        // (LayoutTabs will strip 2*vertInset at strip level › tab rect height = blockH + 2*vertInset)
-        // (ComputeTabContentRects will strip 1*vertInset per side › available area = blockH) ?
         var needed = blockH + 4f * vertInset;
         return Math.Max(minimumThickness, MathF.Ceiling(needed));
     }
@@ -3849,6 +4488,15 @@ public partial class TabView : ElementBase
 
         UpdateTabRects();
 
+        // In horizontal scroll mode, the chevron zones are exclusive â€”
+        // clicks there must never select a tab whose geometry bleeds
+        // under the chevrons. Also clip to the visible tab area so that
+        // a tab scrolled fully off-screen cannot be hit.
+        var scrollBounds = GetScrollVisibleBounds();
+        var scrollActive = scrollBounds.Width > 0f;
+        if (scrollActive && !scrollBounds.Contains(point))
+            return false;
+
         for (var i = 0; i < _tabRects.Count; i++)
         {
             if (_tabRects[i].Contains(point))
@@ -3869,6 +4517,12 @@ public partial class TabView : ElementBase
             return false;
 
         UpdateTabRects();
+
+        // Same exclusive-zone rule as for tab hit-testing: close buttons
+        // that are scrolled under a chevron must not be clickable.
+        var scrollBounds = GetScrollVisibleBounds();
+        if (scrollBounds.Width > 0f && !scrollBounds.Contains(point))
+            return false;
 
         for (var i = 0; i < _tabCloseButtonRects.Count; i++)
         {
@@ -3891,6 +4545,9 @@ public partial class TabView : ElementBase
         return _newTabButtonRect.Contains(point);
     }
 
+    // =========================================================================
+    // UPDATED: UpdateTabRects with Scroll mode support
+    // =========================================================================
     private void UpdateTabRects()
     {
         _tabCloseButtonRects.Clear();
@@ -3924,6 +4581,7 @@ public partial class TabView : ElementBase
 
         if (UsesVerticalTabLayout)
         {
+            // Vertical layout (unchanged) â€“ no scroll mode for vertical
             var axisPadding = Math.Max(4f * ScaleFactor, verticalInset);
             var tabWidth = Math.Max(0f, headerRect.Width - (axisPadding * 2f));
             var contentHeight = Math.Max(0f, headerRect.Height - (axisPadding * 2f) - newTabReserve);
@@ -3996,45 +4654,169 @@ public partial class TabView : ElementBase
             return;
         }
 
+        // =============================================================
+        // HORIZONTAL LAYOUT
+        // =============================================================
         var contentWidth = Math.Max(0f, headerRect.Width - (horizontalPadding * 2f) - newTabReserve);
-    ResetVerticalTabScroll();
 
+        // Compute natural tab widths
         for (var pageIndex = 0; pageIndex < pageCount; pageIndex++)
         {
             var page = GetPageAt(pageIndex);
             if (page == null)
                 continue;
 
-            var width = TabViewTabGeometry.MeasureDesiredTabWidth(page, _tabFont, horizontalPadding,
-                iconSize, iconSpacing, closeButtonAllowance, minWidth, maxWidth,
+            var width = TabViewTabGeometry.MeasureDesiredTabWidth(
+                page, _tabFont, horizontalPadding,
+                iconSize, iconSpacing, closeButtonAllowance,
+                minWidth, maxWidth,
                 ShouldDrawTabIcons, ShouldDrawTabCloseButtons, ImageAlign);
             _tabWidthBuffer.Add(width);
         }
 
-        var startX = ComputeTabStartX(headerRect, horizontalPadding, newTabReserve, contentWidth, gap);
+        // Calculate total width
+        var totalDesiredWidth = 0f;
+        for (var i = 0; i < _tabWidthBuffer.Count; i++)
+            totalDesiredWidth += _tabWidthBuffer[i];
+        totalDesiredWidth += gap * MathF.Max(0f, _tabWidthBuffer.Count - 1);
 
-        TabViewTabGeometry.LayoutTabs(_tabWidthBuffer,
-            startX,
-            headerRect.Top + verticalInset,
-            Math.Max(0f, headerRect.Height - (verticalInset * 2f)),
-            contentWidth,
-            gap,
-            maxWidth,
-            false,
-            _tabRects);
+        // Determine visible width
+        var visibleWidth = contentWidth;
 
-        var currentX = startX;
-        if (_tabRects.Count > 0)
+        if (TabOverflowMode == TabOverflowMode.Collapse)
         {
-            currentX = _tabRects[_tabRects.Count - 1].Right + gap;
+            // ---- COLLAPSE MODE (original behaviour) ----
+            var startX = ComputeTabStartX(headerRect, horizontalPadding, newTabReserve, contentWidth, gap);
+
+            TabViewTabGeometry.LayoutTabs(_tabWidthBuffer,
+                startX,
+                headerRect.Top + verticalInset,
+                Math.Max(0f, headerRect.Height - (verticalInset * 2f)),
+                contentWidth,
+                gap,
+                maxWidth,
+                false,
+                _tabRects);
+
+            _maxScrollOffset = 0f;
+            _scrollOffset = 0f;
+            _leftChevronRect = SKRect.Empty;
+            _rightChevronRect = SKRect.Empty;
+        }
+        else // Scroll mode
+        {
+            // ---- SCROLL MODE ----
+            // Optimization: first check if tabs fit in the full content
+            // width WITHOUT reserving chevron space. Only when they actually
+            // overflow do we reserve chevron areas. This avoids wasted
+            // space when there are few tabs.
+            var chevronSize = ChevronSize * ScaleFactor;
+            var chevronMargin = 4f * ScaleFactor;
+
+            var needsChevrons = totalDesiredWidth > contentWidth + 0.5f;
+
+            float tabAreaLeft, tabAreaRight;
+            if (needsChevrons)
+            {
+                // Visible tab content area: from just after the left chevron
+                // to just before the right chevron (and the new-tab button).
+                tabAreaLeft = headerRect.Left + chevronMargin + chevronSize;
+                tabAreaRight = headerRect.Right - chevronMargin - chevronSize;
+                if (ShouldDrawNewTabButton)
+                    tabAreaRight -= newTabButtonSize + gap;
+
+                var tabAreaWidth = Math.Max(0f, tabAreaRight - tabAreaLeft);
+                _maxScrollOffset = Math.Max(0f, totalDesiredWidth - tabAreaWidth);
+            }
+            else
+            {
+                // No overflow: use full content width, no chevron reserve.
+                tabAreaLeft = headerRect.Left + horizontalPadding;
+                tabAreaRight = headerRect.Right - horizontalPadding;
+                if (ShouldDrawNewTabButton)
+                    tabAreaRight -= newTabButtonSize + gap;
+                _maxScrollOffset = 0f;
+                _scrollOffset = 0f;
+            }
+
+            _scrollOffset = Math.Clamp(_scrollOffset, 0f, _maxScrollOffset);
+
+            // Tabs start at the left edge of the visible area, offset by
+            // the current scroll position.
+            var startX = tabAreaLeft - _scrollOffset;
+
+            // Layout tabs with their natural widths
+            _tabRects.Clear();
+            var currentX = startX;
+            for (var i = 0; i < _tabWidthBuffer.Count; i++)
+            {
+                var width = _tabWidthBuffer[i];
+                var rect = SKRect.Create(currentX, headerRect.Top + verticalInset, width, headerRect.Height - (verticalInset * 2f));
+                _tabRects.Add(rect);
+                currentX += width + gap;
+            }
+
+            // Compute chevron button positions â€” only when needed.
+            if (needsChevrons)
+            {
+                var chevronY = headerRect.MidY - chevronSize / 2f;
+                _leftChevronRect = SKRect.Create(
+                    headerRect.Left + chevronMargin,
+                    chevronY,
+                    chevronSize,
+                    chevronSize);
+                _rightChevronRect = SKRect.Create(
+                    headerRect.Right - chevronSize - chevronMargin,
+                    chevronY,
+                    chevronSize,
+                    chevronSize);
+            }
+            else
+            {
+                _leftChevronRect = SKRect.Empty;
+                _rightChevronRect = SKRect.Empty;
+            }
         }
 
+        // Close button rects (common for both modes)
         for (var pageIndex = 0; pageIndex < _tabRects.Count; pageIndex++)
             _tabCloseButtonRects.Add(CreateTabCloseButtonRect(_tabRects[pageIndex], closeButtonSize, horizontalPadding));
 
+        // New tab button (common)
         if (ShouldDrawNewTabButton)
         {
-            var newButtonLeft = Math.Min(currentX, headerRect.Right - horizontalPadding - newTabButtonSize);
+            var lastTab = _tabRects.Count > 0 ? _tabRects[_tabRects.Count - 1] : SKRect.Empty;
+            var newButtonLeft = lastTab.Right + gap;
+            if (TabOverflowMode == TabOverflowMode.Scroll && _maxScrollOffset > 0f)
+            {
+                // In scroll mode WITH overflow, pin the new-tab button to the
+                // left of the right chevron area so it never overlaps the
+                // chevron. The newTabReserve was already subtracted from
+                // contentWidth when computing the chevron layout, so this
+                // position is consistent with the available tab area.
+                var chevronSize = ChevronSize * ScaleFactor;
+                var chevronMargin = 4f * ScaleFactor;
+                newButtonLeft = headerRect.Right - chevronMargin - chevronSize - newTabButtonSize - gap;
+            }
+            else if (TabOverflowMode == TabOverflowMode.Scroll &&
+                     newButtonLeft + newTabButtonSize > headerRect.Right - horizontalPadding)
+            {
+                // Scroll mode WITHOUT overflow yet: keep the button inside
+                // the header rect.
+                newButtonLeft = headerRect.Right - horizontalPadding - newTabButtonSize;
+            }
+            else if (TabOverflowMode == TabOverflowMode.Collapse)
+            {
+                // In collapse mode, use original logic
+                var totalWidth = 0f;
+                for (var i = 0; i < _tabWidthBuffer.Count; i++)
+                    totalWidth += _tabWidthBuffer[i];
+                totalWidth += gap * MathF.Max(0f, _tabWidthBuffer.Count - 1);
+                var clampedTotal = MathF.Min(totalWidth, contentWidth);
+                var startX = ComputeTabStartX(headerRect, horizontalPadding, newTabReserve, contentWidth, gap);
+                newButtonLeft = startX + clampedTotal + gap;
+            }
+
             _newTabButtonRect = SKRect.Create(
                 newButtonLeft,
                 headerRect.MidY - newTabButtonSize / 2f,
@@ -4152,6 +4934,86 @@ public partial class TabView : ElementBase
             nextOffset += selectedRect.Bottom - viewportBottom;
 
         _verticalTabScrollOffset = Math.Clamp(nextOffset, 0f, _verticalTabScrollableExtent);
+    }
+
+    private void EnsureSelectedHorizontalTabVisible()
+    {
+        if (!ShouldDrawTabStrip || UsesVerticalTabLayout || _selectedIndex < 0 || Count <= 0)
+            return;
+
+        if (TabOverflowMode != TabOverflowMode.Scroll)
+            return;
+
+        var headerRect = GetTabHeaderRect();
+        if (headerRect.Width <= 0f)
+            return;
+
+        UpdateTabRects();
+
+        if (_maxScrollOffset <= 0f || _selectedIndex >= _tabRects.Count)
+            return;
+
+        // Use the actual visible bounds (between chevrons, minus new-tab
+        // button reserve) so the selected tab is scrolled just enough to
+        // be fully visible.
+        var visibleBounds = GetScrollVisibleBounds();
+        if (visibleBounds.Width <= 0f)
+            return;
+
+        var selectedRect = _tabRects[_selectedIndex];
+        var viewportLeft = visibleBounds.Left;
+        var viewportRight = visibleBounds.Right;
+
+        if (selectedRect.Right > viewportRight)
+        {
+            var nextOffset = _scrollOffset + (selectedRect.Right - viewportRight);
+            _scrollOffset = Math.Clamp(nextOffset, 0f, _maxScrollOffset);
+        }
+        else if (selectedRect.Left < viewportLeft)
+        {
+            var nextOffset = _scrollOffset - (viewportLeft - selectedRect.Left);
+            _scrollOffset = Math.Clamp(nextOffset, 0f, _maxScrollOffset);
+        }
+    }
+
+    /// <summary>
+    /// Scrolls the title bar tab strip (in scroll mode) just enough so the
+    /// currently selected tab is fully visible between the two chevrons.
+    /// Called when the selected index changes.
+    /// </summary>
+    private void EnsureSelectedTitleBarTabVisible()
+    {
+        if (!IsTitleBarScrollOverflowActive || _selectedIndex < 0 || Count <= 0)
+            return;
+
+        if (!_hasTitleBarLayoutContext)
+            return;
+
+        var context = _lastTitleBarLayoutContext;
+        var visible = GetTitleBarScrollVisibleBounds(context);
+        if (visible.Width <= 0f)
+            return;
+
+        // Layout must be current for tab rects to reflect the latest scroll.
+        UpdateTitleBarLayout(context);
+
+        if (_maxScrollOffset <= 0f || _selectedIndex >= _titleBarTabRects.Count)
+            return;
+
+        var selectedRect = _titleBarTabRects[_selectedIndex];
+        var viewportLeft = visible.Left;
+        var viewportRight = visible.Right;
+
+        if (selectedRect.Right > viewportRight)
+        {
+            var nextOffset = _scrollOffset + (selectedRect.Right - viewportRight);
+            _scrollOffset = Math.Clamp(nextOffset, 0f, _maxScrollOffset);
+        }
+        else if (selectedRect.Left < viewportLeft)
+        {
+            var nextOffset = _scrollOffset - (viewportLeft - selectedRect.Left);
+            _scrollOffset = Math.Clamp(nextOffset, 0f, _maxScrollOffset);
+        }
     }
 
     private void SetVerticalTabScrollOffset(float value)

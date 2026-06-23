@@ -10,7 +10,7 @@ internal static class Program
     private static void Main()
     {
         ColorScheme.SetThemeInstant(false);
-        ColorScheme.SetPrimarySeedColor(new SKColor(0x00, 0x78, 0xD4));
+        ColorScheme.Primary = new SKColor(0x00, 0x78, 0xD4);
         Application.Run(new SettingsPreviewWindow());
     }
 }
