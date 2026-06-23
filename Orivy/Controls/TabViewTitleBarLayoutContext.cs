@@ -9,4 +9,4 @@ internal readonly record struct TabViewTitleBarLayoutContext(
     float MaxTabWidth)
 {
     public float Bottom => Top + Height;
-}
+}

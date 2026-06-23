@@ -1,4 +1,5 @@
 using Orivy.Controls;
+using Orivy.Controls.RichText;
 using SkiaSharp;
 using System;
 
@@ -6,7 +7,7 @@ namespace Orivy.Example;
 
 internal sealed partial class MarkdownViewerDemoPage : Container
 {
-    private MarkdownViewer viewer = null!;
+    private RichTextBox viewer = null!;
     private TextBox editor = null!;
 
     public MarkdownViewerDemoPage()
@@ -19,34 +20,46 @@ internal sealed partial class MarkdownViewerDemoPage : Container
         Text = "Markdown Viewer";
         Name = "markdownViewerDemoPage";
         Dock = DockStyle.Fill;
-        Padding = new(24);
+        Padding = new(3);
         Radius = new(0);
         Border = new(0);
 
-        editor = new TextBox
+        editor = new()
         {
             Name = "markdownEditor",
-            Dock = DockStyle.Bottom,
-            Height = 180,
+            Dock = DockStyle.Fill,
             Margin = new(0, 12, 0, 0),
             Multiline = true,
             AcceptsReturn = true,
             AcceptsTab = true,
+           
             PlaceholderText = "Write markdown here...",
         };
-        editor.TextChanged += (_, _) => viewer.Markdown = editor.Text;
+        editor.TextChanged += (_, _) => viewer.Text = editor.Text;
 
-        viewer = new MarkdownViewer
+        viewer = new()
         {
             Name = "markdownViewer",
             Dock = DockStyle.Fill,
+            Mode = RichTextMode.MarkdownPreview,
             Margin = new(0),
-            Markdown = editor.Text,
+            Text = editor.Text,
             AutoScroll = true,
-            AutoScrollMargin = new(0, 24),
+            Multiline = true,
+            //AutoScrollMargin = new(0, 24),
         };
 
-        Controls.Add(viewer);
-        Controls.Add(editor);
+        var splitter = new SplitContainer()
+        {
+            Name = "markdownSplitter",
+            Dock = DockStyle.Fill,
+            Orientation = Orientation.Vertical,
+            Height = 24,
+            Margin = new(0, 12, 0, 0),
+        };
+        splitter.Panel1.Controls.Add(viewer);
+        splitter.Panel2.Controls.Add(editor);
+
+        Controls.Add(splitter);
     }
 }

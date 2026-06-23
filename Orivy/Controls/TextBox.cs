@@ -50,7 +50,7 @@ public class TextBox : ElementBase
     private float _contentHeight;
     private string _displayText = string.Empty;
     private bool _multiline;
-    private bool _readOnly;
+    protected bool _readOnly;
     private bool _acceptsReturn = true;
     private bool _acceptsTab;
     private bool _passwordMode;
@@ -1213,7 +1213,7 @@ public class TextBox : ElementBase
         return true;
     }
 
-    private SKRect GetTextViewport()
+    protected SKRect GetTextViewport()
     {
         var viewport = DisplayRectangle;
         var gap = 4f * ScaleFactor;
@@ -1249,17 +1249,17 @@ public class TextBox : ElementBase
             Math.Clamp(point.Y, viewport.Top, viewport.Bottom));
     }
 
-    private float GetHorizontalScrollOffset()
+    protected float GetHorizontalScrollOffset()
     {
         return _hScrollBar?.Visible == true ? _hScrollBar.DisplayValue : 0f;
     }
 
-    private float GetVerticalScrollOffset()
+    protected float GetVerticalScrollOffset()
     {
         return _vScrollBar?.Visible == true ? _vScrollBar.DisplayValue : 0f;
     }
 
-    private float GetContentTopInset(SKRect viewport)
+    protected float GetContentTopInset(SKRect viewport)
     {
         if (_multiline)
             return 0f;
@@ -1870,7 +1870,7 @@ public class TextBox : ElementBase
         return Math.Clamp(index, 0, Text.Length);
     }
 
-    private void InvalidateTextLayout()
+    protected void InvalidateTextLayout()
     {
         _layoutDirty = true;
         InvalidateMeasure();

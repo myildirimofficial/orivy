@@ -383,7 +383,7 @@ internal sealed partial class DesignerControlsDemoPage
         {
             var accent = designerAccentPicker.SelectedColor;
             if (accent != SKColors.Transparent)
-                ColorScheme.SetPrimarySeedColor(accent);
+                ColorScheme.Primary = accent;
 
             UpdateDesignerControlStatus();
         };
