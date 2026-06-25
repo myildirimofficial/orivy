@@ -57,7 +57,7 @@ public partial class TabView : ElementBase
     private bool _chevronHoverLeft;
     private bool _chevronHoverRight;
     private const float ChevronSize = 28f;
-    private const float ChevronFadeWidth = 30f;
+
 
     // Optimization: pre-allocated arrays + reusable paint for the fade
     // gradient, avoiding per-frame GC allocations in DrawFadeGradient.
@@ -66,6 +66,7 @@ public partial class TabView : ElementBase
     private readonly SKPaint _fadePaint;
 
     private readonly AnimationManager _transitionAnimation;
+    private readonly AnimationManager _scrollAnimation;
     private readonly AnimationManager _tabSelectionAnimation;
     private readonly AnimationManager _tabStripResizerAnimation;
     private readonly AnimationManager _titleBarTabSelectionAnimation;
@@ -143,6 +144,8 @@ public partial class TabView : ElementBase
     private SKImage? _transitionToSnapshot;
     private SKRect _transitionViewport = SKRect.Empty;
     private readonly SKPaint _transitionPaint;
+    private float _scrollAnimationStartOffset;
+    private float _scrollAnimationTargetOffset;
     internal event EventHandler? TabModeChanged;
 
     public override SKColor BackColor
@@ -300,6 +303,17 @@ public partial class TabView : ElementBase
         };
         _transitionAnimation.OnAnimationProgress += HandleTransitionProgress;
         _transitionAnimation.OnAnimationFinished += HandleTransitionFinished;
+
+        _scrollAnimation = new AnimationManager
+        {
+            Singular = true,
+            InterruptAnimation = true,
+            Increment = 0.18,
+            SecondaryIncrement = 0.18,
+            AnimationType = AnimationType.CubicEaseOut
+        };
+        _scrollAnimation.OnAnimationProgress += HandleScrollAnimationProgress;
+        _scrollAnimation.OnAnimationFinished += HandleScrollAnimationFinished;
     }
 
     // =========================================================================
@@ -888,12 +902,12 @@ public partial class TabView : ElementBase
 
             if (CanScrollLeft && _leftChevronRect.Contains(e.Location))
             {
-                ScrollTabs(-GetScrollStep());
+                ScrollTabs(-GetChevronScrollDelta(forward: false, titleBar: false), animate: true);
                 return;
             }
             if (CanScrollRight && _rightChevronRect.Contains(e.Location))
             {
-                ScrollTabs(GetScrollStep());
+                ScrollTabs(GetChevronScrollDelta(forward: true, titleBar: false), animate: true);
                 return;
             }
         }
@@ -1069,12 +1083,18 @@ public partial class TabView : ElementBase
         // horizontal gesture / tilt wheel) scrolls the tab strip. Vertical
         // wheel is intentionally ignored so it keeps its default behaviour
         // (e.g. scrolling the page content under the tab strip).
-        if (IsAnyHorizontalScrollOverflowActive && e.IsHorizontalWheel)
+        // Constrain to the tab header rect so scrolling only activates when
+        // the pointer is over the tab strip, not the content area.
+        if (IsHorizontalScrollOverflowActive && WantsHorizontalMouseWheel(e))
         {
-            if (_maxScrollOffset > 0f)
+            var headerRect = GetTabHeaderRect();
+            if (headerRect.Width > 0f && headerRect.Height > 0f && headerRect.Contains(e.Location))
             {
-                ScrollTabs(-e.Delta);
-                return;
+                if (_maxScrollOffset > 0f)
+                {
+                    ScrollTabs(-e.Delta);
+                    return;
+                }
             }
         }
 
@@ -1227,6 +1247,9 @@ public partial class TabView : ElementBase
             _transitionAnimation.OnAnimationProgress -= HandleTransitionProgress;
             _transitionAnimation.OnAnimationFinished -= HandleTransitionFinished;
             _transitionAnimation.Dispose();
+            _scrollAnimation.OnAnimationProgress -= HandleScrollAnimationProgress;
+            _scrollAnimation.OnAnimationFinished -= HandleScrollAnimationFinished;
+            _scrollAnimation.Dispose();
             _tabBackgroundPaint.Dispose();
             _tabBorderPaint.Dispose();
             _tabGlyphPaint.Dispose();
@@ -1292,6 +1315,23 @@ public partial class TabView : ElementBase
     private void HandleTransitionFinished(object _)
     {
         Interlocked.Exchange(ref _transitionFinalizationPending, 1);
+        Invalidate();
+    }
+
+    private void HandleScrollAnimationProgress(object _)
+    {
+        var progress = Math.Clamp((float)_scrollAnimation.GetProgress(), 0f, 1f);
+        var nextOffset = _scrollAnimationStartOffset + ((_scrollAnimationTargetOffset - _scrollAnimationStartOffset) * progress);
+        if (Math.Abs(_scrollOffset - nextOffset) <= 0.01f)
+            return;
+
+        _scrollOffset = nextOffset;
+        Invalidate();
+    }
+
+    private void HandleScrollAnimationFinished(object _)
+    {
+        _scrollOffset = _scrollAnimationTargetOffset;
         Invalidate();
     }
 
@@ -1818,7 +1858,7 @@ public partial class TabView : ElementBase
         // Both pages cross-fade while simultaneously counter-scaling:
         // from shrinks 1.0 › 0.96, to grows 1.04 › 1.0, giving a soft dissolve-morph feel.
         var fromScale = 1f - 0.04f * progress;
-        var toScale   = 1.04f - 0.04f * progress;
+        var toScale = 1.04f - 0.04f * progress;
 
         var fw = viewport.Width * fromScale;
         var fh = viewport.Height * fromScale;
@@ -1829,7 +1869,7 @@ public partial class TabView : ElementBase
         var toRect = SKRect.Create(viewport.MidX - tw / 2f, viewport.MidY - th / 2f, tw, th);
 
         DrawSnapshot(canvas, fromSnapshot, fromRect, (byte)(255f * (1f - progress)));
-        DrawSnapshot(canvas, toSnapshot,   toRect,   (byte)(255f * progress));
+        DrawSnapshot(canvas, toSnapshot, toRect, (byte)(255f * progress));
     }
 
     private void DrawZoom(SKCanvas canvas, SKImage fromSnapshot, SKImage toSnapshot, SKRect viewport, float progress)
@@ -1841,7 +1881,7 @@ public partial class TabView : ElementBase
         // The alpha ramps in quickly (sqrt curve) so the zoom reads as a punch-in.
         var eased = 1f - (1f - progress) * (1f - progress);
         var scale = 0.05f + 0.95f * eased;
-        var tw = viewport.Width  * scale;
+        var tw = viewport.Width * scale;
         var th = viewport.Height * scale;
         var toRect = SKRect.Create(viewport.MidX - tw / 2f, viewport.MidY - th / 2f, tw, th);
         var toAlpha = (byte)(255f * Math.Min(1f, progress * 2f));
@@ -1857,7 +1897,7 @@ public partial class TabView : ElementBase
         var fromAlpha = (byte)(255f * Math.Max(0f, 1f - progress / 0.55f));
         var fromScale = 1f - 0.4f * (progress / 0.55f);
         fromScale = Math.Clamp(fromScale, 0.6f, 1f);
-        var fw = viewport.Width  * fromScale;
+        var fw = viewport.Width * fromScale;
         var fh = viewport.Height * fromScale;
         DrawSnapshot(canvas, fromSnapshot,
             SKRect.Create(viewport.MidX - fw / 2f, viewport.MidY - fh / 2f, fw, fh),
@@ -1866,7 +1906,7 @@ public partial class TabView : ElementBase
         var toProgress = Math.Max(0f, (progress - 0.45f) / 0.55f);
         var toAlpha = (byte)(255f * toProgress);
         var toScale = 0.6f + 0.4f * toProgress;
-        var tw = viewport.Width  * toScale;
+        var tw = viewport.Width * toScale;
         var th = viewport.Height * toScale;
         DrawSnapshot(canvas, toSnapshot,
             SKRect.Create(viewport.MidX - tw / 2f, viewport.MidY - th / 2f, tw, th),
@@ -1881,7 +1921,7 @@ public partial class TabView : ElementBase
         if (progress >= 1f)
             return;
 
-        var alpha  = (byte)(255f * (1f - progress));
+        var alpha = (byte)(255f * (1f - progress));
         var offset = viewport.Width * 0.5f * progress;
 
         // Left half: the clip rect shrinks rightward together with the image edge,
@@ -2091,112 +2131,112 @@ public partial class TabView : ElementBase
         switch (TabDesignMode)
         {
             case TabViewDesignMode.Rectangle:
-                headerBackground    = SKColors.Transparent;
-                headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)72 : (byte)52);
-                inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = themeForeColor.WithAlpha(isDark ? (byte)18 : (byte)12);
-                selectedBackground  = SKColors.Transparent;
+                headerBackground = SKColors.Transparent;
+                headerBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)72 : (byte)52);
+                inactiveBackground = SKColors.Transparent;
+                hoverBackground = themeForeColor.WithAlpha(isDark ? (byte)18 : (byte)12);
+                selectedBackground = SKColors.Transparent;
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = SKColors.Transparent;
-                activeTextColor     = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
-                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)190 : (byte)175) : themeForeColor.WithAlpha(110);
+                activeTextColor = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
+                inactiveTextColor = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)190 : (byte)175) : themeForeColor.WithAlpha(110);
                 break;
 
             case TabViewDesignMode.Rounded:
-                headerBackground    = ColorScheme.SurfaceContainerHigh;
-                headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)60 : (byte)44);
-                inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = themeForeColor.WithAlpha(isDark ? (byte)18 : (byte)12);
-                selectedBackground  = ColorScheme.Surface;
+                headerBackground = ColorScheme.SurfaceContainerHigh;
+                headerBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)60 : (byte)44);
+                inactiveBackground = SKColors.Transparent;
+                hoverBackground = themeForeColor.WithAlpha(isDark ? (byte)18 : (byte)12);
+                selectedBackground = ColorScheme.Surface;
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)90 : (byte)68);
-                activeTextColor     = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
-                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)185 : (byte)170) : themeForeColor.WithAlpha(110);
+                activeTextColor = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
+                inactiveTextColor = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)185 : (byte)170) : themeForeColor.WithAlpha(110);
                 break;
 
             case TabViewDesignMode.RoundedCompact:
-                headerBackground    = ColorScheme.SurfaceVariant;
-                headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)48 : (byte)36);
-                inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = themeForeColor.WithAlpha(isDark ? (byte)16 : (byte)10);
-                selectedBackground  = ColorScheme.Surface;
+                headerBackground = ColorScheme.SurfaceVariant;
+                headerBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)48 : (byte)36);
+                inactiveBackground = SKColors.Transparent;
+                hoverBackground = themeForeColor.WithAlpha(isDark ? (byte)16 : (byte)10);
+                selectedBackground = ColorScheme.Surface;
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)88 : (byte)68);
-                activeTextColor     = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
-                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)185 : (byte)168) : themeForeColor.WithAlpha(110);
+                activeTextColor = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
+                inactiveTextColor = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)185 : (byte)168) : themeForeColor.WithAlpha(110);
                 break;
 
             case TabViewDesignMode.Pill:
-                headerBackground    = SKColors.Transparent;
-                headerBorderColor   = SKColors.Transparent;
-                inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = ColorScheme.Primary.WithAlpha(isDark ? (byte)24 : (byte)18);
-                selectedBackground  = ColorScheme.Primary;
+                headerBackground = SKColors.Transparent;
+                headerBorderColor = SKColors.Transparent;
+                inactiveBackground = SKColors.Transparent;
+                hoverBackground = ColorScheme.Primary.WithAlpha(isDark ? (byte)24 : (byte)18);
+                selectedBackground = ColorScheme.Primary;
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = SKColors.Transparent;
-                activeTextColor     = Enabled ? ColorScheme.Primary.Determine() : ColorScheme.Primary.Determine().WithAlpha(170);
-                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)190 : (byte)175) : themeForeColor.WithAlpha(110);
+                activeTextColor = Enabled ? ColorScheme.Primary.Determine() : ColorScheme.Primary.Determine().WithAlpha(170);
+                inactiveTextColor = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)190 : (byte)175) : themeForeColor.WithAlpha(110);
                 break;
 
             case TabViewDesignMode.Outlined:
-                headerBackground    = SKColors.Transparent;
-                headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)72 : (byte)52);
-                inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = themeForeColor.WithAlpha(isDark ? (byte)16 : (byte)10);
-                selectedBackground  = ColorScheme.Surface;
+                headerBackground = SKColors.Transparent;
+                headerBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)72 : (byte)52);
+                inactiveBackground = SKColors.Transparent;
+                hoverBackground = themeForeColor.WithAlpha(isDark ? (byte)16 : (byte)10);
+                selectedBackground = ColorScheme.Surface;
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)96 : (byte)72);
-                activeTextColor     = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
-                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)185 : (byte)170) : themeForeColor.WithAlpha(110);
+                activeTextColor = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
+                inactiveTextColor = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)185 : (byte)170) : themeForeColor.WithAlpha(110);
                 break;
 
             case TabViewDesignMode.Minimal:
-                headerBackground    = SKColors.Transparent;
-                headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)38 : (byte)28);
-                inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = themeForeColor.WithAlpha(isDark ? (byte)14 : (byte)8);
-                selectedBackground  = ColorScheme.Primary.WithAlpha(isDark ? (byte)16 : (byte)12);
+                headerBackground = SKColors.Transparent;
+                headerBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)38 : (byte)28);
+                inactiveBackground = SKColors.Transparent;
+                hoverBackground = themeForeColor.WithAlpha(isDark ? (byte)14 : (byte)8);
+                selectedBackground = ColorScheme.Primary.WithAlpha(isDark ? (byte)16 : (byte)12);
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = ColorScheme.Primary;
-                activeTextColor     = Enabled ? ColorScheme.Primary : ColorScheme.Primary.WithAlpha(170);
-                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)185 : (byte)168) : themeForeColor.WithAlpha(110);
+                activeTextColor = Enabled ? ColorScheme.Primary : ColorScheme.Primary.WithAlpha(170);
+                inactiveTextColor = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)185 : (byte)168) : themeForeColor.WithAlpha(110);
                 break;
 
             case TabViewDesignMode.Fluent:
-                headerBackground    = (isDark ? ColorScheme.SurfaceContainerHigh : ColorScheme.SurfaceContainer).WithAlpha(isDark ? (byte)184 : (byte)218);
-                headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)44 : (byte)34);
-                inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = ColorScheme.Primary.WithAlpha(isDark ? (byte)28 : (byte)20);
-                selectedBackground  = (isDark ? ColorScheme.SurfaceContainerHigh : ColorScheme.Surface).WithAlpha(isDark ? (byte)232 : (byte)242);
+                headerBackground = (isDark ? ColorScheme.SurfaceContainerHigh : ColorScheme.SurfaceContainer).WithAlpha(isDark ? (byte)184 : (byte)218);
+                headerBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)44 : (byte)34);
+                inactiveBackground = SKColors.Transparent;
+                hoverBackground = ColorScheme.Primary.WithAlpha(isDark ? (byte)28 : (byte)20);
+                selectedBackground = (isDark ? ColorScheme.SurfaceContainerHigh : ColorScheme.Surface).WithAlpha(isDark ? (byte)232 : (byte)242);
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = SKColors.White.WithAlpha(isDark ? (byte)36 : (byte)144);
-                activeTextColor     = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
-                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)190 : (byte)175) : themeForeColor.WithAlpha(110);
+                activeTextColor = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
+                inactiveTextColor = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)190 : (byte)175) : themeForeColor.WithAlpha(110);
                 break;
 
             case TabViewDesignMode.MacOS:
-                headerBackground    = ColorScheme.SurfaceContainer.WithAlpha(isDark ? (byte)150 : (byte)178);
-                headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)54 : (byte)42);
-                inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = themeForeColor.WithAlpha(isDark ? (byte)20 : (byte)14);
-                selectedBackground  = SKColors.White.WithAlpha(isDark ? (byte)40 : (byte)235);
+                headerBackground = ColorScheme.SurfaceContainer.WithAlpha(isDark ? (byte)150 : (byte)178);
+                headerBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)54 : (byte)42);
+                inactiveBackground = SKColors.Transparent;
+                hoverBackground = themeForeColor.WithAlpha(isDark ? (byte)20 : (byte)14);
+                selectedBackground = SKColors.White.WithAlpha(isDark ? (byte)40 : (byte)235);
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)70 : (byte)46);
-                activeTextColor     = Enabled ? (isDark ? SKColors.White : themeForeColor) : themeForeColor.WithAlpha(170);
-                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)190 : (byte)170) : themeForeColor.WithAlpha(110);
+                activeTextColor = Enabled ? (isDark ? SKColors.White : themeForeColor) : themeForeColor.WithAlpha(170);
+                inactiveTextColor = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)190 : (byte)170) : themeForeColor.WithAlpha(110);
                 break;
 
             case TabViewDesignMode.Chromed:
             default:
-                headerBackground    = ColorScheme.SurfaceContainer;
-                headerBorderColor   = ColorScheme.Outline.WithAlpha(isDark ? (byte)96 : (byte)70);
-                inactiveBackground  = SKColors.Transparent;
-                hoverBackground     = themeForeColor.WithAlpha(isDark ? (byte)18 : (byte)12);
-                selectedBackground  = ColorScheme.Surface;
+                headerBackground = ColorScheme.SurfaceContainer;
+                headerBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)96 : (byte)70);
+                inactiveBackground = SKColors.Transparent;
+                hoverBackground = themeForeColor.WithAlpha(isDark ? (byte)18 : (byte)12);
+                selectedBackground = ColorScheme.Surface;
                 inactiveBorderColor = SKColors.Transparent;
                 selectedBorderColor = ColorScheme.Outline.WithAlpha(isDark ? (byte)110 : (byte)82);
-                activeTextColor     = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
-                inactiveTextColor   = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)190 : (byte)175) : themeForeColor.WithAlpha(110);
+                activeTextColor = Enabled ? themeForeColor : themeForeColor.WithAlpha(170);
+                inactiveTextColor = Enabled ? themeForeColor.WithAlpha(isDark ? (byte)190 : (byte)175) : themeForeColor.WithAlpha(110);
                 break;
         }
 
@@ -2408,7 +2448,7 @@ public partial class TabView : ElementBase
 
         if (_isDraggingTab && _dragTabSourceIndex >= 0 && _dragTabSourceIndex < _tabRects.Count)
         {
-            var srcRect  = _tabRects[_dragTabSourceIndex];
+            var srcRect = _tabRects[_dragTabSourceIndex];
             var ghostLeft = Math.Clamp(
                 _dragTabCurrentX - _dragTabGrabX,
                 GetHeaderPrimaryStart(headerRect),
@@ -2462,31 +2502,21 @@ public partial class TabView : ElementBase
             var canScrollRight = CanScrollRight;
 
             var chevronSize = ChevronSize * ScaleFactor;
-            var chevronMargin = 4f * ScaleFactor;
-            var fadeWidth = 40f * ScaleFactor;
-
-            // Shadow starts FROM the chevron — the opaque part is right
-            // behind the chevron (masking tabs that scroll under it), and
-            // the fade extends into the visible tab area. The chevron is
-            // drawn on top, so the shadow reads as a soft mask behind it.
-            var leftChevronLeft = headerRect.Left + chevronMargin;
-            var rightChevronRight = headerRect.Right - chevronMargin;
-
-            // Shadow-based fade: ColorScheme.ShadowColor provides a
-            // theme-aware soft shadow that works in both light and dark
-            // modes without looking like a solid coloured band.
-            var fadeColor = ColorScheme.ShadowColor;
+            
+            var fadeWidth = 12f * ScaleFactor;
+            var leftChevronLeft = headerRect.Left;
+            var rightChevronRight = headerRect.Right;
 
             if (canScrollLeft)
             {
                 // Left fade: from chevron left edge → into tab area
-                DrawFadeGradient(canvas, new SKRect(leftChevronLeft, headerRect.Top, leftChevronLeft + chevronSize + fadeWidth, headerRect.Bottom), true, fadeColor);
+                DrawFadeGradient(canvas, new SKRect(leftChevronLeft, headerRect.Top, leftChevronLeft + chevronSize + fadeWidth, headerRect.Bottom), true);
                 DrawChevron(canvas, _leftChevronRect, _chevronHoverLeft, true);
             }
             if (canScrollRight)
             {
                 // Right fade: from tab area → chevron right edge
-                DrawFadeGradient(canvas, new SKRect(rightChevronRight - chevronSize - fadeWidth, headerRect.Top, rightChevronRight, headerRect.Bottom), false, fadeColor);
+                DrawFadeGradient(canvas, new SKRect(rightChevronRight - chevronSize - fadeWidth, headerRect.Top, rightChevronRight, headerRect.Bottom), false);
                 DrawChevron(canvas, _rightChevronRect, _chevronHoverRight, false);
             }
         }
@@ -2495,19 +2525,15 @@ public partial class TabView : ElementBase
     // =========================================================================
     // NEW: Chevron and fade helpers
     // =========================================================================
-    private void DrawFadeGradient(SKCanvas canvas, SKRect rect, bool leftSide, SKColor fadeColor)
+    private void DrawFadeGradient(SKCanvas canvas, SKRect rect, bool leftSide)
     {
         if (rect.Width <= 0f || rect.Height <= 0f)
             return;
 
-        // Use the full width of the passed rect — the caller controls how
-        // wide the fade should be (e.g. chevronSize + fadeWidth so the
-        // shadow starts behind the chevron and extends into the tab area).
         var actualRect = rect;
 
-        // Optimization: reuse pre-allocated arrays + class-level paint to
-        // avoid per-frame GC pressure (this runs every paint tick).
-        _fadeColors[0] = fadeColor.WithAlpha(50);
+        var fadeColor = ColorScheme.ShadowColor;
+        _fadeColors[0] = fadeColor.WithAlpha(25);
         _fadeColors[1] = fadeColor.WithAlpha(0);
 
         var start = leftSide ? new SKPoint(actualRect.Left, 0) : new SKPoint(actualRect.Right, 0);
@@ -2575,18 +2601,69 @@ public partial class TabView : ElementBase
         canvas.DrawPath(_tabPath, _tabGlyphPaint);
     }
 
-    private void ScrollTabs(float delta)
+    private void ScrollTabs(float delta, bool animate = false)
+    {
+        ScrollTabsToOffset(_scrollOffset + delta, animate);
+    }
+
+    private void ScrollTabsToOffset(float targetOffset, bool animate = false)
     {
         if (_maxScrollOffset <= 0)
+        {
+            _scrollOffset = 0f;
+            _scrollAnimationStartOffset = 0f;
+            _scrollAnimationTargetOffset = 0f;
             return;
+        }
 
-        var newOffset = _scrollOffset + delta;
-        newOffset = Math.Clamp(newOffset, 0f, _maxScrollOffset);
+        var newOffset = Math.Clamp(targetOffset, 0f, _maxScrollOffset);
         if (Math.Abs(newOffset - _scrollOffset) < 0.5f)
             return;
 
-        _scrollOffset = newOffset;
-        Invalidate();
+        if (!animate)
+        {
+            _scrollOffset = newOffset;
+            _scrollAnimationStartOffset = newOffset;
+            _scrollAnimationTargetOffset = newOffset;
+            _scrollAnimation.SetProgress(1d);
+            Invalidate();
+            return;
+        }
+
+        _scrollAnimationStartOffset = _scrollOffset;
+        _scrollAnimationTargetOffset = newOffset;
+        _scrollAnimation.SetProgress(0d);
+        _scrollAnimation.StartNewAnimation(AnimationDirection.In);
+    }
+
+    private float GetChevronScrollDelta(bool forward, bool titleBar)
+    {
+        var rects = titleBar ? _titleBarTabRects : _tabRects;
+        var visible = titleBar
+            ? (_hasTitleBarLayoutContext ? GetTitleBarScrollVisibleBounds(_lastTitleBarLayoutContext) : SKRect.Empty)
+            : GetScrollVisibleBounds();
+
+        if (rects.Count == 0 || visible.Width <= 0f)
+            return GetScrollStep();
+
+        if (forward)
+        {
+            for (var i = 0; i < rects.Count; i++)
+            {
+                if (rects[i].Right > visible.Right + 0.5f)
+                    return rects[i].Right - visible.Right;
+            }
+        }
+        else
+        {
+            for (var i = rects.Count - 1; i >= 0; i--)
+            {
+                if (rects[i].Left < visible.Left - 0.5f)
+                    return visible.Left - rects[i].Left;
+            }
+        }
+
+        return GetScrollStep();
     }
 
     private float GetScrollStep()
@@ -2654,9 +2731,9 @@ public partial class TabView : ElementBase
             return SKRect.Empty;
 
         var chevronSize = ChevronSize * ScaleFactor;
-        var chevronMargin = 4f * ScaleFactor;
-        var left = headerRect.Left + chevronMargin + chevronSize;
-        var right = headerRect.Right - chevronMargin - chevronSize;
+        
+        var left = headerRect.Left + chevronSize;
+        var right = headerRect.Right - chevronSize;
 
         // Account for the new-tab button which is pinned just inside the
         // right chevron area.
@@ -2683,11 +2760,10 @@ public partial class TabView : ElementBase
         if (!IsTitleBarScrollOverflowActive || context.AvailableWidth <= 0f)
             return SKRect.Empty;
 
-        var chevronSize = ChevronSize * ScaleFactor;
-        // Match the tighter margin used in UpdateTitleBarLayout.
-        var chevronMargin = 2f * ScaleFactor;
-        var left = context.StartX + chevronMargin + chevronSize;
-        var right = context.StartX + context.AvailableWidth - chevronMargin - chevronSize;
+        var leftReserve = _leftChevronRect.Width > 0f ? _leftChevronRect.Width : 0f;
+        var rightReserve = _rightChevronRect.Width > 0f ? _rightChevronRect.Width : 0f;
+        var left = context.StartX + leftReserve;
+        var right = context.StartX + context.AvailableWidth - rightReserve;
 
         // Account for the new-tab button at the right edge.
         if (NewTabButton)
@@ -2842,8 +2918,8 @@ public partial class TabView : ElementBase
 
             _tabTextPaint.Color = GetTitleBarTextColor(isSelected, isHovered, hoverProgress, foreColor);
 
-            var titleBarPadding     = GetTitleBarTabHorizontalContentPadding();
-            var titleBarIcon    = TitleBarTabIconSize * ScaleFactor;
+            var titleBarPadding = GetTitleBarTabHorizontalContentPadding();
+            var titleBarIcon = TitleBarTabIconSize * ScaleFactor;
             var titleBarIconSpacing = TitleBarTabIconSpacing * ScaleFactor;
             var hasTitleBarIcon = DrawTabIcons && page.HasImage;
             var titleBarTrailingReserve = pageIndex == _selectedIndex && _titleBarCloseButtonRect.Width > 0f
@@ -2862,7 +2938,7 @@ public partial class TabView : ElementBase
 
         if (_isDraggingTab && _dragTabSourceIndex >= 0 && _dragTabSourceIndex < _titleBarTabRects.Count)
         {
-            var srcRect  = _titleBarTabRects[_dragTabSourceIndex];
+            var srcRect = _titleBarTabRects[_dragTabSourceIndex];
             var ghostLeft = Math.Clamp(
                 _dragTabCurrentX - _dragTabGrabX,
                 context.StartX,
@@ -2873,9 +2949,10 @@ public partial class TabView : ElementBase
             var layerSaved = canvas.SaveLayer(ghostLayerPaint);
 
             DrawTitleBarTabSurface(canvas, ghostRect, true, false, 0f, effectiveHoverColor, foreColor, titleColor);
-            
+
             var ghostPage = GetPageAt(_dragTabSourceIndex);
-            if (ghostPage != null) {
+            if (ghostPage != null)
+            {
                 var hasGhostIcon = DrawTabIcons && ghostPage.HasImage;
                 var titleBarPadding = GetTitleBarTabHorizontalContentPadding();
                 (var ghostIconRect, var ghostTextRect) = ComputeTabContentRects(
@@ -2904,29 +2981,22 @@ public partial class TabView : ElementBase
             var canScrollRight = CanScrollRight;
 
             var chevronSize = ChevronSize * ScaleFactor;
-            // Tighter margin in the title bar so the right chevron sits
-            // close to the window caption buttons (minimize/maximize/close),
-            // avoiding a large gap on the right.
-            var chevronMargin = 2f * ScaleFactor;
             var fadeWidth = 0f * ScaleFactor;
 
             // Shadow starts FROM the chevron — opaque behind the chevron,
             // fading into the visible tab area. Consistent with the
             // embedded strip.
-            var leftChevronLeft = context.StartX + chevronMargin;
-            var rightChevronRight = context.StartX + context.AvailableWidth - chevronMargin;
-
-            // Shadow-based fade — consistent with the embedded strip.
-            var fadeColor = ColorScheme.ShadowColor;
+            var leftChevronLeft = context.StartX;
+            var rightChevronRight = context.StartX + context.AvailableWidth;
 
             if (canScrollLeft)
             {
-                DrawFadeGradient(canvas, new SKRect(leftChevronLeft, context.Top, leftChevronLeft + chevronSize + fadeWidth, context.Bottom), true, fadeColor);
+                DrawFadeGradient(canvas, new SKRect(leftChevronLeft, context.Top, leftChevronLeft + chevronSize + fadeWidth, context.Bottom), true);
                 DrawChevron(canvas, _leftChevronRect, _chevronHoverLeft, true);
             }
             if (canScrollRight)
             {
-                DrawFadeGradient(canvas, new SKRect(rightChevronRight - chevronSize - fadeWidth, context.Top, rightChevronRight, context.Bottom), false, fadeColor);
+                DrawFadeGradient(canvas, new SKRect(rightChevronRight - chevronSize - fadeWidth, context.Top, rightChevronRight, context.Bottom), false);
                 DrawChevron(canvas, _rightChevronRect, _chevronHoverRight, false);
             }
         }
@@ -3053,12 +3123,12 @@ public partial class TabView : ElementBase
         {
             if (CanScrollLeft && _leftChevronRect.Contains(e.Location))
             {
-                ScrollTabs(-GetScrollStep());
+                ScrollTabs(-GetChevronScrollDelta(forward: false, titleBar: true), animate: true);
                 return true;
             }
             if (CanScrollRight && _rightChevronRect.Contains(e.Location))
             {
-                ScrollTabs(GetScrollStep());
+                ScrollTabs(GetChevronScrollDelta(forward: true, titleBar: true), animate: true);
                 return true;
             }
         }
@@ -3091,6 +3161,16 @@ public partial class TabView : ElementBase
             }
         }
         return false;
+    }
+
+    internal bool IsPointOverTitleBarScrollChevron(SKPoint point, TabViewTitleBarLayoutContext context)
+    {
+        if (TabMode != TabViewMode.TitleBar || Count <= 0 || !IsTitleBarScrollOverflowActive)
+            return false;
+
+        UpdateTitleBarLayout(context);
+        return (CanScrollLeft && _leftChevronRect.Contains(point)) ||
+               (CanScrollRight && _rightChevronRect.Contains(point));
     }
 
     internal bool ProcessTitleBarMouseMove(MouseEventArgs e, TabViewTitleBarLayoutContext context)
@@ -3162,18 +3242,24 @@ public partial class TabView : ElementBase
     /// strip. The parent window must forward horizontal wheel events here
     /// because the title bar area is outside the TabView's own bounds, so
     /// <see cref="OnMouseWheel"/> never fires for it.
-    /// Only horizontal wheel (<see cref="MouseEventArgs.IsHorizontalWheel"/>)
-    /// triggers scrolling; vertical wheel is ignored.
+    /// Horizontal wheel and Shift+wheel trigger scrolling; plain vertical
+    /// wheel is ignored.
     /// </summary>
     internal bool ProcessTitleBarMouseWheel(MouseEventArgs e, TabViewTitleBarLayoutContext context)
     {
         if (TabMode != TabViewMode.TitleBar || Count <= 0)
             return false;
 
-        if (!IsTitleBarScrollOverflowActive || !e.IsHorizontalWheel)
+        if (!IsTitleBarScrollOverflowActive || !WantsHorizontalMouseWheel(e))
             return false;
 
         UpdateTitleBarLayout(context);
+
+        var visibleBounds = GetTitleBarScrollVisibleBounds(context);
+        var overChevron = (CanScrollLeft && _leftChevronRect.Contains(e.Location)) ||
+                          (CanScrollRight && _rightChevronRect.Contains(e.Location));
+        if (!overChevron && (visibleBounds.Width <= 0f || !visibleBounds.Contains(e.Location)))
+            return false;
 
         if (_maxScrollOffset > 0f)
         {
@@ -3238,7 +3324,7 @@ public partial class TabView : ElementBase
         PrepareTabFont((DrawTabIcons ? TitleBarTabFontSizeWithIcon : TitleBarTabFontSize).Topx(this));
 
         var horizontalPadding = GetTitleBarTabHorizontalContentPadding();
-        var titleBarIconSize    = TitleBarTabIconSize    * ScaleFactor;
+        var titleBarIconSize = TitleBarTabIconSize * ScaleFactor;
         var titleBarIconSpacing = TitleBarTabIconSpacing * ScaleFactor;
         var closeButtonAllowance = TabCloseButton ? (TitleBarTabCloseButtonSize + TitleBarTabIconSpacing) * ScaleFactor : 0f;
         var newTabButtonSize = 24f * ScaleFactor;
@@ -3280,15 +3366,7 @@ public partial class TabView : ElementBase
 
         if (scrollMode)
         {
-            // ---- SCROLL MODE (TitleBar) ----
-            // Optimization: first check if tabs fit in the full available
-            // width WITHOUT reserving chevron space. Only when they actually
-            // overflow do we reserve chevron areas. This avoids the "too
-            // much empty space on the right" when there are few tabs.
             var chevronSize = ChevronSize * ScaleFactor;
-            // Tighter margin so the right chevron sits close to the window
-            // caption buttons, avoiding a large gap.
-            var chevronMargin = 2f * ScaleFactor;
 
             // Full available width (already minus new-tab button reserve).
             var fullTabAreaLeft = context.StartX;
@@ -3300,12 +3378,19 @@ public partial class TabView : ElementBase
             float tabAreaLeft, tabAreaRight;
             if (needsChevrons)
             {
-                tabAreaLeft = context.StartX + chevronMargin + chevronSize;
-                tabAreaRight = context.StartX + context.AvailableWidth - chevronMargin - chevronSize;
+                var chevronReserve = chevronSize;
+                var endViewportWidth = Math.Max(0f, fullTabAreaWidth - chevronReserve);
+                _maxScrollOffset = Math.Max(0f, totalDesiredWidth - endViewportWidth);
+                _scrollOffset = Math.Clamp(_scrollOffset, 0f, _maxScrollOffset);
+
+                var showLeftChevron = _scrollOffset > 0.5f;
+                var showRightChevron = _scrollOffset < _maxScrollOffset - 0.5f;
+
+                tabAreaLeft = context.StartX + (showLeftChevron ? chevronSize : 0f);
+                tabAreaRight = context.StartX + context.AvailableWidth - (showRightChevron ? chevronSize : 0f);
                 if (NewTabButton)
                     tabAreaRight -= newTabButtonSize + newTabButtonGap;
 
-                _maxScrollOffset = Math.Max(0f, totalDesiredWidth - Math.Max(0f, tabAreaRight - tabAreaLeft));
             }
             else
             {
@@ -3315,8 +3400,6 @@ public partial class TabView : ElementBase
                 _maxScrollOffset = 0f;
                 _scrollOffset = 0f;
             }
-
-            _scrollOffset = Math.Clamp(_scrollOffset, 0f, _maxScrollOffset);
 
             var startX = tabAreaLeft - _scrollOffset;
 
@@ -3333,17 +3416,23 @@ public partial class TabView : ElementBase
             // Chevron positions — only meaningful when needsChevrons is true.
             if (needsChevrons)
             {
+                var showLeftChevron = _scrollOffset > 0.5f;
+                var showRightChevron = _scrollOffset < _maxScrollOffset - 0.5f;
                 var chevronY = context.Top + (context.Height - chevronSize) * 0.5f;
-                _leftChevronRect = SKRect.Create(
-                    context.StartX + chevronMargin,
-                    chevronY,
-                    chevronSize,
-                    chevronSize);
-                _rightChevronRect = SKRect.Create(
-                    context.StartX + context.AvailableWidth - chevronSize - chevronMargin,
-                    chevronY,
-                    chevronSize,
-                    chevronSize);
+                _leftChevronRect = showLeftChevron
+                    ? SKRect.Create(
+                        context.StartX,
+                        chevronY,
+                        chevronSize,
+                        chevronSize)
+                    : SKRect.Empty;
+                _rightChevronRect = showRightChevron
+                    ? SKRect.Create(
+                        context.StartX + context.AvailableWidth - chevronSize,
+                        chevronY,
+                        chevronSize,
+                        chevronSize)
+                    : SKRect.Empty;
             }
             else
             {
@@ -3449,9 +3538,8 @@ public partial class TabView : ElementBase
                 // inside the right chevron area so it never overlaps the
                 // chevron. Match the tighter 2px margin.
                 var chevronSize = ChevronSize * ScaleFactor;
-                var chevronMargin = 2f * ScaleFactor;
                 newButtonLeft = context.StartX + context.AvailableWidth
-                                - chevronMargin - chevronSize - size - gap;
+                                - chevronSize - size - gap;
             }
             else
             {
@@ -3572,7 +3660,7 @@ public partial class TabView : ElementBase
             .WithAlpha(titleColor == SKColor.Empty ? (byte)255 : (byte)150);
         var hoverBg = foreColor.WithAlpha(isLightTitle ? (byte)14 : (byte)18);
         var backgroundColor = isSelected
-            ? selectedBg
+            ? selectedBg.WithAlpha(150)
             : SKColors.Transparent.InterpolateColor(hoverBg, hoverProgress);
         var borderColor = isSelected
             ? ColorScheme.Outline.WithAlpha(isDark ? (byte)90 : (byte)68)
@@ -3592,186 +3680,186 @@ public partial class TabView : ElementBase
         switch (TabDesignMode)
         {
             case TabViewDesignMode.Rectangle:
-            {
-                var flatRect = new SKRect(
-                    MathF.Round(rect.Left),
-                    MathF.Round(rect.Top + sf),
-                    MathF.Round(rect.Right),
-                    MathF.Round(rect.Bottom - sf));
-                canvas.DrawRect(flatRect, _tabBackgroundPaint);
-                if (isSelected)
                 {
-                    _tabIndicatorPaint.Color = ColorScheme.Primary;
-                    var indH = MathF.Max(2f, MathF.Round(3f * sf));
-                    canvas.DrawRect(flatRect.Left, flatRect.Bottom - indH, flatRect.Width, indH, _tabIndicatorPaint);
+                    var flatRect = new SKRect(
+                        MathF.Round(rect.Left),
+                        MathF.Round(rect.Top + sf),
+                        MathF.Round(rect.Right),
+                        MathF.Round(rect.Bottom - sf));
+                    canvas.DrawRect(flatRect, _tabBackgroundPaint);
+                    if (isSelected)
+                    {
+                        _tabIndicatorPaint.Color = ColorScheme.Primary;
+                        var indH = MathF.Max(2f, MathF.Round(3f * sf));
+                        canvas.DrawRect(flatRect.Left, flatRect.Bottom - indH, flatRect.Width, indH, _tabIndicatorPaint);
+                    }
+                    break;
                 }
-                break;
-            }
 
             case TabViewDesignMode.Rounded:
-            {
-                var lift = 1.5f * sf;
-                var roundedRect = new SKRect(
-                    MathF.Round(rect.Left + sf),
-                    MathF.Round(rect.Top + 5f * sf - lift),
-                    MathF.Round(rect.Right - sf),
-                    MathF.Round(rect.Bottom - 2f * sf - lift));
-                var radius = MathF.Min(roundedRect.Height / 2f, MathF.Round(10f * sf));
-                canvas.DrawRoundRect(roundedRect, radius, radius, _tabBackgroundPaint);
-                if (isSelected)
                 {
-                    canvas.DrawRoundRect(roundedRect, radius, radius, _tabBorderPaint);
-                    _tabIndicatorPaint.Color = ColorScheme.Primary.WithAlpha(isLightTitle ? (byte)176 : (byte)208);
-                    var indH = MathF.Max(2f, MathF.Round(3f * sf));
-                    var indL = roundedRect.Left + MathF.Round(10f * sf);
-                    var indW = MathF.Max(0f, roundedRect.Width - MathF.Round(20f * sf));
-                    canvas.DrawRoundRect(SKRect.Create(indL, roundedRect.Bottom - indH, indW, indH),
-                        MathF.Round(sf), MathF.Round(sf), _tabIndicatorPaint);
+                    var lift = 1.5f * sf;
+                    var roundedRect = new SKRect(
+                        MathF.Round(rect.Left + sf),
+                        MathF.Round(rect.Top + 5f * sf - lift),
+                        MathF.Round(rect.Right - sf),
+                        MathF.Round(rect.Bottom - 2f * sf - lift));
+                    var radius = MathF.Min(roundedRect.Height / 2f, MathF.Round(10f * sf));
+                    canvas.DrawRoundRect(roundedRect, radius, radius, _tabBackgroundPaint);
+                    if (isSelected)
+                    {
+                        canvas.DrawRoundRect(roundedRect, radius, radius, _tabBorderPaint);
+                        _tabIndicatorPaint.Color = ColorScheme.Primary.WithAlpha(isLightTitle ? (byte)176 : (byte)208);
+                        var indH = MathF.Max(2f, MathF.Round(3f * sf));
+                        var indL = roundedRect.Left + MathF.Round(10f * sf);
+                        var indW = MathF.Max(0f, roundedRect.Width - MathF.Round(20f * sf));
+                        canvas.DrawRoundRect(SKRect.Create(indL, roundedRect.Bottom - indH, indW, indH),
+                            MathF.Round(sf), MathF.Round(sf), _tabIndicatorPaint);
+                    }
+                    break;
                 }
-                break;
-            }
 
             case TabViewDesignMode.RoundedCompact:
-            {
-                var lift = 1.5f * sf;
-                var shadcnRect = new SKRect(
-                    MathF.Round(rect.Left + 2f * sf),
-                    MathF.Round(rect.Top + 7f * sf - lift),
-                    MathF.Round(rect.Right - 2f * sf),
-                    MathF.Round(rect.Bottom - 4f * sf - lift));
-                var radius = MathF.Min(shadcnRect.Height / 2f, MathF.Round(6f * sf));
-                _tabBorderPaint.StrokeWidth = MathF.Max(1f, MathF.Round(sf));
-                canvas.DrawRoundRect(shadcnRect, radius, radius, _tabBackgroundPaint);
-                if (isSelected)
                 {
-                    canvas.DrawRoundRect(shadcnRect, radius, radius, _tabBorderPaint);
-                    _tabIndicatorPaint.Color = ColorScheme.Primary;
-                    var indH = MathF.Max(2f, MathF.Round(2f * sf));
-                    var indW = shadcnRect.Width - MathF.Round(16f * sf);
-                    var indL = shadcnRect.Left + MathF.Round(8f * sf);
-                    canvas.DrawRoundRect(SKRect.Create(indL, shadcnRect.Bottom - indH, indW, indH),
-                        MathF.Round(sf), MathF.Round(sf), _tabIndicatorPaint);
+                    var lift = 1.5f * sf;
+                    var shadcnRect = new SKRect(
+                        MathF.Round(rect.Left + 2f * sf),
+                        MathF.Round(rect.Top + 7f * sf - lift),
+                        MathF.Round(rect.Right - 2f * sf),
+                        MathF.Round(rect.Bottom - 4f * sf - lift));
+                    var radius = MathF.Min(shadcnRect.Height / 2f, MathF.Round(6f * sf));
+                    _tabBorderPaint.StrokeWidth = MathF.Max(1f, MathF.Round(sf));
+                    canvas.DrawRoundRect(shadcnRect, radius, radius, _tabBackgroundPaint);
+                    if (isSelected)
+                    {
+                        canvas.DrawRoundRect(shadcnRect, radius, radius, _tabBorderPaint);
+                        _tabIndicatorPaint.Color = ColorScheme.Primary;
+                        var indH = MathF.Max(2f, MathF.Round(2f * sf));
+                        var indW = shadcnRect.Width - MathF.Round(16f * sf);
+                        var indL = shadcnRect.Left + MathF.Round(8f * sf);
+                        canvas.DrawRoundRect(SKRect.Create(indL, shadcnRect.Bottom - indH, indW, indH),
+                            MathF.Round(sf), MathF.Round(sf), _tabIndicatorPaint);
+                    }
+                    break;
                 }
-                break;
-            }
 
             case TabViewDesignMode.Outlined:
-            {
-                if (!isSelected && !isHovered)
-                    break;
-                var lift = 2f * sf;
-                var outRect = new SKRect(
-                    MathF.Round(rect.Left),
-                    MathF.Round(rect.Top + 4f * sf - lift),
-                    MathF.Round(rect.Right),
-                    MathF.Round(rect.Bottom - lift));
-                var outRadius = MathF.Round(4f * sf);
-                canvas.DrawRoundRect(outRect, outRadius, outRadius, _tabBackgroundPaint);
-                if (isSelected)
                 {
-                    canvas.DrawRoundRect(outRect, outRadius, outRadius, _tabBorderPaint);
-                    _tabIndicatorPaint.Color = ColorScheme.Primary;
-                    var indH = MathF.Max(2f, MathF.Round(3f * sf));
-                    canvas.DrawRect(outRect.Left + outRadius, outRect.Bottom - indH, outRect.Width - outRadius * 2f, indH, _tabIndicatorPaint);
+                    if (!isSelected && !isHovered)
+                        break;
+                    var lift = 2f * sf;
+                    var outRect = new SKRect(
+                        MathF.Round(rect.Left),
+                        MathF.Round(rect.Top + 4f * sf - lift),
+                        MathF.Round(rect.Right),
+                        MathF.Round(rect.Bottom - lift));
+                    var outRadius = MathF.Round(4f * sf);
+                    canvas.DrawRoundRect(outRect, outRadius, outRadius, _tabBackgroundPaint);
+                    if (isSelected)
+                    {
+                        canvas.DrawRoundRect(outRect, outRadius, outRadius, _tabBorderPaint);
+                        _tabIndicatorPaint.Color = ColorScheme.Primary;
+                        var indH = MathF.Max(2f, MathF.Round(3f * sf));
+                        canvas.DrawRect(outRect.Left + outRadius, outRect.Bottom - indH, outRect.Width - outRadius * 2f, indH, _tabIndicatorPaint);
+                    }
+                    break;
                 }
-                break;
-            }
 
             case TabViewDesignMode.Pill:
-            {
-                if (!isSelected && !isHovered)
+                {
+                    if (!isSelected && !isHovered)
+                        break;
+                    var lift = 1.5f * sf;
+                    var pillRect = new SKRect(
+                        MathF.Round(rect.Left + 4f * sf),
+                        MathF.Round(rect.Top + 7f * sf - lift),
+                        MathF.Round(rect.Right - 4f * sf),
+                        MathF.Round(rect.Bottom - 4f * sf - lift));
+                    var pillRadius = pillRect.Height / 2f;
+                    _tabBackgroundPaint.Color = isSelected
+                        ? ColorScheme.Primary
+                        : ColorScheme.Primary.WithAlpha(isDark ? (byte)22 : (byte)16);
+                    canvas.DrawRoundRect(pillRect, pillRadius, pillRadius, _tabBackgroundPaint);
                     break;
-                var lift = 1.5f * sf;
-                var pillRect = new SKRect(
-                    MathF.Round(rect.Left + 4f * sf),
-                    MathF.Round(rect.Top + 7f * sf - lift),
-                    MathF.Round(rect.Right - 4f * sf),
-                    MathF.Round(rect.Bottom - 4f * sf - lift));
-                var pillRadius = pillRect.Height / 2f;
-                _tabBackgroundPaint.Color = isSelected
-                    ? ColorScheme.Primary
-                    : ColorScheme.Primary.WithAlpha(isDark ? (byte)22 : (byte)16);
-                canvas.DrawRoundRect(pillRect, pillRadius, pillRadius, _tabBackgroundPaint);
-                break;
-            }
+                }
 
             case TabViewDesignMode.Minimal:
-            {
-                if (!isSelected && !isHovered)
-                    break;
-                var minRect = new SKRect(
-                    MathF.Round(rect.Left),
-                    MathF.Round(rect.Top + sf),
-                    MathF.Round(rect.Right),
-                    MathF.Round(rect.Bottom - sf));
-                _tabBackgroundPaint.Color = isSelected
-                    ? ColorScheme.Primary.WithAlpha(isDark ? (byte)12 : (byte)9)
-                    : backgroundColor;
-                canvas.DrawRect(minRect, _tabBackgroundPaint);
-                if (isSelected)
                 {
-                    _tabIndicatorPaint.Color = ColorScheme.Primary;
-                    var indH = MathF.Max(2f, MathF.Round(3f * sf));
-                    canvas.DrawRect(minRect.Left, minRect.Bottom - indH, minRect.Width, indH, _tabIndicatorPaint);
+                    if (!isSelected && !isHovered)
+                        break;
+                    var minRect = new SKRect(
+                        MathF.Round(rect.Left),
+                        MathF.Round(rect.Top + sf),
+                        MathF.Round(rect.Right),
+                        MathF.Round(rect.Bottom - sf));
+                    _tabBackgroundPaint.Color = isSelected
+                        ? ColorScheme.Primary.WithAlpha(isDark ? (byte)12 : (byte)9)
+                        : backgroundColor;
+                    canvas.DrawRect(minRect, _tabBackgroundPaint);
+                    if (isSelected)
+                    {
+                        _tabIndicatorPaint.Color = ColorScheme.Primary;
+                        var indH = MathF.Max(2f, MathF.Round(3f * sf));
+                        canvas.DrawRect(minRect.Left, minRect.Bottom - indH, minRect.Width, indH, _tabIndicatorPaint);
+                    }
+                    break;
                 }
-                break;
-            }
 
             case TabViewDesignMode.Fluent:
-            {
-                if (!isSelected && !isHovered)
-                    break;
-                var fluentRect = new SKRect(
-                    MathF.Round(rect.Left + 4f * sf),
-                    MathF.Round(rect.Top + 6f * sf),
-                    MathF.Round(rect.Right - 4f * sf),
-                    MathF.Round(rect.Bottom - 4f * sf));
-                _tabBackgroundPaint.Color = isSelected ? selectedBg : backgroundColor;
-                canvas.DrawRoundRect(fluentRect, 4f * sf, 4f * sf, _tabBackgroundPaint);
-                if (isSelected)
                 {
-                    _tabIndicatorPaint.Color = ColorScheme.Primary;
-                    canvas.DrawRect(fluentRect.Left + 8f * sf, fluentRect.Bottom - 2f * sf, fluentRect.Width - 16f * sf, 2f * sf, _tabIndicatorPaint);
+                    if (!isSelected && !isHovered)
+                        break;
+                    var fluentRect = new SKRect(
+                        MathF.Round(rect.Left + 4f * sf),
+                        MathF.Round(rect.Top + 6f * sf),
+                        MathF.Round(rect.Right - 4f * sf),
+                        MathF.Round(rect.Bottom - 4f * sf));
+                    _tabBackgroundPaint.Color = isSelected ? selectedBg : backgroundColor;
+                    canvas.DrawRoundRect(fluentRect, 4f * sf, 4f * sf, _tabBackgroundPaint);
+                    if (isSelected)
+                    {
+                        _tabIndicatorPaint.Color = ColorScheme.Primary;
+                        canvas.DrawRect(fluentRect.Left + 8f * sf, fluentRect.Bottom - 2f * sf, fluentRect.Width - 16f * sf, 2f * sf, _tabIndicatorPaint);
+                    }
+                    break;
                 }
-                break;
-            }
 
             case TabViewDesignMode.MacOS:
-            {
-                if (!isSelected && !isHovered)
-                    break;
-                var macRect = new SKRect(
-                    MathF.Round(rect.Left + 2f * sf),
-                    MathF.Round(rect.Top + 4f * sf),
-                    MathF.Round(rect.Right - 2f * sf),
-                    MathF.Round(rect.Bottom - 4f * sf));
-                _tabBackgroundPaint.Color = isSelected ? selectedBg : backgroundColor;
-                canvas.DrawRoundRect(macRect, macRect.Height / 2f, macRect.Height / 2f, _tabBackgroundPaint);
-                if (isSelected)
                 {
-                    _tabBorderPaint.Color = ColorScheme.BorderColor;
-                    canvas.DrawRoundRect(macRect, macRect.Height / 2f, macRect.Height / 2f, _tabBorderPaint);
+                    if (!isSelected && !isHovered)
+                        break;
+                    var macRect = new SKRect(
+                        MathF.Round(rect.Left + 2f * sf),
+                        MathF.Round(rect.Top + 4f * sf),
+                        MathF.Round(rect.Right - 2f * sf),
+                        MathF.Round(rect.Bottom - 4f * sf));
+                    _tabBackgroundPaint.Color = isSelected ? selectedBg : backgroundColor;
+                    canvas.DrawRoundRect(macRect, macRect.Height / 2f, macRect.Height / 2f, _tabBackgroundPaint);
+                    if (isSelected)
+                    {
+                        _tabBorderPaint.Color = ColorScheme.BorderColor;
+                        canvas.DrawRoundRect(macRect, macRect.Height / 2f, macRect.Height / 2f, _tabBorderPaint);
+                    }
+                    break;
                 }
-                break;
-            }
 
             case TabViewDesignMode.Chromed:
             default:
-            {
-                var lift = 2f * sf;
-                var offTop = isSelected ? MathF.Round(4f * sf) : MathF.Round(7f * sf);
-                var offBot = isSelected ? MathF.Max(1f, MathF.Round(sf)) : MathF.Round(2f * sf);
-                var chromedRect = new SKRect(
-                    MathF.Round(rect.Left),
-                    MathF.Round(rect.Top + offTop - lift),
-                    MathF.Round(rect.Right),
-                    isSelected ? MathF.Round(rect.Bottom + offBot - lift) : MathF.Round(rect.Bottom - offBot - lift));
-                TabViewTabGeometry.BuildTopRoundedTabPath(_tabPath, chromedRect, MathF.Round(12f * sf));
-                canvas.DrawPath(_tabPath, _tabBackgroundPaint);
-                if (isSelected)
-                    canvas.DrawPath(_tabPath, _tabBorderPaint);
-                break;
-            }
+                {
+                    var lift = 2f * sf;
+                    var offTop = isSelected ? MathF.Round(4f * sf) : MathF.Round(7f * sf);
+                    var offBot = isSelected ? MathF.Max(1f, MathF.Round(sf)) : MathF.Round(2f * sf);
+                    var chromedRect = new SKRect(
+                        MathF.Round(rect.Left),
+                        MathF.Round(rect.Top + offTop - lift),
+                        MathF.Round(rect.Right),
+                        isSelected ? MathF.Round(rect.Bottom + offBot - lift) : MathF.Round(rect.Bottom - offBot - lift));
+                    TabViewTabGeometry.BuildTopRoundedTabPath(_tabPath, chromedRect, MathF.Round(12f * sf));
+                    canvas.DrawPath(_tabPath, _tabBackgroundPaint);
+                    if (isSelected)
+                        canvas.DrawPath(_tabPath, _tabBorderPaint);
+                    break;
+                }
         }
     }
 
@@ -3780,11 +3868,11 @@ public partial class TabView : ElementBase
         var sf = ScaleFactor;
         var progress = Math.Clamp((float)_titleBarTabCloseHoverAnimation.GetProgress(), 0f, 1f);
         _tabBackgroundPaint.Color = hoverColor.WithAlpha((byte)(28 + progress * 52));
-        
+
         var midX = MathF.Round(rect.MidX);
         var midY = MathF.Round(rect.MidY);
         var width = MathF.Round(rect.Width / 2f);
-        
+
         canvas.DrawCircle(midX, midY, width, _tabBackgroundPaint);
 
         if (progress > 0f)
@@ -3815,7 +3903,7 @@ public partial class TabView : ElementBase
 
         var roundedRect = new SKRect(MathF.Round(rect.Left), MathF.Round(rect.Top), MathF.Round(rect.Right), MathF.Round(rect.Bottom));
         var rad = MathF.Round(6f * sf);
-        
+
         canvas.DrawRoundRect(roundedRect, rad, rad, _tabBackgroundPaint);
         canvas.DrawRoundRect(roundedRect, rad, rad, _tabBorderPaint);
 
@@ -3826,7 +3914,7 @@ public partial class TabView : ElementBase
         var size = MathF.Round(5f * sf);
         var midX = MathF.Round(roundedRect.MidX) + crispOffset;
         var midY = MathF.Round(roundedRect.MidY) + crispOffset;
-        
+
         canvas.DrawLine(midX - size, midY, midX + size, midY, linePaint);
         canvas.DrawLine(midX, midY - size, midX, midY + size, linePaint);
     }
@@ -3864,58 +3952,58 @@ public partial class TabView : ElementBase
                     case TabViewDesignMode.RoundedCompact:
                     case TabViewDesignMode.Pill:
                     case TabViewDesignMode.MacOS:
-                    {
-                        if (activeTabsRect.Width > 0 && activeTabsRect.Height > 0)
                         {
-                            var pad = MathF.Round((TabDesignMode == TabViewDesignMode.MacOS ? 6f : 4f) * sf);
-                            var wrapRect = new SKRect(
-                                activeTabsRect.Left - pad,
-                                activeTabsRect.Top - pad,
-                                activeTabsRect.Right + pad,
-                                activeTabsRect.Bottom + pad);
-                            var wrapRadius = TabDesignMode == TabViewDesignMode.MacOS
-                                ? MathF.Min(wrapRect.Width, wrapRect.Height) * 0.12f
-                                : MathF.Round(10f * sf);
-                            canvas.DrawRoundRect(wrapRect, wrapRadius, wrapRadius, _tabBackgroundPaint);
+                            if (activeTabsRect.Width > 0 && activeTabsRect.Height > 0)
+                            {
+                                var pad = MathF.Round((TabDesignMode == TabViewDesignMode.MacOS ? 6f : 4f) * sf);
+                                var wrapRect = new SKRect(
+                                    activeTabsRect.Left - pad,
+                                    activeTabsRect.Top - pad,
+                                    activeTabsRect.Right + pad,
+                                    activeTabsRect.Bottom + pad);
+                                var wrapRadius = TabDesignMode == TabViewDesignMode.MacOS
+                                    ? MathF.Min(wrapRect.Width, wrapRect.Height) * 0.12f
+                                    : MathF.Round(10f * sf);
+                                canvas.DrawRoundRect(wrapRect, wrapRadius, wrapRadius, _tabBackgroundPaint);
+                            }
+
+                            break;
                         }
 
-                        break;
-                    }
-
                     case TabViewDesignMode.Fluent:
-                    {
-                        DrawFluentTabSurface(canvas, headerRect, MathF.Round(8f * sf), backgroundColor, false);
-                        break;
-                    }
+                        {
+                            DrawFluentTabSurface(canvas, headerRect, MathF.Round(8f * sf), backgroundColor, false);
+                            break;
+                        }
 
                     default:
-                    {
-                        canvas.DrawRect(headerRect, _tabBackgroundPaint);
-                        break;
-                    }
+                        {
+                            canvas.DrawRect(headerRect, _tabBackgroundPaint);
+                            break;
+                        }
                 }
             }
 
             switch (_tabLayoutMode)
             {
                 case TabViewLayoutMode.Left:
-                {
-                    var dividerX = MathF.Round(headerRect.Right) - _tabBorderPaint.StrokeWidth * 0.5f;
-                    canvas.DrawLine(dividerX, MathF.Round(headerRect.Top), dividerX, MathF.Round(headerRect.Bottom), _tabBorderPaint);
-                    break;
-                }
+                    {
+                        var dividerX = MathF.Round(headerRect.Right) - _tabBorderPaint.StrokeWidth * 0.5f;
+                        canvas.DrawLine(dividerX, MathF.Round(headerRect.Top), dividerX, MathF.Round(headerRect.Bottom), _tabBorderPaint);
+                        break;
+                    }
                 case TabViewLayoutMode.Right:
-                {
-                    var dividerX = MathF.Round(headerRect.Left) + _tabBorderPaint.StrokeWidth * 0.5f;
-                    canvas.DrawLine(dividerX, MathF.Round(headerRect.Top), dividerX, MathF.Round(headerRect.Bottom), _tabBorderPaint);
-                    break;
-                }
+                    {
+                        var dividerX = MathF.Round(headerRect.Left) + _tabBorderPaint.StrokeWidth * 0.5f;
+                        canvas.DrawLine(dividerX, MathF.Round(headerRect.Top), dividerX, MathF.Round(headerRect.Bottom), _tabBorderPaint);
+                        break;
+                    }
                 case TabViewLayoutMode.Bottom:
-                {
-                    var dividerY = MathF.Round(headerRect.Top) + _tabBorderPaint.StrokeWidth * 0.5f;
-                    canvas.DrawLine(MathF.Round(headerRect.Left), dividerY, MathF.Round(headerRect.Right), dividerY, _tabBorderPaint);
-                    break;
-                }
+                    {
+                        var dividerY = MathF.Round(headerRect.Top) + _tabBorderPaint.StrokeWidth * 0.5f;
+                        canvas.DrawLine(MathF.Round(headerRect.Left), dividerY, MathF.Round(headerRect.Right), dividerY, _tabBorderPaint);
+                        break;
+                    }
             }
 
             return;
@@ -3929,28 +4017,28 @@ public partial class TabView : ElementBase
                 case TabViewDesignMode.Rounded:
                 case TabViewDesignMode.RoundedCompact:
                 case TabViewDesignMode.Pill:
-                {
-                    if (activeTabsRect.Width > 0 && activeTabsRect.Height > 0)
                     {
-                        var padX = MathF.Round(4f * sf);
-                        var padY = MathF.Round(4f * sf);
-                        var wrapRect = new SKRect(
-                            activeTabsRect.Left - padX,
-                            activeTabsRect.Top - padY,
-                            activeTabsRect.Right + padX,
-                            activeTabsRect.Bottom + padY);
+                        if (activeTabsRect.Width > 0 && activeTabsRect.Height > 0)
+                        {
+                            var padX = MathF.Round(4f * sf);
+                            var padY = MathF.Round(4f * sf);
+                            var wrapRect = new SKRect(
+                                activeTabsRect.Left - padX,
+                                activeTabsRect.Top - padY,
+                                activeTabsRect.Right + padX,
+                                activeTabsRect.Bottom + padY);
 
-                        var wrapRadius = MathF.Round(10f * sf);
-                        canvas.DrawRoundRect(wrapRect, wrapRadius, wrapRadius, _tabBackgroundPaint);
+                            var wrapRadius = MathF.Round(10f * sf);
+                            canvas.DrawRoundRect(wrapRect, wrapRadius, wrapRadius, _tabBackgroundPaint);
+                        }
+                        break;
                     }
-                    break;
-                }
-                
+
                 default:
-                {
-                    canvas.DrawRect(headerRect, _tabBackgroundPaint);
-                    break;
-                }
+                    {
+                        canvas.DrawRect(headerRect, _tabBackgroundPaint);
+                        break;
+                    }
             }
         }
 
@@ -3960,11 +4048,11 @@ public partial class TabView : ElementBase
             case TabViewDesignMode.Chromed:
             case TabViewDesignMode.Outlined:
             case TabViewDesignMode.Minimal:
-            {
-                var divY = MathF.Round(headerRect.Bottom) - _tabBorderPaint.StrokeWidth * 0.5f;
-                canvas.DrawLine(MathF.Round(headerRect.Left), divY, MathF.Round(headerRect.Right), divY, _tabBorderPaint);
-                break;
-            }
+                {
+                    var divY = MathF.Round(headerRect.Bottom) - _tabBorderPaint.StrokeWidth * 0.5f;
+                    canvas.DrawLine(MathF.Round(headerRect.Left), divY, MathF.Round(headerRect.Right), divY, _tabBorderPaint);
+                    break;
+                }
 
             case TabViewDesignMode.Rounded:
             case TabViewDesignMode.RoundedCompact:
@@ -4031,146 +4119,146 @@ public partial class TabView : ElementBase
         switch (TabDesignMode)
         {
             case TabViewDesignMode.Rectangle:
-            {
-                if (isHovered && !isSelected)
                 {
-                    var ghostRect = new SKRect(
-                        MathF.Round(rect.Left + 2f * sf), MathF.Round(rect.Top + 2f * sf),
-                        MathF.Round(rect.Right - 2f * sf), MathF.Round(rect.Bottom - 2f * sf));
-                    var radius = MathF.Round(6f * sf);
-                    canvas.DrawRoundRect(ghostRect, radius, radius, _tabBackgroundPaint);
+                    if (isHovered && !isSelected)
+                    {
+                        var ghostRect = new SKRect(
+                            MathF.Round(rect.Left + 2f * sf), MathF.Round(rect.Top + 2f * sf),
+                            MathF.Round(rect.Right - 2f * sf), MathF.Round(rect.Bottom - 2f * sf));
+                        var radius = MathF.Round(6f * sf);
+                        canvas.DrawRoundRect(ghostRect, radius, radius, _tabBackgroundPaint);
+                    }
+
+                    if (isSelected)
+                        DrawContentEdgeIndicator(canvas, rect, MathF.Max(2f, MathF.Round(2.5f * sf)), ColorScheme.Primary);
+
+                    break;
                 }
 
-                if (isSelected)
-                    DrawContentEdgeIndicator(canvas, rect, MathF.Max(2f, MathF.Round(2.5f * sf)), ColorScheme.Primary);
-
-                break;
-            }
-
             case TabViewDesignMode.Pill:
-            {
-                if (!isSelected && !isHovered)
-                    break;
+                {
+                    if (!isSelected && !isHovered)
+                        break;
 
-                var inset = MathF.Round(4f * sf);
-                var pillRect = new SKRect(
-                    MathF.Round(rect.Left + inset), MathF.Round(rect.Top + inset),
-                    MathF.Round(rect.Right - inset), MathF.Round(rect.Bottom - inset));
-                var radius = MathF.Min(pillRect.Width, pillRect.Height) * 0.5f;
-                canvas.DrawRoundRect(pillRect, radius, radius, _tabBackgroundPaint);
-                break;
-            }
+                    var inset = MathF.Round(4f * sf);
+                    var pillRect = new SKRect(
+                        MathF.Round(rect.Left + inset), MathF.Round(rect.Top + inset),
+                        MathF.Round(rect.Right - inset), MathF.Round(rect.Bottom - inset));
+                    var radius = MathF.Min(pillRect.Width, pillRect.Height) * 0.5f;
+                    canvas.DrawRoundRect(pillRect, radius, radius, _tabBackgroundPaint);
+                    break;
+                }
 
             case TabViewDesignMode.Minimal:
-            {
-                if (!isSelected && !isHovered)
+                {
+                    if (!isSelected && !isHovered)
+                        break;
+
+                    canvas.DrawRect(rect, _tabBackgroundPaint);
+                    if (isSelected)
+                        DrawContentEdgeIndicator(canvas, rect, MathF.Max(2f, MathF.Round(3f * sf)), borderColor == SKColors.Transparent ? ColorScheme.Primary : borderColor);
+
                     break;
-
-                canvas.DrawRect(rect, _tabBackgroundPaint);
-                if (isSelected)
-                    DrawContentEdgeIndicator(canvas, rect, MathF.Max(2f, MathF.Round(3f * sf)), borderColor == SKColors.Transparent ? ColorScheme.Primary : borderColor);
-
-                break;
-            }
+                }
 
             case TabViewDesignMode.Outlined:
-            {
-                if (!isSelected && !isHovered)
-                    break;
+                {
+                    if (!isSelected && !isHovered)
+                        break;
 
-                var outlineRect = new SKRect(
-                    MathF.Round(rect.Left + sf), MathF.Round(rect.Top + sf),
-                    MathF.Round(rect.Right - sf), MathF.Round(rect.Bottom - sf));
-                var radius = MathF.Round(7f * sf);
-                canvas.DrawRoundRect(outlineRect, radius, radius, _tabBackgroundPaint);
-                if (isSelected)
-                    canvas.DrawRoundRect(outlineRect, radius, radius, _tabBorderPaint);
-                break;
-            }
+                    var outlineRect = new SKRect(
+                        MathF.Round(rect.Left + sf), MathF.Round(rect.Top + sf),
+                        MathF.Round(rect.Right - sf), MathF.Round(rect.Bottom - sf));
+                    var radius = MathF.Round(7f * sf);
+                    canvas.DrawRoundRect(outlineRect, radius, radius, _tabBackgroundPaint);
+                    if (isSelected)
+                        canvas.DrawRoundRect(outlineRect, radius, radius, _tabBorderPaint);
+                    break;
+                }
 
             case TabViewDesignMode.Rounded:
-            {
-                if (!isSelected && !isHovered)
-                    break;
+                {
+                    if (!isSelected && !isHovered)
+                        break;
 
-                var vIn = MathF.Round(2.5f * sf);
-                var hIn = MathF.Round(2f * sf);
-                var pillRect = new SKRect(
-                    MathF.Round(rect.Left + hIn), MathF.Round(rect.Top + vIn),
-                    MathF.Round(rect.Right - hIn), MathF.Round(rect.Bottom - vIn));
-                var radius = MathF.Round(8f * sf);
-                canvas.DrawRoundRect(pillRect, radius, radius, _tabBackgroundPaint);
-                if (isSelected)
-                    canvas.DrawRoundRect(pillRect, radius, radius, _tabBorderPaint);
-                break;
-            }
+                    var vIn = MathF.Round(2.5f * sf);
+                    var hIn = MathF.Round(2f * sf);
+                    var pillRect = new SKRect(
+                        MathF.Round(rect.Left + hIn), MathF.Round(rect.Top + vIn),
+                        MathF.Round(rect.Right - hIn), MathF.Round(rect.Bottom - vIn));
+                    var radius = MathF.Round(8f * sf);
+                    canvas.DrawRoundRect(pillRect, radius, radius, _tabBackgroundPaint);
+                    if (isSelected)
+                        canvas.DrawRoundRect(pillRect, radius, radius, _tabBorderPaint);
+                    break;
+                }
 
             case TabViewDesignMode.RoundedCompact:
-            {
-                if (!isSelected && !isHovered)
-                    break;
+                {
+                    if (!isSelected && !isHovered)
+                        break;
 
-                var vIn = MathF.Round(3f * sf);
-                var hIn = MathF.Round(3f * sf);
-                var cardRect = new SKRect(
-                    MathF.Round(rect.Left + hIn), MathF.Round(rect.Top + vIn),
-                    MathF.Round(rect.Right - hIn), MathF.Round(rect.Bottom - vIn));
-                var radius = MathF.Round(6f * sf);
-                canvas.DrawRoundRect(cardRect, radius, radius, _tabBackgroundPaint);
-                if (isSelected)
-                    canvas.DrawRoundRect(cardRect, radius, radius, _tabBorderPaint);
-                break;
-            }
+                    var vIn = MathF.Round(3f * sf);
+                    var hIn = MathF.Round(3f * sf);
+                    var cardRect = new SKRect(
+                        MathF.Round(rect.Left + hIn), MathF.Round(rect.Top + vIn),
+                        MathF.Round(rect.Right - hIn), MathF.Round(rect.Bottom - vIn));
+                    var radius = MathF.Round(6f * sf);
+                    canvas.DrawRoundRect(cardRect, radius, radius, _tabBackgroundPaint);
+                    if (isSelected)
+                        canvas.DrawRoundRect(cardRect, radius, radius, _tabBorderPaint);
+                    break;
+                }
 
             case TabViewDesignMode.Fluent:
-            {
-                if (!isSelected && !isHovered)
-                    break;
+                {
+                    if (!isSelected && !isHovered)
+                        break;
 
-                var fluentRect = new SKRect(
-                    MathF.Round(rect.Left + 4f * sf), MathF.Round(rect.Top + 4f * sf),
-                    MathF.Round(rect.Right - 4f * sf), MathF.Round(rect.Bottom - 4f * sf));
-                var radius = MathF.Round(6f * sf);
-                DrawFluentTabSurface(canvas, fluentRect, radius, backgroundColor, isSelected);
-                if (isSelected)
-                    DrawContentEdgeIndicator(canvas, rect, MathF.Max(2f, MathF.Round(2.5f * sf)), ColorScheme.Primary);
-                break;
-            }
+                    var fluentRect = new SKRect(
+                        MathF.Round(rect.Left + 4f * sf), MathF.Round(rect.Top + 4f * sf),
+                        MathF.Round(rect.Right - 4f * sf), MathF.Round(rect.Bottom - 4f * sf));
+                    var radius = MathF.Round(6f * sf);
+                    DrawFluentTabSurface(canvas, fluentRect, radius, backgroundColor, isSelected);
+                    if (isSelected)
+                        DrawContentEdgeIndicator(canvas, rect, MathF.Max(2f, MathF.Round(2.5f * sf)), ColorScheme.Primary);
+                    break;
+                }
 
             case TabViewDesignMode.MacOS:
-            {
-                if (!isSelected && !isHovered)
-                    break;
+                {
+                    if (!isSelected && !isHovered)
+                        break;
 
-                var macRect = new SKRect(
-                    MathF.Round(rect.Left + 2f * sf), MathF.Round(rect.Top + 4f * sf),
-                    MathF.Round(rect.Right - 2f * sf), MathF.Round(rect.Bottom - 4f * sf));
-                var radius = MathF.Min(macRect.Width, macRect.Height) * 0.5f;
-                canvas.DrawRoundRect(macRect, radius, radius, _tabBackgroundPaint);
-                if (isSelected)
-                    canvas.DrawRoundRect(macRect, radius, radius, _tabBorderPaint);
-                break;
-            }
+                    var macRect = new SKRect(
+                        MathF.Round(rect.Left + 2f * sf), MathF.Round(rect.Top + 4f * sf),
+                        MathF.Round(rect.Right - 2f * sf), MathF.Round(rect.Bottom - 4f * sf));
+                    var radius = MathF.Min(macRect.Width, macRect.Height) * 0.5f;
+                    canvas.DrawRoundRect(macRect, radius, radius, _tabBackgroundPaint);
+                    if (isSelected)
+                        canvas.DrawRoundRect(macRect, radius, radius, _tabBorderPaint);
+                    break;
+                }
 
             case TabViewDesignMode.Chromed:
             default:
-            {
-                if (!isSelected && !isHovered)
-                    break;
-
-                var inset = MathF.Round(isSelected ? 1f * sf : 4f * sf);
-                var chromedRect = new SKRect(
-                    MathF.Round(rect.Left + inset), MathF.Round(rect.Top + 3f * sf),
-                    MathF.Round(rect.Right - inset), MathF.Round(rect.Bottom - 3f * sf));
-                var radius = MathF.Round(10f * sf);
-                canvas.DrawRoundRect(chromedRect, radius, radius, _tabBackgroundPaint);
-                if (isSelected)
                 {
-                    canvas.DrawRoundRect(chromedRect, radius, radius, _tabBorderPaint);
-                    DrawContentEdgeIndicator(canvas, rect, MathF.Max(1f, MathF.Round(1.5f * sf)), selectedBorderColor);
+                    if (!isSelected && !isHovered)
+                        break;
+
+                    var inset = MathF.Round(isSelected ? 1f * sf : 4f * sf);
+                    var chromedRect = new SKRect(
+                        MathF.Round(rect.Left + inset), MathF.Round(rect.Top + 3f * sf),
+                        MathF.Round(rect.Right - inset), MathF.Round(rect.Bottom - 3f * sf));
+                    var radius = MathF.Round(10f * sf);
+                    canvas.DrawRoundRect(chromedRect, radius, radius, _tabBackgroundPaint);
+                    if (isSelected)
+                    {
+                        canvas.DrawRoundRect(chromedRect, radius, radius, _tabBorderPaint);
+                        DrawContentEdgeIndicator(canvas, rect, MathF.Max(1f, MathF.Round(1.5f * sf)), selectedBorderColor);
+                    }
+                    break;
                 }
-                break;
-            }
         }
     }
 
@@ -4403,9 +4491,9 @@ public partial class TabView : ElementBase
             return minimumThickness;
 
         PrepareTabFont();
-        var iconSize    = TabIconSize    * ScaleFactor;
+        var iconSize = TabIconSize * ScaleFactor;
         var iconSpacing = TabIconSpacing * ScaleFactor;
-        var vertInset   = GetTabVerticalContentPadding();
+        var vertInset = GetTabVerticalContentPadding();
 
         var (_, blockH) = TabViewTabGeometry.MeasureContentBlockSize(
             null, true, _tabFont, iconSize, iconSpacing, ContentAlignment.TopCenter);
@@ -4427,8 +4515,8 @@ public partial class TabView : ElementBase
         var horizontalPadding = GetTabHorizontalContentPadding();
         var minWidth = Math.Max(VerticalTabMinWidth * ScaleFactor, minimumThickness);
         var maxWidth = Math.Max(VerticalTabMaxWidth * ScaleFactor, minWidth);
-        var iconSize    = TabIconSize    * ScaleFactor;
-        var iconSpacing = TabIconSpacing  * ScaleFactor;
+        var iconSize = TabIconSize * ScaleFactor;
+        var iconSpacing = TabIconSpacing * ScaleFactor;
         var closeButtonSize = TabCloseButtonSize * ScaleFactor;
         var closeButtonSpacing = TabCloseButtonSpacing * ScaleFactor;
         var closeButtonAllowance = ShouldDrawTabCloseButtons ? closeButtonSize + closeButtonSpacing : 0f;
@@ -4571,8 +4659,8 @@ public partial class TabView : ElementBase
         var customMetrics = _customTabStyle.HasValue ? _customTabStyle.Value.Metrics : default;
         var minWidth = (customMetrics.MinWidth ?? TabMinWidth) * ScaleFactor;
         var maxWidth = Math.Max(minWidth, (customMetrics.MaxWidth ?? TabMaxWidth) * ScaleFactor);
-        var iconSize    = TabIconSize    * ScaleFactor;
-        var iconSpacing = TabIconSpacing  * ScaleFactor;
+        var iconSize = TabIconSize * ScaleFactor;
+        var iconSpacing = TabIconSpacing * ScaleFactor;
         var closeButtonSize = TabCloseButtonSize * ScaleFactor;
         var closeButtonSpacing = TabCloseButtonSpacing * ScaleFactor;
         var closeButtonAllowance = ShouldDrawTabCloseButtons ? closeButtonSize + closeButtonSpacing : 0f;
@@ -4705,13 +4793,7 @@ public partial class TabView : ElementBase
         }
         else // Scroll mode
         {
-            // ---- SCROLL MODE ----
-            // Optimization: first check if tabs fit in the full content
-            // width WITHOUT reserving chevron space. Only when they actually
-            // overflow do we reserve chevron areas. This avoids wasted
-            // space when there are few tabs.
             var chevronSize = ChevronSize * ScaleFactor;
-            var chevronMargin = 4f * ScaleFactor;
 
             var needsChevrons = totalDesiredWidth > contentWidth + 0.5f;
 
@@ -4720,8 +4802,8 @@ public partial class TabView : ElementBase
             {
                 // Visible tab content area: from just after the left chevron
                 // to just before the right chevron (and the new-tab button).
-                tabAreaLeft = headerRect.Left + chevronMargin + chevronSize;
-                tabAreaRight = headerRect.Right - chevronMargin - chevronSize;
+                tabAreaLeft = headerRect.Left + chevronSize;
+                tabAreaRight = headerRect.Right - chevronSize;
                 if (ShouldDrawNewTabButton)
                     tabAreaRight -= newTabButtonSize + gap;
 
@@ -4761,12 +4843,12 @@ public partial class TabView : ElementBase
             {
                 var chevronY = headerRect.MidY - chevronSize / 2f;
                 _leftChevronRect = SKRect.Create(
-                    headerRect.Left + chevronMargin,
+                    headerRect.Left,
                     chevronY,
                     chevronSize,
                     chevronSize);
                 _rightChevronRect = SKRect.Create(
-                    headerRect.Right - chevronSize - chevronMargin,
+                    headerRect.Right - chevronSize,
                     chevronY,
                     chevronSize,
                     chevronSize);
@@ -4795,8 +4877,8 @@ public partial class TabView : ElementBase
                 // contentWidth when computing the chevron layout, so this
                 // position is consistent with the available tab area.
                 var chevronSize = ChevronSize * ScaleFactor;
-                var chevronMargin = 4f * ScaleFactor;
-                newButtonLeft = headerRect.Right - chevronMargin - chevronSize - newTabButtonSize - gap;
+                
+                newButtonLeft = headerRect.Right - chevronSize - newTabButtonSize - gap;
             }
             else if (TabOverflowMode == TabOverflowMode.Scroll &&
                      newButtonLeft + newTabButtonSize > headerRect.Right - horizontalPadding)
@@ -5079,10 +5161,10 @@ public partial class TabView : ElementBase
         float horizontalPadding, float verticalPadding,
         float iconSize, float iconSpacing, float trailingReserve)
     {
-        var availLeft   = tabRect.Left   + horizontalPadding;
-        var availRight  = Math.Max(tabRect.Left + horizontalPadding,
+        var availLeft = tabRect.Left + horizontalPadding;
+        var availRight = Math.Max(tabRect.Left + horizontalPadding,
                                    tabRect.Right - horizontalPadding - trailingReserve);
-        var availTop    = tabRect.Top    + verticalPadding;
+        var availTop = tabRect.Top + verticalPadding;
         var availBottom = Math.Max(tabRect.Top + verticalPadding,
                                    tabRect.Bottom - verticalPadding);
         var hasText = !string.IsNullOrEmpty(text);
@@ -5290,8 +5372,8 @@ public partial class TabView : ElementBase
     {
         return align switch
         {
-            ContentAlignment.TopLeft    or ContentAlignment.MiddleLeft    or ContentAlignment.BottomLeft    => left,
-            ContentAlignment.TopRight   or ContentAlignment.MiddleRight   or ContentAlignment.BottomRight   => right - contentW,
+            ContentAlignment.TopLeft or ContentAlignment.MiddleLeft or ContentAlignment.BottomLeft => left,
+            ContentAlignment.TopRight or ContentAlignment.MiddleRight or ContentAlignment.BottomRight => right - contentW,
             _ => left + (right - left - contentW) * 0.5f,
         };
     }
@@ -5300,7 +5382,7 @@ public partial class TabView : ElementBase
     {
         return align switch
         {
-            ContentAlignment.TopLeft    or ContentAlignment.TopCenter    or ContentAlignment.TopRight    => top,
+            ContentAlignment.TopLeft or ContentAlignment.TopCenter or ContentAlignment.TopRight => top,
             ContentAlignment.BottomLeft or ContentAlignment.BottomCenter or ContentAlignment.BottomRight => bottom - contentH,
             _ => top + (bottom - top - contentH) * 0.5f,
         };
@@ -5320,8 +5402,8 @@ public partial class TabView : ElementBase
         return _tabAlignment switch
         {
             TabViewAlignment.Center => headerRect.Left + horizontalPadding + (contentWidth - totalTabWidth) / 2f,
-            TabViewAlignment.End    => headerRect.Left + horizontalPadding + (contentWidth - totalTabWidth),
-            _                             => headerRect.Left + horizontalPadding
+            TabViewAlignment.End => headerRect.Left + horizontalPadding + (contentWidth - totalTabWidth),
+            _ => headerRect.Left + horizontalPadding
         };
     }
 
@@ -5339,8 +5421,8 @@ public partial class TabView : ElementBase
         return _tabAlignment switch
         {
             TabViewAlignment.Center => headerRect.Top + verticalPadding + (contentHeight - totalTabHeight) / 2f,
-            TabViewAlignment.End    => headerRect.Top + verticalPadding + (contentHeight - totalTabHeight),
-            _                             => headerRect.Top + verticalPadding
+            TabViewAlignment.End => headerRect.Top + verticalPadding + (contentHeight - totalTabHeight),
+            _ => headerRect.Top + verticalPadding
         };
     }
 

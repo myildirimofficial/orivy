@@ -240,6 +240,7 @@ public partial class Window : WindowBase
     private float _titleBarTopDPI => _maximizedTitleInsetDPI;
     private float _titleBarBottomDPI => _titleBarTopDPI + _titleHeightDPI;
     private float _titleBarCenterYDPI => _titleBarTopDPI + (_titleHeightDPI / 2f);
+    private static readonly SKPath _chevronDownPath = SKPath.ParseSvgPathData("M3 5L8 10L13 5");
 
     private float GetTitleBarRequiredTitleHeightDpi()
     {
@@ -964,6 +965,8 @@ public partial class Window : WindowBase
         _controlBoxLeft = Width;
         var rightEdge = Width - _titleBarRightInsetDPI;
 
+        var titleIconSize = 24 * ScaleFactor;
+
         if (controlBox)
         {
             _controlBoxRect = SKRect.Create(rightEdge - _iconWidthDPI, _titleBarTopDPI, _iconWidthDPI, _titleHeightDPI);
@@ -998,10 +1001,10 @@ public partial class Window : WindowBase
             if (ExtendBox)
             {
                 if (MinimizeBox)
-                    _extendBoxRect = SKRect.Create(_minimizeBoxRect.Left - _iconWidthDPI - 2, _controlBoxRect.Top,
+                    _extendBoxRect = SKRect.Create(_minimizeBoxRect.Left - titleIconSize - 16, _controlBoxRect.Top,
                         _iconWidthDPI, _titleHeightDPI);
                 else
-                    _extendBoxRect = SKRect.Create(_controlBoxRect.Left - _iconWidthDPI - 2, _controlBoxRect.Top,
+                    _extendBoxRect = SKRect.Create(_controlBoxRect.Left - titleIconSize - 16, _controlBoxRect.Top,
                         _iconWidthDPI, _titleHeightDPI);
             }
         }
@@ -1011,7 +1014,6 @@ public partial class Window : WindowBase
             _minimizeBoxRect = _controlBoxRect = SKRect.Create(Width + 1, Height + 1, 1, 1);
         }
 
-        var titleIconSize = 24 * ScaleFactor;
         _formMenuRect = SKRect.Create(_titleBarLeftInsetDPI + 10, _titleBarCenterYDPI - titleIconSize / 2, titleIconSize, titleIconSize);
 
         Padding = new Thickness(
@@ -1035,7 +1037,12 @@ public partial class Window : WindowBase
 
     private bool IsPointOverTabHeader(SKPoint point)
     {
-        return TryGetTabIndexAtPoint(point, out _);
+        if (!UsesTitleBarTabs || _tabView == null)
+            return false;
+
+        var context = CreateTitleBarLayoutContext();
+        return _tabView.TryGetTitleBarTabIndexAtPoint(point, context, out _) ||
+               _tabView.IsPointOverTitleBarScrollChevron(point, context);
     }
 
     protected override bool ShouldIncludeHitTestElement(ElementBase element, bool requireEnabled)
@@ -1224,14 +1231,14 @@ public partial class Window : WindowBase
         var inTitleArea = ShowTitle && e.Y < Padding.Top;
         var inTitleBarMenu = IsPointOverTitleBarMenuStrip(e.Location);
         var inTabHeader = UsesTitleBarTabs && _tabView != null && _tabView.TryGetTitleBarTabIndexAtPoint(e.Location, CreateTitleBarLayoutContext(), out _);
-        
-        var inTitleBarButtons = UsesTitleBarTabs && _tabView != null && 
-                                    (_tabView.IsPointOverTitleBarCloseButton(e.Location, CreateTitleBarLayoutContext()) || 
+
+        var inTitleBarButtons = UsesTitleBarTabs && _tabView != null &&
+                                    (_tabView.IsPointOverTitleBarCloseButton(e.Location, CreateTitleBarLayoutContext()) ||
                                      _tabView.IsPointOverTitleBarNewTabButton(e.Location, CreateTitleBarLayoutContext()));
-        
+
         var inControlBox = _inCloseBox || _inMaxBox || _inMinBox || _inExtendBox || _inFormMenuBox || inTitleBarMenu || inTitleBarButtons;
 
-        if (UsesTitleBarTabs && _tabView != null && 
+        if (UsesTitleBarTabs && _tabView != null &&
             _tabView.ProcessTitleBarMouseDown(e, CreateTitleBarLayoutContext()))
         {
             SetCapture(Handle);
@@ -1413,11 +1420,11 @@ public partial class Window : WindowBase
         // (e.g. due to a wrong initial layout position) would block all window movement.
         var screenCursor = CursorScreenPosition;
 
-        if (!_formMoveMouseDown && _mouseCapturedElement == null && 
+        if (!_formMoveMouseDown && _mouseCapturedElement == null &&
             TryRouteMouseEventToFloatingOverlay(e, static (popup, localEvent) => popup.OnMouseMove(localEvent)))
             return;
 
-        if (!_formMoveMouseDown && UsesTitleBarTabs && _tabView != null && 
+        if (!_formMoveMouseDown && UsesTitleBarTabs && _tabView != null &&
             _tabView.ProcessTitleBarMouseMove(e, CreateTitleBarLayoutContext()))
         {
             return;
@@ -1549,6 +1556,10 @@ public partial class Window : WindowBase
             return;
 
         CloseFloatingOverlays();
+
+        if (UsesTitleBarTabs && _tabView != null && ShowTitle && e.Y < Padding.Top &&
+            _tabView.ProcessTitleBarMouseWheel(e, CreateTitleBarLayoutContext()))
+            return;
 
         base.OnMouseWheel(e);
 
@@ -1785,55 +1796,49 @@ public partial class Window : WindowBase
 
         if (ExtendBox)
         {
-            var color = foreColor;
+            float cx = _extendBoxRect.MidX;
+            float cy = _titleBarCenterYDPI;
+
+            float hoverSize = 24f * ScaleFactor;
+
             if (_inExtendBox)
             {
-                var hoverSize = 24 * ScaleFactor;
-                using var paint = new SKPaint
+                using var hoverPaint = new SKPaint
                 {
-                    Color = hoverColor.WithAlpha((byte)(extendBoxHoverAnimationManager.GetProgress() * 60)),
+                    Color = hoverColor.WithAlpha(
+                        (byte)(extendBoxHoverAnimationManager.GetProgress() * 60)),
                     IsAntialias = true
                 };
 
-                using var path = new SKPath();
-                path.AddRoundRect(new SKRect(
-                    _extendBoxRect.Left + 20 * ScaleFactor,
-                    _titleBarCenterYDPI - hoverSize / 2,
-                    _extendBoxRect.Left + 20 * ScaleFactor + hoverSize,
-                    _titleBarCenterYDPI + hoverSize / 2
-                ), 15, 15);
-
-                canvas.DrawPath(path, paint);
+                canvas.DrawRoundRect(
+                    new SKRect(
+                        cx - hoverSize / 2,
+                        cy - hoverSize / 2,
+                        cx + hoverSize / 2,
+                        cy + hoverSize / 2),
+                    hoverSize * 0.22f,
+                    hoverSize * 0.22f,
+                    hoverPaint);
             }
 
-            var size = 16 * ScaleFactor;
-            using var extendPaint = new SKPaint
+            using var paint = new SKPaint
             {
                 Color = foreColor,
-                StrokeWidth = 1.1f * ScaleFactor,
-                IsAntialias = true,
-                StrokeCap = SKStrokeCap.Round
+                Style = SKPaintStyle.Stroke,
+                StrokeWidth = 1 * ScaleFactor,
+                StrokeCap = SKStrokeCap.Round,
+                StrokeJoin = SKStrokeJoin.Round,
+                IsAntialias = true
             };
 
-            var iconRect = new SkiaSharp.SKRect(
-                _extendBoxRect.Left + 24 * ScaleFactor,
-                _titleBarCenterYDPI - size / 2,
-                _extendBoxRect.Left + 24 * ScaleFactor + size,
-                _titleBarCenterYDPI + size / 2);
+            canvas.Save();
 
-            canvas.DrawLine(
-                iconRect.Left + iconRect.Width / 2 - 5 * ScaleFactor - 1,
-                iconRect.Top + iconRect.Height / 2 - 2 * ScaleFactor,
-                iconRect.Left + iconRect.Width / 2 - 1 * ScaleFactor,
-                iconRect.Top + iconRect.Height / 2 + 3 * ScaleFactor,
-                extendPaint);
+            canvas.Translate(cx - 8 * ScaleFactor, cy - 8 * ScaleFactor);
+            canvas.Scale(ScaleFactor);
 
-            canvas.DrawLine(
-                iconRect.Left + iconRect.Width / 2 + 5 * ScaleFactor - 1,
-                iconRect.Top + iconRect.Height / 2 - 2 * ScaleFactor,
-                iconRect.Left + iconRect.Width / 2 - 1 * ScaleFactor,
-                iconRect.Top + iconRect.Height / 2 + 3 * ScaleFactor,
-                extendPaint);
+            canvas.DrawPath(_chevronDownPath, paint);
+
+            canvas.Restore();
         }
 
         var faviconSize = 16 * ScaleFactor;
@@ -2084,7 +2089,7 @@ public partial class Window : WindowBase
         if (ExtendBox)
             occupiedWidth += _extendBoxRect.Width;
 
-        occupiedWidth += 30 * ScaleFactor;
+        occupiedWidth += 0;
 
         var availableWidth = Math.Max(0f, Width - occupiedWidth);
         var maxSize = 250f * ScaleFactor;
