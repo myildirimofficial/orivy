@@ -1288,7 +1288,7 @@ public class MenuStrip : ElementBase
         _activeDropDown.ItemPadding = Math.Max(ItemPadding, 6f);
         _activeDropDown.Orientation = Orientation.Vertical;
         _activeDropDown.ImageScalingSize = ImageScalingSize;
-        _activeDropDown.ShowSubmenuArrow = ShowSubmenuArrow;
+        _activeDropDown.ShowSubmenuArrow = true;
         _activeDropDown.ShowIcons = ShowIcons;
         _activeDropDown.ShowCheckMargin = ShowCheckMargin;
         _activeDropDown.ShowShortcutKeys = ShowShortcutKeys;
