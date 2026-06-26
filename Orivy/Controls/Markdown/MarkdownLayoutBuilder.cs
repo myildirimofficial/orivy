@@ -14,7 +14,7 @@ internal static class MarkdownLayoutBuilder
 {
     private struct AtomStyle
     {
-        public bool Bold, Italic, Strike, Sub, Sup;
+        public bool Bold, Italic, Strike, Sub, Sup, Insert, Mark;
         public LinkInline? Link;
     }
 
@@ -25,7 +25,9 @@ internal static class MarkdownLayoutBuilder
         public bool ForceBreak;
         public bool IsCode;
         public bool Bold, Italic, Strike, Subscript, Superscript;
-        public bool IsEmoji;        // render with emoji fallback font
+        public bool IsEmoji;
+        public bool Insert;   // underline decoration (<ins>/++++)
+        public bool Mark;     // highlight background (<mark>/====)
         public LinkInline? Link;
         public ImageInline? Image;
     }
@@ -50,6 +52,8 @@ internal static class MarkdownLayoutBuilder
         public List<MdBox> Boxes = new();
         public float Y;
         public Dictionary<string, float> HeadingPositions = new();
+        // Syntax highlight cache: avoids re-tokenizing code blocks when only layout changes
+        public Dictionary<(string Code, string? Lang), List<List<SyntaxToken>>> SyntaxCache = new();
     }
 
     public static List<MdBox> Build(
@@ -91,7 +95,10 @@ internal static class MarkdownLayoutBuilder
                 case ListBlock l: LayoutList(ctx, l, x, width); break;
                 case TableBlock t: LayoutTable(ctx, t, x, width); break;
                 case DetailsBlock d: LayoutDetails(ctx, d, x, width); break;
+                case ContainerBlock cb2: LayoutContainer(ctx, cb2, x, width); break;
+                case DefinitionListBlock dl: LayoutDefinitionList(ctx, dl, x, width); break;
                 case RawHtmlBlock raw: LayoutRawHtml(ctx, raw, x, width); break;
+                case FootnotesBlock fn: LayoutFootnotes(ctx, fn, x, width); break;
             }
 
             first = false;
@@ -143,7 +150,12 @@ internal static class MarkdownLayoutBuilder
     // ------------------------------------------------------------------
     private static void LayoutCodeBlock(Ctx ctx, CodeBlockBlock cb, float x, float width)
     {
-        var tokensPerLine = MarkdownSyntaxHighlighter.Tokenize(cb.Code, cb.Language);
+        var cacheKey = (cb.Code, cb.Language);
+        if (!ctx.SyntaxCache.TryGetValue(cacheKey, out var tokensPerLine))
+        {
+            tokensPerLine = MarkdownSyntaxHighlighter.Tokenize(cb.Code, cb.Language);
+            ctx.SyntaxCache[cacheKey] = tokensPerLine;
+        }
         var codeLines = cb.Code.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
 
         float codeFontPx = ctx.Theme.CodeFontSize * ctx.Scale;
@@ -169,7 +181,7 @@ internal static class MarkdownLayoutBuilder
             void EmitRun(string text, SyntaxKind kind)
             {
                 if (text.Length == 0) return;
-                float w = codeFont.MeasureText(text);
+                float w = text.Length <= 64 ? ctx.Fonts.MeasureText(text, ctx.Theme, true, codeFontPx, false, false) : codeFont.MeasureText(text);
                 runs.Add(new TextRunBox
                 {
                     Bounds = new SKRect(cx, 0, cx + w, lineHeight),
@@ -194,7 +206,7 @@ internal static class MarkdownLayoutBuilder
             lineBoxes.Add(runs);
         }
 
-        float viewportWidth = width - 2 * padH;
+        float viewportWidth = Math.Max(64f * ctx.Scale, width - 2 * padH);
         bool needsHScroll = widestLine > viewportWidth;
         var scrollState = GetOrCreateScrollState(ctx.State, cb);
         float maxScroll = Math.Max(0f, widestLine - viewportWidth);
@@ -220,6 +232,46 @@ internal static class MarkdownLayoutBuilder
             ViewportWidth = viewportWidth,
         };
         ctx.Boxes.Add(outer);
+
+        // ── Emit selectable flat TextRunBoxes for code lines (absolute coordinates) ──
+        // These allow mouse/keyboard selection inside code blocks.
+        {
+            float absX    = outer.BodyOrigin.X;
+            float absY    = outer.BodyOrigin.Y;
+            var   nlFont  = codeFont;  // same font as code content
+            for (int li = 0; li < lineBoxes.Count; li++)
+            {
+                float lineTop = absY + li * lineHeight;
+                foreach (var run in lineBoxes[li])
+                {
+                    ctx.Boxes.Add(new TextRunBox
+                    {
+                        Bounds     = new SKRect(absX + run.Bounds.Left, lineTop,
+                                                absX + run.Bounds.Right, lineTop + lineHeight),
+                        Text       = run.Text,
+                        Font       = run.Font,
+                        Color      = run.Color,
+                        Baseline   = new SKPoint(absX + run.Baseline.X, lineTop + ascent),
+                        CodeOwner  = outer,
+                    });
+                }
+                // Newline sentinel between lines so GetSelectedText can join them
+                string nlText = li < lineBoxes.Count - 1 ? "\n" : "";
+                if (!string.IsNullOrEmpty(nlText))
+                {
+                    ctx.Boxes.Add(new TextRunBox
+                    {
+                        Bounds    = new SKRect(absX, lineTop, absX + 1f, lineTop + lineHeight),
+                        Text      = nlText,
+                        Font      = nlFont,
+                        Color     = ctx.Theme.MutedColor,
+                        Baseline  = new SKPoint(absX, lineTop + ascent),
+                        CodeOwner = outer,
+                        IsNewlineSentinel = true,
+                    });
+                }
+            }
+        }
 
         if (!string.IsNullOrEmpty(cb.Language))
         {
@@ -394,7 +446,10 @@ internal static class MarkdownLayoutBuilder
         float fontSizePx = ctx.Theme.BodyFontSize * ctx.Scale;
         float padH = ctx.Theme.TableCellPaddingH * ctx.Scale;
         float padV = ctx.Theme.TableCellPaddingV * ctx.Scale;
+        float radius = ctx.Theme.CornerRadius * ctx.Scale;
+        float hair = MathF.Max(1f, ctx.Scale);
 
+        // ── Measure natural column widths (unconstrained) ──
         var natural = new float[cols];
         for (int c = 0; c < cols; c++)
             natural[c] = MeasureCellNaturalWidth(ctx, c < table.HeaderCells.Count ? table.HeaderCells[c] : new(), fontSizePx, true);
@@ -402,45 +457,90 @@ internal static class MarkdownLayoutBuilder
             for (int c = 0; c < cols; c++)
                 natural[c] = Math.Max(natural[c], MeasureCellNaturalWidth(ctx, c < row.Count ? row[c] : new(), fontSizePx, false));
 
-        float totalNatural = 0f;
-        for (int c = 0; c < cols; c++) { natural[c] = Math.Min(natural[c] + 2 * padH, width); totalNatural += natural[c]; }
+        float minColW = 64f * ctx.Scale;
+        float contentWidth = 0f;
+        for (int c = 0; c < cols; c++) { natural[c] = MathF.Max(minColW, natural[c] + 2 * padH); contentWidth += natural[c]; }
+
+        // ── Decide whether to scroll or squeeze columns ──
+        bool needsScroll  = contentWidth > width;
+        float viewportWidth = Math.Max(64f * ctx.Scale, width - 2 * padH);
+        var scrollState   = ctx.State.GetOrCreateTableScroll(table);
+        float maxScroll   = needsScroll ? MathF.Max(0f, contentWidth - viewportWidth) : 0f;
+        scrollState.ScrollX = Math.Clamp(scrollState.ScrollX, 0f, maxScroll);
 
         var colWidths = new float[cols];
-        if (totalNatural > 0 && totalNatural <= width)
+        if (!needsScroll)
         {
-            float extra = (width - totalNatural) / cols;
+            // Distribute extra space proportionally
+            float extra = (width - contentWidth) / cols;
             for (int c = 0; c < cols; c++) colWidths[c] = natural[c] + extra;
+            contentWidth = width;
         }
         else
         {
-            float scaleDown = totalNatural > 0 ? width / totalNatural : 1f;
-            for (int c = 0; c < cols; c++) colWidths[c] = Math.Max(48f * ctx.Scale, natural[c] * scaleDown);
+            for (int c = 0; c < cols; c++) colWidths[c] = natural[c];
         }
 
         var colX = new float[cols + 1];
-        colX[0] = x;
+        colX[0] = 0f;   // relative to table content origin
         for (int c = 0; c < cols; c++) colX[c + 1] = colX[c] + colWidths[c];
 
-        float startY = ctx.Y;
-        float headerRowHeight = LayoutTableRow(ctx, table.HeaderCells, colX, colWidths, table.Alignments, padH, padV, fontSizePx, true, measureOnly: true);
-        ctx.Boxes.Add(new RectBox { Bounds = new SKRect(x, ctx.Y, colX[cols], ctx.Y + headerRowHeight), Fill = ctx.Theme.TableHeaderBackground });
-        LayoutTableRow(ctx, table.HeaderCells, colX, colWidths, table.Alignments, padH, padV, fontSizePx, true, measureOnly: false);
-        ctx.Y += headerRowHeight;
-
-        foreach (var row in table.Rows)
+        // ── Build children into a temporary sub-context ──
+        var childBoxes = new List<MdBox>();
+        var subCtx = new Ctx
         {
-            float rowHeight = LayoutTableRow(ctx, row, colX, colWidths, table.Alignments, padH, padV, fontSizePx, false, measureOnly: true);
-            LayoutTableRow(ctx, row, colX, colWidths, table.Alignments, padH, padV, fontSizePx, false, measureOnly: false);
-            ctx.Y += rowHeight;
+            Theme = ctx.Theme, Fonts = ctx.Fonts, Scale = ctx.Scale,
+            State = ctx.State, Boxes = childBoxes, Y = 0f,
+            HeadingPositions = new Dictionary<string, float>()
+        };
+
+        // Header row
+        float startY = 0f;
+        float headerRowH = LayoutTableRow(subCtx, table.HeaderCells, colX, colWidths, table.Alignments,
+            padH, padV, fontSizePx, bold: true, measureOnly: true);
+        // Header background
+        childBoxes.Add(new RectBox { Bounds = new SKRect(0, startY, contentWidth, startY + headerRowH), Fill = ctx.Theme.TableHeaderBackground });
+        LayoutTableRow(subCtx, table.HeaderCells, colX, colWidths, table.Alignments,
+            padH, padV, fontSizePx, bold: true, measureOnly: false);
+        subCtx.Y += headerRowH;
+        childBoxes.Add(new RectBox { Bounds = new SKRect(0, subCtx.Y - hair, contentWidth, subCtx.Y), Fill = ctx.Theme.TableBorderColor });
+
+        // Data rows with alternating background
+        for (int ri = 0; ri < table.Rows.Count; ri++)
+        {
+            float rowY   = subCtx.Y;
+            float rowH   = LayoutTableRow(subCtx, table.Rows[ri], colX, colWidths, table.Alignments,
+                padH, padV, fontSizePx, bold: false, measureOnly: true);
+            // Alt-row background (insert before row content)
+            if (ri % 2 == 1)
+                childBoxes.Add(new RectBox { Bounds = new SKRect(0, rowY, contentWidth, rowY + rowH), Fill = ctx.Theme.TableRowAltBackground });
+            LayoutTableRow(subCtx, table.Rows[ri], colX, colWidths, table.Alignments,
+                padH, padV, fontSizePx, bold: false, measureOnly: false);
+            subCtx.Y += rowH;
         }
 
-        float endY = ctx.Y;
-        float hair = Math.Max(1f, ctx.Scale);
-        for (int c = 0; c <= cols; c++)
-            ctx.Boxes.Add(new RectBox { Bounds = new SKRect(colX[c], startY, colX[c] + hair, endY), Fill = ctx.Theme.TableBorderColor });
-        ctx.Boxes.Add(new RectBox { Bounds = new SKRect(x, startY, colX[cols], startY + hair), Fill = ctx.Theme.TableBorderColor });
-        ctx.Boxes.Add(new RectBox { Bounds = new SKRect(x, startY + headerRowHeight, colX[cols], startY + headerRowHeight + hair), Fill = ctx.Theme.TableBorderColor });
-        ctx.Boxes.Add(new RectBox { Bounds = new SKRect(x, endY - hair, colX[cols], endY), Fill = ctx.Theme.TableBorderColor });
+        float tableContentH = subCtx.Y;
+        float thumbAreaH    = needsScroll ? 10f * ctx.Scale : 0f;
+        float totalH        = tableContentH + thumbAreaH;
+
+        // Column dividers
+        for (int c = 1; c < cols; c++)
+            childBoxes.Add(new RectBox { Bounds = new SKRect(colX[c], 0, colX[c] + hair, tableContentH), Fill = ctx.Theme.TableBorderColor });
+
+        // Emit TableBox into the main boxes list
+        float tableTop = ctx.Y;
+        var tblBox = new TableBox
+        {
+            Bounds           = new SKRect(x, tableTop, x + viewportWidth, tableTop + totalH),
+            Source           = table,
+            Children         = childBoxes,
+            ContentWidth     = contentWidth,
+            ViewportWidth    = viewportWidth,
+            Scroll           = scrollState,
+            NeedsHorizontalScroll = needsScroll,
+        };
+        ctx.Boxes.Add(tblBox);
+        ctx.Y += totalH;
     }
 
     private static float MeasureCellNaturalWidth(Ctx ctx, List<MarkdownInline> inlines, float fontSizePx, bool bold)
@@ -566,6 +666,60 @@ internal static class MarkdownLayoutBuilder
         html = html.Trim();
         return html.Length > 400 ? html[..400] + "\u2026" : html;
     }
+    // ------------------------------------------------------------------
+    // Footnotes section
+    // ------------------------------------------------------------------
+    private static void LayoutFootnotes(Ctx ctx, FootnotesBlock fn, float x, float width)
+    {
+        if (fn.Definitions.Count == 0) return;
+
+        float scale     = ctx.Scale;
+        float hairH     = MathF.Max(1f, scale);
+        float topPad    = 16f * scale;
+        float leftPad   = 24f * scale;   // indent after the number
+        float numW      = 24f * scale;
+
+        // Separator line
+        ctx.Y += topPad;
+        ctx.Boxes.Add(new RectBox
+        {
+            Bounds = new SKRect(x, ctx.Y, x + Math.Min(width, 160f * scale), ctx.Y + hairH),
+            Fill   = ctx.Theme.BorderColor
+        });
+        ctx.Y += hairH + topPad * 0.5f;
+
+        float smallSizePx = ctx.Theme.SmallFontSize * scale;
+        float lineH       = MathF.Ceiling(smallSizePx * ctx.Theme.BodyLineHeight);
+
+        foreach (var def in fn.Definitions)
+        {
+            float startY = ctx.Y;
+
+            // Number label
+            var numFont = ctx.Fonts.GetFont(ctx.Theme, false, smallSizePx, false, false);
+            float numAscent = -numFont.Metrics.Ascent;
+            ctx.Boxes.Add(new TextRunBox
+            {
+                Bounds   = new SKRect(x, ctx.Y, x + numW, ctx.Y + lineH),
+                Text     = $"{def.Number}.",
+                Font     = numFont,
+                Color    = ctx.Theme.MutedColor,
+                Baseline = new SKPoint(x, ctx.Y + (lineH - (numAscent + numFont.Metrics.Descent)) / 2f + numAscent)
+            });
+
+            // Content blocks indented
+            float savedY = ctx.Y;
+            LayoutBlocks(ctx, def.Blocks, x + numW, width - numW, tight: true,
+                textColor: ctx.Theme.MutedColor, isFirstInParent: true);
+
+            // Ensure at least one line height of spacing
+            if (ctx.Y <= savedY) ctx.Y = savedY + lineH;
+            ctx.Y += 4f * scale;  // gap between entries
+        }
+
+        ctx.Y += topPad * 0.5f;
+    }
+
 
     // ------------------------------------------------------------------
     // Inline -> atoms
@@ -591,6 +745,18 @@ internal static class MarkdownLayoutBuilder
             case StrikethroughInline sk:
                 { var st = style; st.Strike = true; CollectAtoms(sk.Children, st, output); }
                 break;
+            case InsertInline ins:
+                { var st = style; st.Insert = true; CollectAtoms(ins.Children, st, output); }
+                break;
+            case MarkInline mk:
+                { var st = style; st.Mark = true; CollectAtoms(mk.Children, st, output); }
+                break;
+            case SuperscriptInline sup:
+                { var st = style; st.Sup = true; CollectAtoms(sup.Children, st, output); }
+                break;
+            case SubscriptInline sub:
+                { var st = style; st.Sub = true; CollectAtoms(sub.Children, st, output); }
+                break;
             case LinkInline l:
                 { var st = style; st.Link = l; CollectAtoms(l.Children, st, output); }
                 break;
@@ -611,11 +777,18 @@ internal static class MarkdownLayoutBuilder
                 output.Add(lb.Hard ? new Atom { ForceBreak = true } : new Atom { IsWhitespace = true, Text = " " });
                 break;
             case InlineHtmlInline ih:
+                // <kbd> etc. — just pass through with current style
+                CollectAtoms(ih.Children, style, output);
+                break;
+            case FootnoteRefInline fn:
+                // Render as superscript "¹", "[1]" style clickable ref
                 {
                     var st = style;
-                    if (ih.Kind == InlineHtmlKind.Subscript) st.Sub = true;
-                    else if (ih.Kind == InlineHtmlKind.Superscript) st.Sup = true;
-                    CollectAtoms(ih.Children, st, output);
+                    st.Sup = true;
+                    string display = fn.Number > 0 ? $"[{fn.Number}]" : $"[{fn.Label}]";
+                    // Create a link that scrolls to footnote anchor
+                    st.Link = new LinkInline { Url = $"#fn-{fn.Label.ToLowerInvariant()}", Children = new List<MarkdownInline>() };
+                    AppendWords(display, st, output);
                 }
                 break;
         }
@@ -645,14 +818,15 @@ internal static class MarkdownLayoutBuilder
                 if (isEmojiChar != inEmoji && i > emojiStart)
                 {
                     // Flush accumulated run
-                    output.Add(new Atom
-                    {
-                        Text = text[emojiStart..i],
-                        Bold = style.Bold, Italic = style.Italic, Strike = style.Strike,
-                        Subscript = style.Sub, Superscript = style.Sup,
-                        Link = style.Link,
-                        IsEmoji = inEmoji
-                    });
+                output.Add(new Atom
+                {
+                    Text = text[emojiStart..i],
+                    Bold = style.Bold, Italic = style.Italic, Strike = style.Strike,
+                    Subscript = style.Sub, Superscript = style.Sup,
+                    Mark = style.Mark, Insert = style.Insert,
+                    Link = style.Link,
+                    IsEmoji = inEmoji
+                });
                     emojiStart = i;
                 }
                 inEmoji = isEmojiChar;
@@ -665,6 +839,7 @@ internal static class MarkdownLayoutBuilder
                     Text = text[emojiStart..i],
                     Bold = style.Bold, Italic = style.Italic, Strike = style.Strike,
                     Subscript = style.Sub, Superscript = style.Sup,
+                    Mark = style.Mark, Insert = style.Insert,
                     Link = style.Link,
                     IsEmoji = inEmoji
                 });
@@ -685,7 +860,7 @@ internal static class MarkdownLayoutBuilder
             }
             int start = i;
             while (i < n && !char.IsWhiteSpace(code[i])) i++;
-            output.Add(new Atom { Text = code[start..i], IsCode = true, Link = style.Link });
+            output.Add(new Atom { Text = code[start..i], IsCode = true, Link = style.Link, Mark = style.Mark, Insert = style.Insert });
         }
     }
 
@@ -728,11 +903,7 @@ internal static class MarkdownLayoutBuilder
                     SKFont font;
                     if (atom.IsEmoji)
                     {
-                        var emojiTf = ctx.Fonts.GetEmojiTypeface();
-                        float sz = fontSizePx;
-                        font = emojiTf != null
-                            ? new SKFont(emojiTf, sz)
-                            : ctx.Fonts.GetFont(ctx.Theme, false, sz, false, false);
+                        font = GetEmojiFont(ctx, fontSizePx);
                     }
                     else
                     {
@@ -773,130 +944,92 @@ internal static class MarkdownLayoutBuilder
 
     private static void EmitWrappedLine(Ctx ctx, List<Atom> atoms, WrappedLine line, float x, float y, float fontSizePx, SKColor baseColor, bool forceBold)
     {
-        // ── Pass 1: compute the dominant (max-ascent) baseline so all runs align ──
+        const float SubSupScale = 0.72f;
+
+        // ── Pass 1: dominant (max-ascent) baseline ──
         float maxAscent = 0f;
         for (int k = line.Start; k < line.End; k++)
         {
             var a = atoms[k];
             if (a.IsWhitespace || a.Image != null || a.ForceBreak) continue;
-            float sz = a.IsCode ? ctx.Theme.CodeFontSize * ctx.Scale : fontSizePx;
-            var f = ctx.Fonts.GetFont(ctx.Theme, a.IsCode, sz, a.Bold || forceBold, a.Italic);
+            bool isSS = a.Subscript || a.Superscript;
+            float sz  = a.IsCode ? ctx.Theme.CodeFontSize * ctx.Scale
+                      : isSS    ? fontSizePx * SubSupScale : fontSizePx;
+            var f  = ctx.Fonts.GetFont(ctx.Theme, a.IsCode, sz, a.Bold || forceBold, a.Italic);
             float asc = -f.Metrics.Ascent;
-            if (a.Subscript)  asc -= sz * 0.18f;
-            if (a.Superscript) asc += sz * 0.32f;
+            if (a.Superscript) asc += fontSizePx * SubSupScale * 0.55f;
             maxAscent = Math.Max(maxAscent, asc);
         }
         if (maxAscent <= 0f)
-        {
-            // Fallback to base font
-            var bf = ctx.Fonts.GetFont(ctx.Theme, false, fontSizePx, forceBold, false);
-            maxAscent = -bf.Metrics.Ascent;
-        }
+            maxAscent = -ctx.Fonts.GetFont(ctx.Theme, false, fontSizePx, forceBold, false).Metrics.Ascent;
         float baselineY = y + maxAscent;
-
         var baseFont = ctx.Fonts.GetFont(ctx.Theme, false, fontSizePx, forceBold, false);
         float cx = x;
 
-        // Track pending inline-code run for background-pill emission
-        int   codeRunStart = -1;
-        float codeRunLeft  = 0f;
-        float codeRunAsc   = 0f;
-        float codeRunDesc  = 0f;
+        int   codeRunStart = -1; float codeRunLeft = 0f, codeRunAsc = 0f, codeRunDesc = 0f;
+        int   markRunStart = -1; float markRunLeft = 0f, markTop = y, markBottom = y + line.Height;
 
         void FlushCodeRun()
         {
             if (codeRunStart < 0) return;
-            float padH   = 4f * ctx.Scale;
-            float padV   = 2f * ctx.Scale;
-            // Pill height is derived from CODE font metrics (not the full line height),
-            // so it wraps the text tightly regardless of adjacent heading/body font size.
-            float pillTop    = baselineY - codeRunAsc  - padV;
-            float pillBottom = baselineY + codeRunDesc + padV;
-            ctx.Boxes.Add(new RectBox
-            {
-                Bounds = new SKRect(codeRunLeft - padH, pillTop, cx + padH, pillBottom),
-                Fill = ctx.Theme.CodeInlineBackground,
-                CornerRadius = 4f * ctx.Scale
-            });
+            float padH = 4f * ctx.Scale, padV = 2f * ctx.Scale;
+            ctx.Boxes.Add(new RectBox { Bounds = new SKRect(codeRunLeft - padH, baselineY - codeRunAsc - padV, cx + padH, baselineY + codeRunDesc + padV), Fill = ctx.Theme.CodeInlineBackground, CornerRadius = 4f * ctx.Scale });
             codeRunStart = -1;
+        }
+
+        void FlushMarkRun()
+        {
+            if (markRunStart < 0) return;
+            ctx.Boxes.Add(new RectBox { Bounds = new SKRect(markRunLeft, markTop + ctx.Scale, cx, markBottom - ctx.Scale), Fill = ctx.Theme.MarkBackground, CornerRadius = 3f * ctx.Scale });
+            markRunStart = -1;
         }
 
         for (int i = line.Start; i < line.End; i++)
         {
             var atom = atoms[i];
-
             if (atom.IsWhitespace)
             {
-                FlushCodeRun();
-                cx += baseFont.MeasureText(" ");
-                continue;
+                float spW = baseFont.MeasureText(" ");
+                if (!atom.Mark) { FlushCodeRun(); FlushMarkRun(); } else { cx += spW; continue; }
+                cx += spW; continue;
             }
-
             if (atom.Image != null)
             {
-                FlushCodeRun();
+                FlushCodeRun(); FlushMarkRun();
                 var (w, h) = MeasureImageAtom(ctx, atom.Image, line.Width + 1f);
                 ctx.Boxes.Add(new ImageBox { Bounds = new SKRect(cx, y, cx + w, y + h), Source = atom.Image, Link = atom.Link });
-                cx += w;
-                continue;
+                cx += w; continue;
             }
 
-            bool isCode  = atom.IsCode;
-            bool isEmoji = atom.IsEmoji;
-            float size   = isCode ? ctx.Theme.CodeFontSize * ctx.Scale : fontSizePx;
-            var font     = isEmoji
-                ? GetEmojiFont(ctx, size)
-                : ctx.Fonts.GetFont(ctx.Theme, isCode, size, atom.Bold || forceBold, atom.Italic);
+            bool isSS = atom.Subscript || atom.Superscript;
+            float size = atom.IsCode ? ctx.Theme.CodeFontSize * ctx.Scale
+                       : isSS       ? fontSizePx * SubSupScale : fontSizePx;
+            var font = atom.IsEmoji ? GetEmojiFont(ctx, size)
+                     : ctx.Fonts.GetFont(ctx.Theme, atom.IsCode, size, atom.Bold || forceBold, atom.Italic);
+            float runAsc = -font.Metrics.Ascent, runDesc = font.Metrics.Descent;
 
-            float runAscent  = -font.Metrics.Ascent;
-            float runDescent = font.Metrics.Descent;
+            if (atom.IsCode) { if (codeRunStart < 0) { codeRunStart = i; codeRunLeft = cx; codeRunAsc = runAsc; codeRunDesc = runDesc; } codeRunAsc = Math.Max(codeRunAsc, runAsc); codeRunDesc = Math.Max(codeRunDesc, runDesc); }
+            else FlushCodeRun();
 
-            if (isCode)
-            {
-                if (codeRunStart < 0) { codeRunStart = i; codeRunLeft = cx; codeRunAsc = runAscent; codeRunDesc = runDescent; }
-                codeRunAsc  = Math.Max(codeRunAsc,  runAscent);
-                codeRunDesc = Math.Max(codeRunDesc, runDescent);
-            }
-            else
-            {
-                FlushCodeRun();
-            }
+            if (atom.Mark) { if (markRunStart < 0) { markRunStart = i; markRunLeft = cx; markTop = baselineY - runAsc; markBottom = baselineY + runDesc; } markTop = Math.Min(markTop, baselineY - runAsc); markBottom = Math.Max(markBottom, baselineY + runDesc); }
+            else FlushMarkRun();
 
             float w2 = font.MeasureText(atom.Text);
-            SKColor color = isCode ? ctx.Theme.CodeForeground
-                          : atom.Link != null ? ctx.Theme.LinkColor
-                          : baseColor;
+            SKColor color = atom.IsCode ? ctx.Theme.CodeForeground : atom.Mark ? ctx.Theme.MarkColor : atom.Link != null ? ctx.Theme.LinkColor : baseColor;
 
-            float runBaseline = baselineY;
-            if (atom.Subscript)   runBaseline += size * 0.18f;
-            if (atom.Superscript) runBaseline -= size * 0.32f;
+            float bl = baselineY;
+            if (atom.Superscript) bl = baselineY - fontSizePx * SubSupScale * 0.55f;
+            if (atom.Subscript)   bl = baselineY + fontSizePx * SubSupScale * 0.12f;
 
-            ctx.Boxes.Add(new TextRunBox
-            {
-                Bounds   = new SKRect(cx, y, cx + w2, y + line.Height),
-                Text     = atom.Text,
-                Font     = font,
-                Color    = color,
-                Baseline = new SKPoint(cx, runBaseline),
-                Link     = atom.Link,
-                Underline = atom.Link != null,
-                Strike   = atom.Strike,
-                IsEmoji  = isEmoji
-            });
-
+            ctx.Boxes.Add(new TextRunBox { Bounds = new SKRect(cx, y, cx + w2, y + line.Height), Text = atom.Text, Font = font, Color = color, Baseline = new SKPoint(cx, bl), Link = atom.Link, Underline = atom.Link != null || atom.Insert, Strike = atom.Strike, Mark = atom.Mark, IsEmoji = atom.IsEmoji });
             cx += w2;
         }
-
-        FlushCodeRun();
+        FlushCodeRun(); FlushMarkRun();
     }
-
     private static SKFont GetEmojiFont(Ctx ctx, float sizePx)
     {
-        var emojiTf = ctx.Fonts.GetEmojiTypeface();
-        if (emojiTf == null) return ctx.Fonts.GetFont(ctx.Theme, false, sizePx, false, false);
-        // Emoji fonts are not cached by MarkdownFontCache (different code path) — create a small
-        // short-lived instance. Emoji rarely appear in large quantities, so this is acceptable.
-        return new SKFont(emojiTf, sizePx) { Subpixel = true, Edging = SKFontEdging.Antialias };
+        // Route through the font cache so emoji fonts are reused, not re-created each call.
+        return ctx.Fonts.GetEmojiFont(ctx.Theme, sizePx);
     }
 
     private static (float Width, float Height) MeasureImageAtom(Ctx ctx, ImageInline image, float maxWidth)
@@ -918,5 +1051,114 @@ internal static class MarkdownLayoutBuilder
         float placeholderW = Math.Min(Math.Max(40f, maxWidth), 220f * ctx.Scale);
         float placeholderH = ctx.Theme.ImagePlaceholderHeight * ctx.Scale;
         return (placeholderW, placeholderH);
+    }
+
+    // ------------------------------------------------------------------
+    // Container blocks (:::)
+    // ------------------------------------------------------------------
+    private static void LayoutContainer(Ctx ctx, ContainerBlock container, float x, float width)
+    {
+        var (borderColor, bgColor) = ResolveContainerColors(ctx.Theme, container.Name);
+
+        float pad    = 16f * ctx.Scale;
+        float barW   =  4f * ctx.Scale;
+        float radius =  6f * ctx.Scale;
+        float startY = ctx.Y;
+
+        // Name label (bold, coloured)
+        if (!string.IsNullOrEmpty(container.Name))
+        {
+            float labelSize = ctx.Theme.SmallFontSize * ctx.Scale;
+            var labelFont   = ctx.Fonts.GetFont(ctx.Theme, false, labelSize, true, false);
+            float lAsc = -labelFont.Metrics.Ascent;
+            float labelLineH = MathF.Ceiling(labelSize * 1.4f);
+            ctx.Boxes.Add(new TextRunBox
+            {
+                Bounds   = new SKRect(x + barW + pad, ctx.Y, x + width, ctx.Y + labelLineH),
+                Text     = container.Name.ToUpperInvariant(),
+                Font     = labelFont,
+                Color    = borderColor,
+                Baseline = new SKPoint(x + barW + pad, ctx.Y + lAsc)
+            });
+            ctx.Y += labelLineH + 4f * ctx.Scale;
+        }
+
+        // Inner content
+        float contentX = x + barW + pad;
+        LayoutBlocks(ctx, container.Blocks, contentX, width - barW - pad, tight: false,
+            textColor: ctx.Theme.BodyColor, isFirstInParent: true);
+
+        ctx.Y += pad * 0.5f;
+        float endY = ctx.Y;
+
+        // Background fill
+        if (bgColor.Alpha > 0)
+        {
+            var bgRect = new SKRect(x, startY - 4f * ctx.Scale, x + width, endY + 4f * ctx.Scale);
+            ctx.Boxes.Insert(ctx.Boxes.Count - (int)((endY - startY) / 5 + 1),   // best-effort: insert before content
+                new RectBox { Bounds = bgRect, Fill = bgColor, CornerRadius = radius });
+        }
+
+        // Left bar
+        ctx.Boxes.Add(new RectBox
+        {
+            Bounds = new SKRect(x, startY - 4f * ctx.Scale, x + barW, endY + 4f * ctx.Scale),
+            Fill   = borderColor, CornerRadius = barW / 2f
+        });
+    }
+
+    private static (SKColor Border, SKColor Bg) ResolveContainerColors(MarkdownTheme t, string name)
+    {
+        return name.ToLowerInvariant() switch
+        {
+            "warning" or "warn"    => (t.ContainerWarningBorder, t.ContainerWarningBg),
+            "danger"  or "error"   => (t.ContainerDangerBorder,  t.ContainerDangerBg),
+            "info"    or "note"    => (t.ContainerInfoBorder,     t.ContainerInfoBg),
+            "tip"     or "success" => (t.ContainerTipBorder,      t.ContainerTipBg),
+            _                      => (t.ContainerDefaultBorder,  t.ContainerDefaultBg),
+        };
+    }
+
+    // ------------------------------------------------------------------
+    // Definition lists
+    // ------------------------------------------------------------------
+    private static void LayoutDefinitionList(Ctx ctx, DefinitionListBlock dl, float x, float width)
+    {
+        float termSize = ctx.Theme.BodyFontSize * ctx.Scale;
+        float defSize  = ctx.Theme.BodyFontSize * ctx.Scale;
+        float indent   = 24f * ctx.Scale;
+        bool first     = true;
+
+        foreach (var entry in dl.Entries)
+        {
+            if (!first) ctx.Y += ctx.Theme.TightBlockSpacing * ctx.Scale;
+
+            // Term (bold)
+            var termAtoms = new List<Atom>();
+            CollectAtoms(entry.Term, default, termAtoms);
+            if (termAtoms.Count > 0)
+            {
+                var termStyle = default(AtomStyle); termStyle.Bold = true;
+                var boldTermAtoms = new List<Atom>();
+                foreach (var a in termAtoms)
+                {
+                    var ba = a; ba.Bold = true; boldTermAtoms.Add(ba);
+                }
+                EmitInlineFlow(ctx, boldTermAtoms, x, width, ctx.Theme.BodyFontSize, ctx.Theme.BodyLineHeight,
+                    ctx.Theme.BodyColor, forceBold: false);
+            }
+
+            // Definitions (indented, body color)
+            foreach (var def in entry.Definitions)
+            {
+                var defAtoms = new List<Atom>();
+                CollectAtoms(def, default, defAtoms);
+                if (defAtoms.Count > 0)
+                    EmitInlineFlow(ctx, defAtoms, x + indent, width - indent, ctx.Theme.BodyFontSize,
+                        ctx.Theme.BodyLineHeight, ctx.Theme.MutedColor, forceBold: false);
+            }
+
+            first = false;
+        }
     }
 }

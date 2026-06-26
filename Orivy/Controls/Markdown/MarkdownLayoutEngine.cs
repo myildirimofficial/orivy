@@ -22,7 +22,10 @@ internal sealed class TextRunBox : MdBox
     public LinkInline? Link;
     public bool Underline;
     public bool Strike;
-    public bool IsEmoji;          // use emoji fallback typeface
+    public bool Mark;
+    public bool IsEmoji;
+    public bool IsNewlineSentinel;
+    public CodeBlockBox? CodeOwner;
 
     // ---- selection helpers (called by renderer, no allocation) ----
 
@@ -135,17 +138,18 @@ internal sealed class MarkdownSelectionState
 // Interaction state (persists across reflows)
 // ============================================================================
 
-internal sealed class CodeBlockScrollState
+public sealed class CodeBlockScrollState
 {
     public float ScrollX;
 }
 
-internal sealed class MarkdownInteractionState
+public sealed class MarkdownInteractionState
 {
     public IMarkdownImageProvider? ImageProvider;
     public Action<string, SKImage?> OnImageLoaded = (_, _) => { };
     public Dictionary<CodeBlockBlock, CodeBlockScrollState> CodeScroll = new();
     public Dictionary<DetailsBlock, bool> DetailsExpanded = new();
+    public Dictionary<TableBlock, TableScrollState> TableScroll = new();
 }
 
 internal sealed class MarkdownHoverState
@@ -153,7 +157,8 @@ internal sealed class MarkdownHoverState
     public LinkInline? HoveredLink;
     public CodeBlockBox? HoveredCodeBlock;
     public bool HoveredCopyButton;
-    public bool HoveredText;   // true when cursor is over selectable text
+    public bool HoveredText;
+    public TableBox? HoveredTableBox;
 }
 
 // ============================================================================
@@ -164,6 +169,8 @@ internal sealed class MarkdownFontCache : IDisposable
 {
     private readonly Dictionary<(bool Mono, bool Bold, bool Italic), SKTypeface> _typefaces = new();
     private readonly Dictionary<(bool Mono, bool Bold, bool Italic, int SizeTenths), SKFont> _fonts = new();
+    // MeasureText cache: (text, fontKey) → width. Capped at 4096 entries to avoid unbounded growth.
+    private readonly Dictionary<(string Text, bool Mono, bool Bold, bool Italic, int SizeTenths), float> _measureCache = new(4096);
     private SKTypeface? _hostBodyTypeface;
     private SKTypeface? _emojiTypeface;
     private bool _emojiFontSearched;
@@ -182,6 +189,20 @@ internal sealed class MarkdownFontCache : IDisposable
             if (tf != null) { _emojiTypeface = tf; break; }
         }
         return _emojiTypeface;
+    }
+
+    // Cached emoji font — same lifecycle as regular fonts
+    private readonly Dictionary<int, SKFont> _emojiFonts = new();
+
+    public SKFont GetEmojiFont(MarkdownTheme theme, float sizePx)
+    {
+        var emojiTf = GetEmojiTypeface();
+        if (emojiTf == null) return GetFont(theme, false, sizePx, false, false);
+        int sizeTenths = (int)MathF.Round(Math.Max(1f, sizePx) * 10f);
+        if (_emojiFonts.TryGetValue(sizeTenths, out var cached)) return cached;
+        var font = new SKFont(emojiTf, sizeTenths / 10f) { Subpixel = true, Edging = SKFontEdging.Antialias };
+        _emojiFonts[sizeTenths] = font;
+        return font;
     }
 
     public SKFont GetFont(MarkdownTheme theme, bool mono, float sizePx, bool bold, bool italic)
@@ -239,11 +260,85 @@ internal sealed class MarkdownFontCache : IDisposable
         return typeface;
     }
 
+    /// <summary>
+    /// Cached MeasureText. Use for short words/tokens; skip for very long strings (>64 chars).
+    /// </summary>
+    public float MeasureText(string text, MarkdownTheme theme, bool mono, float sizePx, bool bold, bool italic)
+    {
+        if (text.Length == 0) return 0f;
+        int sizeTenths = (int)MathF.Round(Math.Max(1f, sizePx) * 10f);
+        var key = (text, mono, bold, italic, sizeTenths);
+        if (_measureCache.TryGetValue(key, out float cached)) return cached;
+        var font = GetFont(theme, mono, sizePx, bold, italic);
+        float w = font.MeasureText(text);
+        if (_measureCache.Count >= 4096) _measureCache.Clear(); // simple eviction
+        _measureCache[key] = w;
+        return w;
+    }
+
     public void Dispose()
     {
         foreach (var f in _fonts.Values) f.Dispose();
         _fonts.Clear();
+        foreach (var f in _emojiFonts.Values) f.Dispose();
+        _emojiFonts.Clear();
         foreach (var t in _typefaces.Values) t.Dispose();
         _typefaces.Clear();
+        _measureCache.Clear();
+    }
+}
+
+// ── Scrollable table box ────────────────────────────────────────────────────
+
+/// <summary>
+/// A pre-rendered table with optional horizontal scroll state.
+/// Created by MarkdownLayoutBuilder when the natural table width exceeds the viewport.
+/// </summary>
+internal sealed class TableBox : MdBox
+{
+    public TableBlock Source = null!;
+    /// <summary>All rows as pre-positioned TextRunBox/RectBox lists.</summary>
+    public List<MdBox> Children = new();
+    public float ContentWidth;
+    public float ViewportWidth;
+    public TableScrollState Scroll = null!;
+    public bool NeedsHorizontalScroll;
+    public SKRect HeaderRowRect;
+    public List<SKRect> RowRects = new();
+}
+
+/// <summary>Horizontal scroll offset for a wide table. Keyed by TableBlock instance.</summary>
+public sealed class TableScrollState
+{
+    public float ScrollX;
+}
+
+/// <summary>Definition-list rendered box.</summary>
+internal sealed class DefinitionListBox : MdBox
+{
+    public List<MdBox> Children = new();
+}
+
+/// <summary>Container block (:::) box.</summary>
+internal sealed class ContainerBox : MdBox
+{
+    public ContainerBlock Source = null!;
+    public List<MdBox> Children = new();
+}
+
+// ── Selection enhancements ─────────────────────────────────────────────────
+
+/// <summary>Extends MarkdownInteractionState with scrollable-table state.</summary>
+public static class InteractionStateExtensions
+{
+    public static TableScrollState GetOrCreateTableScroll(
+        this MarkdownInteractionState state, TableBlock block)
+    {
+        if (!state.TableScroll.TryGetValue(block, out var s))
+        {
+            s = new TableScrollState();
+            state.TableScroll[block] = s;
+        }
+        return s;
     }
 }

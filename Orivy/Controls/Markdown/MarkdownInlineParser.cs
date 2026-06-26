@@ -7,269 +7,366 @@ using System.Text.RegularExpressions;
 namespace Orivy.Controls.Markdown;
 
 /// <summary>
-/// Parses the inline content of a single block's raw text (already line-joined by the
-/// block parser, with soft/hard break markers preserved as "\n"/"\\\n" respectively)
-/// into a tree of <see cref="MarkdownInline"/> nodes.
-///
-/// This implements a simplified-but-careful version of the CommonMark inline algorithm:
-/// code spans / autolinks / raw safelisted HTML are resolved first (highest precedence,
-/// cannot be split by emphasis), then links/images, then a delimiter-stack pass resolves
-/// '*'/'_'/'~~' emphasis runs (including the "left/right-flanking" and "multiple-of-3"
-/// rules that matter for correctly nesting "**bold *and italic***" style text). It is not
-/// a byte-for-byte CommonMark implementation, but it is correct for the overwhelming
-/// majority of real-world documents.
+/// Inline content parser. Handles:
+///  - CommonMark: code spans, emphasis/strong (*/_), strikethrough (~~),
+///    links, images, autolinks, escaped chars, HTML entities
+///  - GFM extensions: strikethrough, autolink literals
+///  - Extended: superscript (^text^), subscript (~text~, single tilde),
+///    underline (++text++ or &lt;ins&gt;), highlight (==text== or &lt;mark&gt;),
+///    &lt;kbd&gt;, emoji shortcodes (:smile:), typographic replacements
 /// </summary>
 public static class MarkdownInlineParser
 {
-    private static readonly Regex EntityRegex = new(@"&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z][a-zA-Z0-9]*);", RegexOptions.Compiled);
-    private static readonly Regex BareUrlRegex = new(@"\G(https?://|www\.)[^\s<>""')\]]+", RegexOptions.Compiled);
-    private static readonly Regex BareEmailRegex = new(@"\G[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", RegexOptions.Compiled);
+    private static readonly Regex EntityRegex     = new(@"&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z][a-zA-Z0-9]*);", RegexOptions.Compiled);
+    private static readonly Regex BareUrlRegex    = new(@"\G(https?://|www\.)[^\s<>""')\]]+",              RegexOptions.Compiled);
 
     private static readonly Dictionary<string, char> NamedEntities = new(StringComparer.Ordinal)
     {
-        ["amp"] = '&', ["lt"] = '<', ["gt"] = '>', ["quot"] = '"', ["apos"] = '\'',
-        ["nbsp"] = '\u00A0', ["copy"] = '\u00A9', ["reg"] = '\u00AE', ["trade"] = '\u2122',
-        ["mdash"] = '\u2014', ["ndash"] = '\u2013', ["hellip"] = '\u2026',
-        ["lsquo"] = '\u2018', ["rsquo"] = '\u2019', ["ldquo"] = '\u201C', ["rdquo"] = '\u201D',
+        ["amp"]=  '&', ["lt"]= '<', ["gt"]= '>',  ["quot"]= '"', ["apos"]= '\'',
+        ["nbsp"]= '\u00A0', ["copy"]= '\u00A9', ["reg"]= '\u00AE', ["trade"]= '\u2122',
+        ["mdash"]= '\u2014', ["ndash"]= '\u2013', ["hellip"]= '\u2026',
+        ["lsquo"]= '\u2018', ["rsquo"]= '\u2019', ["ldquo"]= '\u201C', ["rdquo"]= '\u201D',
     };
 
-    private sealed class Delimiter
+    // ── Typographic replacement table ──────────────────────────────────
+    private static readonly (string From, string To)[] TypoReplacements =
     {
-        public int NodeIndex;     // index into the working node list (a TextInline holding the literal marker chars)
-        public char Marker;       // '*', '_' or '~'
-        public int Length;        // remaining un-matched marker length
-        public bool CanOpen;
-        public bool CanClose;
-        public bool Active = true;
-    }
+        ("(c)",  "\u00A9"), ("(C)",  "\u00A9"),  // ©
+        ("(r)",  "\u00AE"), ("(R)",  "\u00AE"),  // ®
+        ("(tm)", "\u2122"), ("(TM)", "\u2122"),  // ™
+        ("(p)",  "\u00A7"), ("(P)",  "\u00A7"),  // §
+        ("+-",   "\u00B1"), ("-+",   "\u00B1"),  // ±
+        ("<<",   "\u00AB"),                       // «
+        (">>",   "\u00BB"),                       // »
+        ("...",  "\u2026"),                       // … (before -- replacements)
+        ("---",  "\u2014"),                       // — em dash
+        ("--",   "\u2013"),                       // – en dash
+    };
 
-    // ------------------------------------------------------------------
-    // Typographic replacements (smartypants-style)
-    // ------------------------------------------------------------------
+    // ── Shortcut emoticon table ───────────────────────────────────────────────
+    // Ordered longest-first so :-) matches before :-)  etc.
+    private static readonly (string From, string To)[] EmoticonReplacements =
+    {
+        (":-)",  "😊"), (":)",   "😊"),
+        (":-D",  "😄"), (":D",   "😄"),
+        (":-(",  "😞"), (":(",   "😞"),
+        (";-)",  "😉"), (";)",   "😉"),
+        (":-P",  "😛"), (":P",   "😛"), (":-p", "😛"), (":p", "😛"),
+        (":-|",  "😐"), (":|",   "😐"),
+        (":-O",  "😮"), (":O",   "😮"), (":-o", "😮"), (":o", "😮"),
+        (":'(", "😢"),
+        (":-*",  "😘"), (":*",   "😘"),
+        ("B-)",  "😎"), ("B)",   "😎"),
+        ("8-)",  "😎"), ("8)",   "😎"),
+        ("O:-)", "😇"), ("O:)",  "😇"),
+        (":-/",  "😕"), (":/",   "😕"),
+        ("<3",   "❤️"),
+        ("</3",  "💔"),
+        ("XD",   "😆"),
+    };
+
     private static string ApplyTypography(string text)
     {
-        if (!ContainsTypographyTrigger(text)) return text;
-        text = text.Replace("---", "\u2014"); // em dash
-        text = text.Replace("--", "\u2013");  // en dash
-        text = text.Replace("...", "\u2026"); // ellipsis
-        return SmartDoubleQuotes(SmartSingleQuotes(text));
+        if (text.Length < 2) return text;
+        // Emoticons before typo replacements (longest match order in table handles priority)
+        text = ApplyEmoticons(text);
+        foreach (var (from, to) in TypoReplacements)
+            if (text.Contains(from, StringComparison.Ordinal))
+                text = text.Replace(from, to);
+        if (text.Contains('"') || text.Contains('\''))
+            text = SmartQuotes(SmartSingleQuotes(text));
+        return text;
     }
 
-    private static bool ContainsTypographyTrigger(string text) =>
-        text.Contains('-') || text.Contains('.') || text.Contains('"') || text.Contains('\'');
-
-    private static string SmartDoubleQuotes(string text)
+    private static string ApplyEmoticons(string text)
     {
-        if (text.IndexOf('"') < 0) return text;
+        // Fast path: skip if no emoticon trigger chars present
+        if (!text.Contains(':') && !text.Contains(';') && !text.Contains('8') &&
+            !text.Contains('B') && !text.Contains('O') && !text.Contains('X') &&
+            !text.Contains('<'))
+            return text;
+
+        // Use StringBuilder to avoid O(n²) string allocations from repeated Remove+Insert
+        var sb = new StringBuilder(text.Length + 16);
+        int pos = 0;
+
+        // Single pass: try each position for any emoticon match
+        while (pos < text.Length)
+        {
+            bool matched = false;
+            foreach (var (from, to) in EmoticonReplacements)
+            {
+                if (pos + from.Length > text.Length) continue;
+                if (!text.AsSpan(pos).StartsWith(from.AsSpan(), StringComparison.Ordinal)) continue;
+
+                // Boundary check: char before must not be letter/digit
+                bool okBefore = pos == 0 || !char.IsLetterOrDigit(text[pos - 1]);
+                int  afterIdx = pos + from.Length;
+                bool okAfter  = afterIdx >= text.Length || !char.IsLetterOrDigit(text[afterIdx]);
+
+                if (okBefore && okAfter)
+                {
+                    sb.Append(to);
+                    pos += from.Length;
+                    matched = true;
+                    break;  // longest match wins (table is ordered longest-first per trigger)
+                }
+            }
+            if (!matched)
+                sb.Append(text[pos++]);
+        }
+
+        return sb.Length == text.Length && sb.ToString() == text ? text : sb.ToString();
+    }
+
+    private static string SmartQuotes(string text)
+    {
+        if (!text.Contains('"')) return text;
         var sb = new StringBuilder(text.Length);
-        bool afterOpenContext = true;
+        bool afterOpen = true;
         foreach (char c in text)
         {
-            if (c == '"') { sb.Append(afterOpenContext ? '\u201C' : '\u201D'); afterOpenContext = false; }
-            else { sb.Append(c); afterOpenContext = char.IsWhiteSpace(c) || c is '(' or '[' or '\u201C'; }
+            if (c == '"') { sb.Append(afterOpen ? '\u201C' : '\u201D'); afterOpen = false; }
+            else { sb.Append(c); afterOpen = char.IsWhiteSpace(c) || c is '(' or '[' or '\u201C'; }
         }
         return sb.ToString();
     }
 
     private static string SmartSingleQuotes(string text)
     {
-        if (text.IndexOf('\'') < 0) return text;
+        if (!text.Contains('\'')) return text;
         var sb = new StringBuilder(text.Length);
-        bool afterOpenContext = true;
+        bool afterOpen = true;
         foreach (char c in text)
         {
-            if (c == '\'') { sb.Append(afterOpenContext ? '\u2018' : '\u2019'); afterOpenContext = false; }
-            else { sb.Append(c); afterOpenContext = char.IsWhiteSpace(c) || c is '(' or '[' or '\u2018'; }
+            if (c == '\'') { sb.Append(afterOpen ? '\u2018' : '\u2019'); afterOpen = false; }
+            else { sb.Append(c); afterOpen = char.IsWhiteSpace(c) || c is '(' or '[' or '\u2018'; }
         }
         return sb.ToString();
     }
 
+    // ── Delimiter stack entry (for */_/~~ emphasis) ────────────────────
+    private sealed class Delimiter
+    {
+        public int NodeIndex; public char Marker; public int Length;
+        public bool CanOpen; public bool CanClose; public bool Active = true;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Main entry point
+    // ══════════════════════════════════════════════════════════════════════
+
     public static List<MarkdownInline> Parse(string raw, Dictionary<string, LinkReferenceDefinition> refs)
     {
-        var nodes = new List<MarkdownInline>();
+        var nodes      = new List<MarkdownInline>();
         var delimiters = new List<Delimiter>();
-
-        int i = 0;
-        int n = raw.Length;
+        int i = 0, n = raw.Length;
         var plain = new StringBuilder();
 
         void FlushPlain()
         {
             if (plain.Length == 0) return;
-            string text = ApplyTypography(plain.ToString());
+            string t = ApplyTypography(plain.ToString());
             plain.Clear();
-            if (text.Length > 0) nodes.Add(new TextInline { Text = text });
+            if (t.Length > 0) nodes.Add(new TextInline { Text = t });
         }
 
         while (i < n)
         {
             char c = raw[i];
 
-            // Hard / soft line breaks: a literal '\n' was inserted by the block parser between
-            // source lines. A preceding "  " (2+ spaces) or "\\" makes it hard.
+            // ── Hard/soft line breaks ──
             if (c == '\n')
             {
                 bool hard = false;
-                if (plain.Length > 0 && plain[^1] == '\\') { plain.Length -= 1; hard = true; }
-                else
-                {
-                    int trail = 0;
-                    while (plain.Length - trail > 0 && plain[plain.Length - trail - 1] == ' ') trail++;
-                    if (trail >= 2) { plain.Length -= trail; hard = true; }
-                }
+                if (plain.Length > 0 && plain[^1] == '\\') { plain.Length--; hard = true; }
+                else { int t2 = 0; while (t2 < plain.Length && plain[plain.Length - t2 - 1] == ' ') t2++; if (t2 >= 2) { plain.Length -= t2; hard = true; } }
                 FlushPlain();
                 nodes.Add(new LineBreakInline { Hard = hard });
-                i++;
-                continue;
+                i++; continue;
             }
 
-            if (c == '\\' && i + 1 < n && IsAsciiPunctuation(raw[i + 1]))
-            {
-                plain.Append(raw[i + 1]);
-                i += 2;
-                continue;
-            }
+            // ── Escape ──
+            if (c == '\\' && i + 1 < n && IsAsciiPunct(raw[i + 1]))
+            { plain.Append(raw[i + 1]); i += 2; continue; }
 
+            // ── HTML entity ──
             if (c == '&')
             {
                 var m = EntityRegex.Match(raw, i);
-                if (m.Success && m.Index == i)
-                {
-                    plain.Append(DecodeEntity(m.Groups[1].Value));
-                    i += m.Length;
-                    continue;
-                }
+                if (m.Success && m.Index == i) { plain.Append(DecodeEntity(m.Groups[1].Value)); i += m.Length; continue; }
             }
 
+            // ── Code span ──
             if (c == '`')
             {
-                int runStart = i;
-                int runLen = 0;
+                int runStart = i, runLen = 0;
                 while (i < n && raw[i] == '`') { i++; runLen++; }
-                int closeStart = raw.IndexOf(new string('`', runLen), i, StringComparison.Ordinal);
-                // make sure it's an exact-length run, not a longer one
-                while (closeStart >= 0)
-                {
-                    int after = closeStart + runLen;
-                    if (after >= n || raw[after] != '`') break;
-                    closeStart = raw.IndexOf(new string('`', runLen), after, StringComparison.Ordinal);
-                }
-                if (closeStart < 0)
-                {
-                    plain.Append(raw, runStart, i - runStart);
-                    continue;
-                }
+                int closeAt = FindExactBacktickRun(raw, i, runLen);
+                if (closeAt < 0) { plain.Append(raw, runStart, i - runStart); continue; }
                 FlushPlain();
-                string code = raw.Substring(i, closeStart - i).Replace('\n', ' ');
+                string code = raw.Substring(i, closeAt - i).Replace('\n', ' ');
                 if (code.Length >= 2 && code[0] == ' ' && code[^1] == ' ' && code.Trim().Length > 0)
                     code = code[1..^1];
                 nodes.Add(new CodeSpanInline { Code = code });
-                i = closeStart + runLen;
-                continue;
+                i = closeAt + runLen; continue;
             }
 
+            // ── Angle constructs: autolinks + safelisted HTML ──
             if (c == '<')
             {
-                var consumed = TryParseAngleConstruct(raw, i, nodes, plain, FlushPlain);
+                int consumed = TryParseAngleConstruct(raw, i, nodes, plain, refs, FlushPlain);
                 if (consumed > 0) { i += consumed; continue; }
             }
 
-            if ((c == 'h' && BareUrlRegex.IsMatch(raw[i..])) || (c == 'w' && raw.AsSpan(i).StartsWith("www.")))
+            // ── Bare URLs ──
+            if (c is 'h' or 'w')
             {
                 var m = BareUrlRegex.Match(raw, i);
                 if (m.Success && m.Index == i)
                 {
-                    string url = TrimTrailingAutolinkPunctuation(m.Value);
+                    string url = TrimTrailingPunct(m.Value);
                     FlushPlain();
-                    string display = url;
                     string href = url.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? "https://" + url : url;
-                    nodes.Add(new AutoLinkInline { Url = href, DisplayText = display });
-                    i += url.Length;
-                    continue;
+                    nodes.Add(new AutoLinkInline { Url = href, DisplayText = url });
+                    i += url.Length; continue;
                 }
             }
 
+            // ── Emoji shortcode :name: ──
+            if (c == ':' && i + 2 < n)
+            {
+                int end = raw.IndexOf(':', i + 1);
+                if (end > i + 1 && end - i - 1 <= 40)
+                {
+                    string code = raw.Substring(i + 1, end - i - 1);
+                    if (IsValidEmojiName(code))
+                    {
+                        string? emoji = MarkdownEmojiTable.Lookup(code);
+                        if (emoji != null)
+                        { FlushPlain(); nodes.Add(new TextInline { Text = emoji }); i = end + 1; continue; }
+                    }
+                }
+            }
+
+            // ── Image ──
             if (c == '!' && i + 1 < n && raw[i + 1] == '[')
             {
                 int consumed = TryParseImage(raw, i, refs, nodes, FlushPlain);
                 if (consumed > 0) { i += consumed; continue; }
             }
 
+            // ── Footnote reference [^label] ──
+            if (c == '[' && i + 2 < n && raw[i + 1] == '^')
+            {
+                int close = raw.IndexOf(']', i + 2);
+                if (close > i + 2)
+                {
+                    string label = raw.Substring(i + 2, close - i - 2).Trim();
+                    if (label.Length > 0 && !label.Contains('[') && !label.Contains('\n'))
+                    {
+                        FlushPlain();
+                        // Look up ordinal from refs (registered by parser as "__fnref__label" → number)
+                        int num = refs != null && refs.TryGetValue($"__fnref__{label}", out var refDef)
+                            ? (int.TryParse(refDef.Title, out int n2) ? n2 : 0) : 0;
+                        nodes.Add(new FootnoteRefInline { Label = label, Number = num });
+                        i = close + 1; continue;
+                    }
+                }
+            }
+
+            // ── Link ──
             if (c == '[')
             {
                 int consumed = TryParseLink(raw, i, refs, nodes, delimiters, FlushPlain);
                 if (consumed > 0) { i += consumed; continue; }
             }
 
+            // ── Superscript ^text^ ──
+            if (c == '^')
+            {
+                int close = FindPairedChar(raw, i + 1, '^');
+                if (close > i + 1)
+                {
+                    FlushPlain();
+                    string inner = raw.Substring(i + 1, close - i - 1);
+                    nodes.Add(new SuperscriptInline { Children = Parse(inner, refs) });
+                    i = close + 1; continue;
+                }
+            }
+
+            // ── Highlight ==text== ──
+            if (c == '=' && i + 1 < n && raw[i + 1] == '=')
+            {
+                int close = raw.IndexOf("==", i + 2, StringComparison.Ordinal);
+                if (close > i + 1)
+                {
+                    FlushPlain();
+                    string inner = raw.Substring(i + 2, close - i - 2);
+                    nodes.Add(new MarkInline { Children = Parse(inner, refs) });
+                    i = close + 2; continue;
+                }
+            }
+
+            // ── Underline ++text++ ──
+            if (c == '+' && i + 1 < n && raw[i + 1] == '+')
+            {
+                int close = raw.IndexOf("++", i + 2, StringComparison.Ordinal);
+                if (close > i + 1)
+                {
+                    FlushPlain();
+                    string inner = raw.Substring(i + 2, close - i - 2);
+                    nodes.Add(new InsertInline { Children = Parse(inner, refs) });
+                    i = close + 2; continue;
+                }
+            }
+
+            // ── Emphasis / Strikethrough / Subscript (*/_/~/~~) ──
             if (c is '*' or '_' or '~')
             {
                 int start = i;
-                char marker = c;
                 int runLen = 0;
-                while (i < n && raw[i] == marker) { i++; runLen++; }
+                while (i < n && raw[i] == c) { i++; runLen++; }
 
-                if (marker == '~' && runLen != 2)
+                // Single tilde → subscript (scan-based, not delimiter stack)
+                if (c == '~' && runLen == 1)
                 {
-                    // Only "~~" is a strikethrough delimiter; lone '~' is literal.
-                    plain.Append('~', runLen);
-                    continue;
+                    int close = FindPairedChar(raw, i, '~');
+                    // Make sure it's truly a single closing tilde (not ~~)
+                    if (close > start + 1 && (close + 1 >= raw.Length || raw[close + 1] != '~'))
+                    {
+                        FlushPlain();
+                        string inner = raw.Substring(i, close - i);
+                        nodes.Add(new SubscriptInline { Children = Parse(inner, refs) });
+                        i = close + 1; continue;
+                    }
+                    // No valid closing single tilde → treat as literal
+                    plain.Append('~'); continue;
                 }
+
+                // Double+ tilde → strikethrough delimiter
+                if (c == '~' && runLen < 2) { plain.Append(c, runLen); continue; }
 
                 char before = start > 0 ? raw[start - 1] : ' ';
-                char after = i < n ? raw[i] : ' ';
-                bool beforeWhitespace = char.IsWhiteSpace(before);
-                bool afterWhitespace = char.IsWhiteSpace(after);
-                bool beforePunct = IsAsciiPunctuation(before);
-                bool afterPunct = IsAsciiPunctuation(after);
+                char after  = i < n ? raw[i] : ' ';
+                bool bWs = char.IsWhiteSpace(before), aWs = char.IsWhiteSpace(after);
+                bool bPt = IsAsciiPunct(before),       aPt = IsAsciiPunct(after);
 
-                bool leftFlanking = !afterWhitespace && (!afterPunct || beforeWhitespace || beforePunct);
-                bool rightFlanking = !beforeWhitespace && (!beforePunct || afterWhitespace || afterPunct);
+                bool leftFlanking  = !aWs && (!aPt || bWs || bPt);
+                bool rightFlanking = !bWs && (!bPt || aWs || aPt);
 
-                bool canOpen = leftFlanking;
+                bool canOpen  = leftFlanking;
                 bool canClose = rightFlanking;
-                if (marker == '_')
-                {
-                    // CommonMark intraword underscore restriction.
-                    canOpen = leftFlanking && (!rightFlanking || beforePunct);
-                    canClose = rightFlanking && (!leftFlanking || afterPunct);
-                }
+                if (c == '_')
+                { canOpen = leftFlanking && (!rightFlanking || bPt); canClose = rightFlanking && (!leftFlanking || aPt); }
 
                 FlushPlain();
-                nodes.Add(new TextInline { Text = new string(marker, runLen) });
-                delimiters.Add(new Delimiter
-                {
-                    NodeIndex = nodes.Count - 1,
-                    Marker = marker,
-                    Length = runLen,
-                    CanOpen = canOpen,
-                    CanClose = canClose,
-                });
+                nodes.Add(new TextInline { Text = new string(c, runLen) });
+                delimiters.Add(new Delimiter { NodeIndex = nodes.Count - 1, Marker = c, Length = runLen, CanOpen = canOpen, CanClose = canClose });
                 continue;
             }
 
-            // Emoji shortcode: :code:
-            if (c == ':')
-            {
-                int end = raw.IndexOf(':', i + 1);
-                if (end > i + 1 && end - i - 1 <= 40)
-                {
-                    string code = raw.Substring(i + 1, end - i - 1);
-                    if (IsValidEmojiCodeName(code))
-                    {
-                        string? emoji = MarkdownEmojiTable.Lookup(code);
-                        if (emoji != null)
-                        {
-                            FlushPlain();
-                            nodes.Add(new TextInline { Text = emoji });
-                            i = end + 1;
-                            continue;
-                        }
-                    }
-                }
-            }
-
-            plain.Append(c);
-            i++;
+            plain.Append(c); i++;
         }
 
         FlushPlain();
@@ -277,17 +374,38 @@ public static class MarkdownInlineParser
         return nodes;
     }
 
-    private static bool IsValidEmojiCodeName(string code)
+    private static bool IsValidEmojiName(string s)
     {
-        if (code.Length == 0) return false;
-        foreach (char ch in code)
-            if (!char.IsLetterOrDigit(ch) && ch != '_' && ch != '+' && ch != '-') return false;
-        return true;
+        foreach (char c in s) if (!char.IsLetterOrDigit(c) && c != '_' && c != '+' && c != '-') return false;
+        return s.Length > 0;
     }
 
-    // ------------------------------------------------------------------
-    // Emphasis / strong / strikethrough resolution (delimiter-stack algorithm)
-    // ------------------------------------------------------------------
+    private static int FindPairedChar(string raw, int from, char ch)
+    {
+        for (int i = from; i < raw.Length; i++)
+        {
+            if (raw[i] == '\\' && i + 1 < raw.Length) { i++; continue; }
+            if (raw[i] == ch) return i;
+        }
+        return -1;
+    }
+
+    private static int FindExactBacktickRun(string raw, int from, int runLen)
+    {
+        string target = new('`', runLen);
+        int idx = from;
+        while (true)
+        {
+            int found = raw.IndexOf(target, idx, StringComparison.Ordinal);
+            if (found < 0) return -1;
+            int after = found + runLen;
+            if (after >= raw.Length || raw[after] != '`') return found;
+            idx = after;
+        }
+    }
+
+    // ── Delimiter stack resolution ──────────────────────────────────────
+
     private static void ResolveEmphasis(List<MarkdownInline> nodes, List<Delimiter> delimiters)
     {
         var openersBottom = new Dictionary<char, int>();
@@ -297,73 +415,49 @@ public static class MarkdownInlineParser
             var closer = delimiters[closeIdx];
             if (!closer.Active || !closer.CanClose || closer.Length <= 0) continue;
 
-            int bottom = openersBottom.TryGetValue(closer.Marker, out var b) ? b : 0;
+            int bottom  = openersBottom.TryGetValue(closer.Marker, out var b) ? b : 0;
             int openIdx = -1;
             for (int k = closeIdx - 1; k >= bottom; k--)
             {
                 var cand = delimiters[k];
                 if (!cand.Active || cand.Marker != closer.Marker || !cand.CanOpen || cand.Length <= 0) continue;
-
                 bool oddRule = (cand.CanOpen && cand.CanClose) || (closer.CanOpen && closer.CanClose);
-                if (oddRule && (cand.Length + closer.Length) % 3 == 0 && cand.Length % 3 != 0 && closer.Length % 3 != 0)
-                    continue;
-
-                openIdx = k;
-                break;
+                if (oddRule && (cand.Length + closer.Length) % 3 == 0 && cand.Length % 3 != 0 && closer.Length % 3 != 0) continue;
+                openIdx = k; break;
             }
 
-            if (openIdx < 0)
-            {
-                openersBottom[closer.Marker] = closeIdx;
-                if (!closer.CanOpen) closer.Active = false;
-                continue;
-            }
+            if (openIdx < 0) { openersBottom[closer.Marker] = closeIdx; if (!closer.CanOpen) closer.Active = false; continue; }
 
             var opener = delimiters[openIdx];
+            for (int k = openIdx + 1; k < closeIdx; k++) delimiters[k].Active = false;
 
-            // Delimiters strictly inside the span we are about to wrap become part of its
-            // (literal) content; they must not be reachable as openers for closers further right.
-            for (int k = openIdx + 1; k < closeIdx; k++)
-                delimiters[k].Active = false;
-
-            int use = (closer.Marker == '~') ? 2 : Math.Min(2, Math.Min(opener.Length, closer.Length));
+            int use = closer.Marker == '~' ? 2 : Math.Min(2, Math.Min(opener.Length, closer.Length));
             use = Math.Min(use, Math.Min(opener.Length, closer.Length));
 
-            int openNodeIndex = opener.NodeIndex;
-            int closeNodeIndex = closer.NodeIndex;
+            int openNode  = opener.NodeIndex;
+            int closeNode = closer.NodeIndex;
 
             var children = new List<MarkdownInline>();
-            for (int idx = openNodeIndex + 1; idx < closeNodeIndex; idx++)
-                if (nodes[idx] is not null)
-                    children.Add(nodes[idx]);
+            for (int idx = openNode + 1; idx < closeNode; idx++) if (nodes[idx] is not null) children.Add(nodes[idx]);
 
             MarkdownInline wrapper = (use >= 2)
-                ? (closer.Marker == '~' ? new StrikethroughInline { Children = children } : new StrongInline { Children = children })
+                ? (closer.Marker == '~' ? (MarkdownInline)new StrikethroughInline { Children = children } : new StrongInline { Children = children })
                 : new EmphasisInline { Children = children };
 
-            for (int idx = openNodeIndex + 1; idx < closeNodeIndex; idx++)
-                nodes[idx] = null!;
+            for (int idx = openNode + 1; idx < closeNode; idx++) nodes[idx] = null!;
 
-            opener.Length -= use;
-            closer.Length -= use;
-
-            var openerText = (TextInline)nodes[openNodeIndex]!;
-            openerText.Text = new string(opener.Marker, opener.Length);
-            var closerText = (TextInline)nodes[closeNodeIndex]!;
+            opener.Length -= use; closer.Length -= use;
+            ((TextInline)nodes[openNode]!).Text  = new string(opener.Marker, opener.Length);
+            var closerText = (TextInline)nodes[closeNode]!;
             closerText.Text = new string(closer.Marker, closer.Length);
-
-            nodes[closeNodeIndex] = closerText;
-            nodes.Insert(closeNodeIndex, wrapper);
-            // shift node indices of all delimiters positioned at/after closeNodeIndex by +1 (we inserted a node)
-            foreach (var d in delimiters)
-                if (d.NodeIndex >= closeNodeIndex) d.NodeIndex++;
+            nodes[closeNode] = closerText;
+            nodes.Insert(closeNode, wrapper);
+            foreach (var d in delimiters) if (d.NodeIndex >= closeNode) d.NodeIndex++;
 
             if (opener.Length == 0) opener.Active = false;
-            if (closer.Length == 0) { closer.Active = false; }
-            else { closeIdx--; } // re-test this closer against remaining openers
+            if (closer.Length == 0) closer.Active = false; else closeIdx--;
         }
 
-        // Strip emptied delimiter placeholder text nodes & null holes.
         for (int idx = nodes.Count - 1; idx >= 0; idx--)
         {
             if (nodes[idx] is null) { nodes.RemoveAt(idx); continue; }
@@ -371,336 +465,206 @@ public static class MarkdownInlineParser
         }
     }
 
-    // ------------------------------------------------------------------
-    // Links / images
-    // ------------------------------------------------------------------
+    // ── Link / Image parsing ────────────────────────────────────────────
+
     private static int TryParseLink(string raw, int start, Dictionary<string, LinkReferenceDefinition> refs,
         List<MarkdownInline> nodes, List<Delimiter> delimiters, Action flush)
     {
         int closeBracket = FindMatchingBracket(raw, start);
         if (closeBracket < 0) return 0;
-
         string label = raw.Substring(start + 1, closeBracket - start - 1);
         int after = closeBracket + 1;
 
         if (after < raw.Length && raw[after] == '(')
         {
-            if (TryParseInlineDestination(raw, after, out string url, out string? title, out int consumedLen))
+            if (TryParseInlineDest(raw, after, out string url, out string? title, out int clen))
             {
                 flush();
                 nodes.Add(new LinkInline { Url = url, Title = title, Children = Parse(label, refs) });
-                return after + consumedLen - start;
+                return after + clen - start;
             }
         }
 
-        string refLabel = label;
-        int refConsumed = closeBracket + 1 - start;
+        string refLabel = label; int refConsumed = closeBracket + 1 - start;
         if (after < raw.Length && raw[after] == '[')
         {
             int closeRef = FindMatchingBracket(raw, after);
             if (closeRef > after)
             {
-                string explicitLabel = raw.Substring(after + 1, closeRef - after - 1);
-                if (explicitLabel.Length > 0) refLabel = explicitLabel;
+                string expLabel = raw.Substring(after + 1, closeRef - after - 1);
+                if (expLabel.Length > 0) refLabel = expLabel;
                 refConsumed = closeRef + 1 - start;
             }
         }
-
-        if (refs.TryGetValue(NormalizeLabel(refLabel), out var def))
+        if (refs.TryGetValue(NormLabel(refLabel), out var def))
         {
-            flush();
-            nodes.Add(new LinkInline { Url = def.Url, Title = def.Title, Children = Parse(label, refs) });
+            flush(); nodes.Add(new LinkInline { Url = def.Url, Title = def.Title, Children = Parse(label, refs) });
             return refConsumed;
         }
-
         return 0;
     }
 
     private static int TryParseImage(string raw, int start, Dictionary<string, LinkReferenceDefinition> refs,
         List<MarkdownInline> nodes, Action flush)
     {
-        int bracketStart = start + 1;      // skip '!'
+        int bracketStart = start + 1;
         int closeBracket = FindMatchingBracket(raw, bracketStart);
         if (closeBracket < 0) return 0;
-
-        string alt = raw.Substring(bracketStart + 1, closeBracket - bracketStart - 1);
-        string cleanAlt = StripInlineMarkup(alt);
+        string alt     = raw.Substring(bracketStart + 1, closeBracket - bracketStart - 1);
+        string cleanAlt = StripMarkup(alt);
         int after = closeBracket + 1;
 
-        // Inline: ![alt](url "title")
         if (after < raw.Length && raw[after] == '(')
         {
-            if (TryParseInlineDestination(raw, after, out string url, out string? title, out int consumedLen))
-            {
-                flush();
-                nodes.Add(new ImageInline { Url = url, Title = title, AltText = cleanAlt });
-                return after + consumedLen - start;
-            }
+            if (TryParseInlineDest(raw, after, out string url, out string? title, out int clen))
+            { flush(); nodes.Add(new ImageInline { Url = url, Title = title, AltText = cleanAlt }); return after + clen - start; }
         }
 
-        // Full reference: ![alt][id]  or collapsed: ![alt][]  or shortcut: ![alt]
-        string refLabel = alt;
-        int refConsumed = closeBracket + 1 - start;
-
+        // Full [alt][id] / collapsed [alt][] / shortcut [alt]
+        string refLabel = alt; int refConsumed = closeBracket + 1 - start;
         if (after < raw.Length && raw[after] == '[')
         {
             int closeRef = FindMatchingBracket(raw, after);
             if (closeRef > after)
             {
-                string explicitLabel = raw.Substring(after + 1, closeRef - after - 1);
-                if (explicitLabel.Length > 0) refLabel = explicitLabel;   // ![alt][id] → look up "id"
+                string expLabel = raw.Substring(after + 1, closeRef - after - 1);
+                if (expLabel.Length > 0) refLabel = expLabel;
                 refConsumed = closeRef + 1 - start;
             }
         }
-
-        if (refs.TryGetValue(NormalizeLabel(refLabel), out var def))
-        {
-            flush();
-            nodes.Add(new ImageInline { Url = def.Url, Title = def.Title, AltText = cleanAlt });
-            return refConsumed;
-        }
-
+        if (refs.TryGetValue(NormLabel(refLabel), out var def))
+        { flush(); nodes.Add(new ImageInline { Url = def.Url, Title = def.Title, AltText = cleanAlt }); return refConsumed; }
         return 0;
     }
 
-    private static bool TryParseInlineDestination(string raw, int parenStart, out string url, out string? title, out int consumedLength)
+    private static bool TryParseInlineDest(string raw, int parenStart, out string url, out string? title, out int consumedLen)
     {
-        url = ""; title = null; consumedLength = 0;
-        int i = parenStart + 1;
-        int n = raw.Length;
+        url = ""; title = null; consumedLen = 0;
+        int i = parenStart + 1, n = raw.Length;
         while (i < n && raw[i] == ' ') i++;
-
-        var urlBuilder = new StringBuilder();
+        var ub = new StringBuilder();
         if (i < n && raw[i] == '<')
-        {
-            i++;
-            while (i < n && raw[i] != '>') { urlBuilder.Append(raw[i]); i++; }
-            if (i >= n) return false;
-            i++;
-        }
-        else
-        {
-            int depth = 0;
-            while (i < n)
-            {
-                char c = raw[i];
-                if (c == '(' ) depth++;
-                else if (c == ')') { if (depth == 0) break; depth--; }
-                else if (char.IsWhiteSpace(c)) break;
-                urlBuilder.Append(c);
-                i++;
-            }
-        }
-        url = urlBuilder.ToString();
-
+        { i++; while (i < n && raw[i] != '>') { ub.Append(raw[i]); i++; } if (i >= n) return false; i++; }
+        else { int depth = 0; while (i < n) { char c = raw[i]; if (c == '(') depth++; else if (c == ')') { if (depth == 0) break; depth--; } else if (char.IsWhiteSpace(c)) break; ub.Append(c); i++; } }
+        url = ub.ToString();
         while (i < n && raw[i] == ' ') i++;
         if (i < n && (raw[i] == '"' || raw[i] == '\''))
         {
-            char q = raw[i];
-            i++;
-            var t = new StringBuilder();
-            while (i < n && raw[i] != q) { t.Append(raw[i]); i++; }
-            if (i >= n) return false;
-            i++;
-            title = t.ToString();
+            char q = raw[i]; i++;
+            var tb = new StringBuilder();
+            while (i < n && raw[i] != q) { tb.Append(raw[i]); i++; }
+            if (i >= n) return false; i++;
+            title = tb.ToString();
             while (i < n && raw[i] == ' ') i++;
         }
-
         if (i >= n || raw[i] != ')') return false;
-        i++;
-        consumedLength = i - parenStart;
-        return true;
+        i++; consumedLen = i - parenStart; return true;
     }
 
-    private static int FindMatchingBracket(string raw, int openBracketIndex)
+    private static int FindMatchingBracket(string raw, int open)
     {
         int depth = 0;
-        for (int i = openBracketIndex; i < raw.Length; i++)
+        for (int i = open; i < raw.Length; i++)
         {
             if (raw[i] == '\\') { i++; continue; }
             if (raw[i] == '[') depth++;
-            else if (raw[i] == ']')
-            {
-                depth--;
-                if (depth == 0) return i;
-            }
+            else if (raw[i] == ']') { depth--; if (depth == 0) return i; }
         }
         return -1;
     }
 
-    private static string NormalizeLabel(string label) =>
-        Regex.Replace(label.Trim(), @"\s+", " ").ToLowerInvariant();
+    private static string NormLabel(string l) => Regex.Replace(l.Trim(), @"\s+", " ").ToLowerInvariant();
+    private static string StripMarkup(string t) => Regex.Replace(t, @"[\[\]*_`~^=+]", "");
 
-    private static string StripInlineMarkup(string text) => Regex.Replace(text, @"[\[\]*_`~]", "");
+    // ── Angle constructs (autolinks + safelisted HTML) ──────────────────
 
-    // ------------------------------------------------------------------
-    // <...> constructs: autolinks and a small inline-HTML safelist
-    // ------------------------------------------------------------------
-    private static readonly Regex AutoLinkAngle = new(@"\G<([a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^\s<>]*)>", RegexOptions.Compiled);
+    private static readonly Regex AutoLinkAngle      = new(@"\G<([a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^\s<>]*)>",  RegexOptions.Compiled);
     private static readonly Regex AutoLinkEmailAngle = new(@"\G<([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})>", RegexOptions.Compiled);
 
-    private static int TryParseAngleConstruct(string raw, int i, List<MarkdownInline> nodes, StringBuilder plain, Action flush)
+    private static int TryParseAngleConstruct(string raw, int i, List<MarkdownInline> nodes,
+        StringBuilder plain, Dictionary<string, LinkReferenceDefinition> refs, Action flush)
     {
         var m = AutoLinkAngle.Match(raw, i);
         if (m.Success && m.Index == i)
-        {
-            flush();
-            nodes.Add(new AutoLinkInline { Url = m.Groups[1].Value, DisplayText = m.Groups[1].Value });
-            return m.Length;
-        }
+        { flush(); nodes.Add(new AutoLinkInline { Url = m.Groups[1].Value, DisplayText = m.Groups[1].Value }); return m.Length; }
+
         m = AutoLinkEmailAngle.Match(raw, i);
         if (m.Success && m.Index == i)
+        { flush(); nodes.Add(new AutoLinkInline { Url = "mailto:" + m.Groups[1].Value, DisplayText = m.Groups[1].Value }); return m.Length; }
+
+        // Named inline HTML tags we handle structurally
+        foreach (var (tag, factory) in InlineHtmlTags(refs))
         {
+            if (!TryMatchOpenTag(raw, i, tag, out int openLen)) continue;
+            string closeTag = $"</{tag}>";
+            int close = raw.IndexOf(closeTag, i + openLen, StringComparison.OrdinalIgnoreCase);
+            if (close < 0) continue;
             flush();
-            nodes.Add(new AutoLinkInline { Url = "mailto:" + m.Groups[1].Value, DisplayText = m.Groups[1].Value });
-            return m.Length;
+            string inner = raw.Substring(i + openLen, close - (i + openLen));
+            nodes.Add(factory(inner));
+            return close + closeTag.Length - i;
         }
 
-        if (TryMatchTag(raw, i, "br")) { flush(); nodes.Add(new LineBreakInline { Hard = true }); return TagLength(raw, i); }
+        // <br/>
+        if (TryMatchTag(raw, i, "br")) { flush(); nodes.Add(new LineBreakInline { Hard = true }); return TagLen(raw, i); }
 
-        if (TryMatchOpenTag(raw, i, "sub", out int subLen))
-        {
-            int close = raw.IndexOf("</sub>", i + subLen, StringComparison.OrdinalIgnoreCase);
-            if (close > 0)
-            {
-                flush();
-                string inner = raw.Substring(i + subLen, close - (i + subLen));
-                nodes.Add(new InlineHtmlInline { Kind = InlineHtmlKind.Subscript, Children = Parse(inner, new()) });
-                return close + 6 - i;
-            }
-        }
-        if (TryMatchOpenTag(raw, i, "sup", out int supLen))
-        {
-            int close = raw.IndexOf("</sup>", i + supLen, StringComparison.OrdinalIgnoreCase);
-            if (close > 0)
-            {
-                flush();
-                string inner = raw.Substring(i + supLen, close - (i + supLen));
-                nodes.Add(new InlineHtmlInline { Kind = InlineHtmlKind.Superscript, Children = Parse(inner, new()) });
-                return close + 6 - i;
-            }
-        }
-        if (TryMatchOpenTag(raw, i, "kbd", out int kbdLen))
-        {
-            int close = raw.IndexOf("</kbd>", i + kbdLen, StringComparison.OrdinalIgnoreCase);
-            if (close > 0)
-            {
-                flush();
-                string inner = raw.Substring(i + kbdLen, close - (i + kbdLen));
-                nodes.Add(new InlineHtmlInline { Kind = InlineHtmlKind.KeyboardKey, Children = Parse(inner, new()) });
-                return close + 6 - i;
-            }
-        }
-
-        foreach (var (tag, factory) in new (string, Func<List<MarkdownInline>, MarkdownInline>)[]
-                 {
-                     ("strong", c => new StrongInline { Children = c }),
-                     ("b", c => new StrongInline { Children = c }),
-                     ("em", c => new EmphasisInline { Children = c }),
-                     ("i", c => new EmphasisInline { Children = c }),
-                     ("del", c => new StrikethroughInline { Children = c }),
-                     ("s", c => new StrikethroughInline { Children = c }),
-                     ("code", c => null!), // handled specially below
-                 })
-        {
-            if (tag == "code" && TryMatchOpenTag(raw, i, "code", out int codeLen))
-            {
-                int close = raw.IndexOf("</code>", i + codeLen, StringComparison.OrdinalIgnoreCase);
-                if (close > 0)
-                {
-                    flush();
-                    nodes.Add(new CodeSpanInline { Code = raw.Substring(i + codeLen, close - (i + codeLen)) });
-                    return close + 7 - i;
-                }
-                continue;
-            }
-            if (TryMatchOpenTag(raw, i, tag, out int len))
-            {
-                string closeTag = "</" + tag + ">";
-                int close = raw.IndexOf(closeTag, i + len, StringComparison.OrdinalIgnoreCase);
-                if (close > 0)
-                {
-                    flush();
-                    string inner = raw.Substring(i + len, close - (i + len));
-                    nodes.Add(factory(Parse(inner, new())));
-                    return close + closeTag.Length - i;
-                }
-            }
-        }
-
-        // Unknown / unsupported tag: drop it silently rather than rendering raw angle brackets
-        // that would otherwise look like a parsing glitch.
+        // Drop unknown tags silently
         if (TryMatchAnyTag(raw, i, out int anyLen)) return anyLen;
-
         return 0;
+    }
+
+    private static IEnumerable<(string Tag, Func<string, MarkdownInline> Factory)> InlineHtmlTags(
+        Dictionary<string, LinkReferenceDefinition> refs)
+    {
+        yield return ("ins",    inner => new InsertInline    { Children = Parse(inner, refs) });
+        yield return ("mark",   inner => new MarkInline      { Children = Parse(inner, refs) });
+        yield return ("strong", inner => new StrongInline    { Children = Parse(inner, refs) });
+        yield return ("b",      inner => new StrongInline    { Children = Parse(inner, refs) });
+        yield return ("em",     inner => new EmphasisInline  { Children = Parse(inner, refs) });
+        yield return ("i",      inner => new EmphasisInline  { Children = Parse(inner, refs) });
+        yield return ("del",    inner => new StrikethroughInline { Children = Parse(inner, refs) });
+        yield return ("s",      inner => new StrikethroughInline { Children = Parse(inner, refs) });
+        yield return ("sub",    inner => new SubscriptInline   { Children = Parse(inner, refs) });
+        yield return ("sup",    inner => new SuperscriptInline { Children = Parse(inner, refs) });
+        yield return ("kbd",    inner => new InlineHtmlInline  { TagName = "kbd", Children = Parse(inner, refs) });
+        yield return ("code",   inner => (MarkdownInline)new CodeSpanInline { Code = inner });
     }
 
     private static bool TryMatchTag(string raw, int i, string name)
     {
-        string pattern = "<" + name;
-        if (string.CompareOrdinal(raw, i, pattern, 0, pattern.Length) != 0) return false;
-        int j = i + pattern.Length;
-        while (j < raw.Length && raw[j] != '>') j++;
-        return j < raw.Length;
+        string p = "<" + name; if (!raw.AsSpan(i).StartsWith(p, StringComparison.OrdinalIgnoreCase)) return false;
+        int j = i + p.Length; while (j < raw.Length && raw[j] != '>') j++; return j < raw.Length;
     }
-
-    private static int TagLength(string raw, int i)
-    {
-        int j = i;
-        while (j < raw.Length && raw[j] != '>') j++;
-        return j < raw.Length ? j - i + 1 : raw.Length - i;
-    }
-
+    private static int TagLen(string raw, int i) { int j = i; while (j < raw.Length && raw[j] != '>') j++; return j < raw.Length ? j - i + 1 : raw.Length - i; }
     private static bool TryMatchOpenTag(string raw, int i, string name, out int length)
     {
         length = 0;
-        string pattern = "<" + name;
-        if (i + pattern.Length > raw.Length) return false;
-        if (string.CompareOrdinal(raw, i, pattern, 0, pattern.Length) != 0) return false;
-        int j = i + pattern.Length;
-        if (j < raw.Length && raw[j] != '>' && raw[j] != ' ') return false; // e.g. "<sub2" should not match "sub"
+        string p = "<" + name;
+        if (i + p.Length > raw.Length) return false;
+        if (!raw.AsSpan(i, p.Length).Equals(p.AsSpan(), StringComparison.OrdinalIgnoreCase)) return false;
+        int j = i + p.Length;
+        if (j < raw.Length && raw[j] != '>' && raw[j] != ' ') return false;
         while (j < raw.Length && raw[j] != '>') j++;
         if (j >= raw.Length) return false;
-        length = j - i + 1;
-        return true;
+        length = j - i + 1; return true;
     }
-
     private static bool TryMatchAnyTag(string raw, int i, out int length)
     {
-        length = 0;
-        var m = Regex.Match(raw[i..], @"^</?[a-zA-Z][a-zA-Z0-9-]*(\s+[^<>]*)?/?>");
-        if (!m.Success) return false;
-        length = m.Length;
-        return true;
+        length = 0; var m = Regex.Match(raw[i..], @"^</?[a-zA-Z][a-zA-Z0-9-]*(\s+[^<>]*)?/?>"); if (!m.Success) return false; length = m.Length; return true;
     }
 
-    private static string TrimTrailingAutolinkPunctuation(string url)
+    private static string TrimTrailingPunct(string url)
     {
         while (url.Length > 0 && ".,;:!?".IndexOf(url[^1]) >= 0) url = url[..^1];
-        if (url.EndsWith(')') && url.Count(ch => ch == '(') < url.Count(ch => ch == ')'))
-            url = url[..^1];
+        if (url.EndsWith(')') && url.Count(ch => ch == '(') < url.Count(ch => ch == ')')) url = url[..^1];
         return url;
     }
-
-    private static bool IsAsciiPunctuation(char c) =>
-        (c >= '!' && c <= '/') || (c >= ':' && c <= '@') || (c >= '[' && c <= '`') || (c >= '{' && c <= '~');
-
+    private static bool IsAsciiPunct(char c) => (c >= '!' && c <= '/') || (c >= ':' && c <= '@') || (c >= '[' && c <= '`') || (c >= '{' && c <= '~');
     private static string DecodeEntity(string body)
     {
-        if (body.StartsWith("#x", StringComparison.OrdinalIgnoreCase))
-        {
-            if (int.TryParse(body[2..], System.Globalization.NumberStyles.HexNumber, null, out int code))
-                return char.ConvertFromUtf32(code);
-        }
-        else if (body.StartsWith('#'))
-        {
-            if (int.TryParse(body[1..], out int code))
-                return char.ConvertFromUtf32(code);
-        }
-        else if (NamedEntities.TryGetValue(body, out char ch))
-        {
-            return ch.ToString();
-        }
+        if (body.StartsWith("#x", StringComparison.OrdinalIgnoreCase)) { if (int.TryParse(body[2..], System.Globalization.NumberStyles.HexNumber, null, out int hc)) return char.ConvertFromUtf32(hc); }
+        else if (body.StartsWith('#')) { if (int.TryParse(body[1..], out int dc)) return char.ConvertFromUtf32(dc); }
+        else if (NamedEntities.TryGetValue(body, out char ch)) return ch.ToString();
         return "&" + body + ";";
     }
 }

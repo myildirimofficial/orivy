@@ -2,85 +2,56 @@ using System.Collections.Generic;
 
 namespace Orivy.Controls.Markdown;
 
-/// <summary>Root of a parsed markdown document.</summary>
 public sealed class MarkdownDocument
 {
     public List<MarkdownBlock> Blocks { get; } = new();
-
-    /// <summary>Link reference definitions ("[label]: url \"title\""), keyed case-insensitively.</summary>
     public Dictionary<string, LinkReferenceDefinition> LinkReferences { get; } =
         new(System.StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>Flattened (Level, Text, Slug) outline, populated by the parser for quick TOC use.</summary>
     public List<(int Level, string Text, string Slug)> Outline { get; } = new();
 }
 
 public sealed class LinkReferenceDefinition
 {
-    public string Label = "";
-    public string Url = "";
-    public string? Title;
+    public string Label = ""; public string Url = ""; public string? Title;
 }
 
-// ============================================================================
-// Block-level nodes
-// ============================================================================
+// ── Blocks ─────────────────────────────────────────────────────────────────
 
-public abstract class MarkdownBlock
-{
-    /// <summary>1-based source line, best-effort, for diagnostics only.</summary>
-    public int SourceLine;
-}
+public abstract class MarkdownBlock { public int SourceLine; }
 
 public sealed class HeadingBlock : MarkdownBlock
 {
-    public int Level = 1; // 1..6
-    public List<MarkdownInline> Inlines = new();
-    public string Slug = "";
+    public int Level = 1; public List<MarkdownInline> Inlines = new(); public string Slug = "";
 }
 
-public sealed class ParagraphBlock : MarkdownBlock
-{
-    public List<MarkdownInline> Inlines = new();
-}
+public sealed class ParagraphBlock : MarkdownBlock { public List<MarkdownInline> Inlines = new(); }
 
-public sealed class ThematicBreakBlock : MarkdownBlock
-{
-}
+public sealed class ThematicBreakBlock : MarkdownBlock { }
 
 public sealed class CodeBlockBlock : MarkdownBlock
 {
-    public string Code = "";
-    public string? Language;
-    public bool Fenced;
+    public string Code = ""; public string? Language; public bool Fenced;
 }
 
 public enum ListKind { Unordered, Ordered }
 
 public sealed class ListBlock : MarkdownBlock
 {
-    public ListKind Kind;
-    public int StartNumber = 1;
-    /// <summary>Tight lists render item paragraphs without extra inter-block spacing (CommonMark rule).</summary>
-    public bool Tight = true;
-    public char BulletChar = '-';
+    public ListKind Kind; public int StartNumber = 1;
+    public bool Tight = true; public char BulletChar = '-';
     public List<ListItemBlock> Items = new();
 }
 
 public sealed class ListItemBlock : MarkdownBlock
 {
-    public List<MarkdownBlock> Blocks = new();
-    /// <summary>null = not a task item; otherwise the checked state of a GFM "- [ ]"/"- [x]" item.</summary>
-    public bool? TaskChecked;
+    public List<MarkdownBlock> Blocks = new(); public bool? TaskChecked;
 }
 
 public enum AlertKind { None, Note, Tip, Important, Warning, Caution }
 
 public sealed class BlockQuoteBlock : MarkdownBlock
 {
-    public List<MarkdownBlock> Blocks = new();
-    /// <summary>Set when the quote starts with a GitHub alert marker, e.g. "&gt; [!NOTE]".</summary>
-    public AlertKind AlertKind = AlertKind.None;
+    public List<MarkdownBlock> Blocks = new(); public AlertKind AlertKind = AlertKind.None;
 }
 
 public enum ColumnAlignment { None, Left, Center, Right }
@@ -92,87 +63,88 @@ public sealed class TableBlock : MarkdownBlock
     public List<ColumnAlignment> Alignments = new();
 }
 
-/// <summary>A "&lt;details&gt;&lt;summary&gt;...&lt;/summary&gt; ... &lt;/details&gt;" collapsible section.</summary>
 public sealed class DetailsBlock : MarkdownBlock
 {
-    public string Summary = "Details";
-    public List<MarkdownBlock> Blocks = new();
-    public bool DefaultOpen;
+    public string Summary = "Details"; public List<MarkdownBlock> Blocks = new(); public bool DefaultOpen;
 }
 
-/// <summary>
-/// Any HTML block not recognized by the limited safelist (details/summary). Rendered as
-/// inert, escaped monospace text rather than executed, both for safety and simplicity.
-/// </summary>
-public sealed class RawHtmlBlock : MarkdownBlock
+/// <summary>Custom container block: `::: name ... :::` (markdown-it style).</summary>
+public sealed class ContainerBlock : MarkdownBlock
 {
-    public string Html = "";
+    public string Name = ""; public List<MarkdownBlock> Blocks = new();
 }
 
-// ============================================================================
-// Inline-level nodes
-// ============================================================================
-
-public abstract class MarkdownInline
+/// <summary>Definition list block: `Term\n  ~ Definition`.</summary>
+public sealed class DefinitionListBlock : MarkdownBlock
 {
+    public List<DefinitionEntry> Entries = new();
 }
 
-public sealed class TextInline : MarkdownInline
+public sealed class DefinitionEntry
 {
-    public string Text = "";
+    public List<MarkdownInline> Term = new();
+    public List<List<MarkdownInline>> Definitions = new();
 }
 
-public sealed class EmphasisInline : MarkdownInline
-{
-    public List<MarkdownInline> Children = new();
-}
+public sealed class RawHtmlBlock : MarkdownBlock { public string Html = ""; }
 
-public sealed class StrongInline : MarkdownInline
-{
-    public List<MarkdownInline> Children = new();
-}
+// ── Inlines ────────────────────────────────────────────────────────────────
 
-public sealed class StrikethroughInline : MarkdownInline
-{
-    public List<MarkdownInline> Children = new();
-}
+public abstract class MarkdownInline { }
 
-public sealed class CodeSpanInline : MarkdownInline
-{
-    public string Code = "";
-}
-
-public sealed class LineBreakInline : MarkdownInline
-{
-    /// <summary>True = hard break (trailing "\\" or two+ trailing spaces). False = soft break (collapses to a space).</summary>
-    public bool Hard;
-}
-
+public sealed class TextInline    : MarkdownInline { public string Text = ""; }
+public sealed class EmphasisInline : MarkdownInline { public List<MarkdownInline> Children = new(); }
+public sealed class StrongInline   : MarkdownInline { public List<MarkdownInline> Children = new(); }
+public sealed class StrikethroughInline : MarkdownInline { public List<MarkdownInline> Children = new(); }
+public sealed class CodeSpanInline : MarkdownInline { public string Code = ""; }
+public sealed class LineBreakInline : MarkdownInline { public bool Hard; }
 public sealed class LinkInline : MarkdownInline
 {
-    public string Url = "";
-    public string? Title;
-    public List<MarkdownInline> Children = new();
+    public string Url = ""; public string? Title; public List<MarkdownInline> Children = new();
 }
-
 public sealed class ImageInline : MarkdownInline
 {
-    public string Url = "";
-    public string? Title;
-    public string AltText = "";
+    public string Url = ""; public string? Title; public string AltText = "";
 }
+public sealed class AutoLinkInline : MarkdownInline { public string Url = ""; public string DisplayText = ""; }
 
-public sealed class AutoLinkInline : MarkdownInline
-{
-    public string Url = "";
-    public string DisplayText = "";
-}
+/// <summary>Underline: `<ins>text</ins>` or `++text++`.</summary>
+public sealed class InsertInline : MarkdownInline { public List<MarkdownInline> Children = new(); }
 
-/// <summary>Small safelisted HTML inline tags we understand: sub/sup/kbd.</summary>
-public enum InlineHtmlKind { Subscript, Superscript, KeyboardKey }
+/// <summary>Highlight: `<mark>text</mark>` or `==text==`.</summary>
+public sealed class MarkInline : MarkdownInline { public List<MarkdownInline> Children = new(); }
 
+/// <summary>Superscript: `^text^`.</summary>
+public sealed class SuperscriptInline : MarkdownInline { public List<MarkdownInline> Children = new(); }
+
+/// <summary>Subscript: `~text~` (single tilde; `~~` is strikethrough).</summary>
+public sealed class SubscriptInline : MarkdownInline { public List<MarkdownInline> Children = new(); }
+
+/// <summary>Safelisted HTML: kbd only (sub/sup/ins/mark handled as dedicated nodes above).</summary>
 public sealed class InlineHtmlInline : MarkdownInline
 {
-    public InlineHtmlKind Kind;
     public List<MarkdownInline> Children = new();
+    public string TagName = ""; // "kbd"
+}
+
+// ── Footnotes ──────────────────────────────────────────────────────────────
+
+/// <summary>Inline footnote reference: `[^label]` renders as superscript link.</summary>
+public sealed class FootnoteRefInline : MarkdownInline
+{
+    public string Label = "";   // The footnote label (e.g. "first")
+    public int    Number;        // 1-based order of first use
+}
+
+/// <summary>Block that collects all footnote definitions at document end.</summary>
+public sealed class FootnotesBlock : MarkdownBlock
+{
+    public List<FootnoteDefinition> Definitions = new();
+}
+
+public sealed class FootnoteDefinition
+{
+    public string            Label  = "";
+    public int               Number;          // 1-based order
+    public List<MarkdownBlock> Blocks = new();
 }

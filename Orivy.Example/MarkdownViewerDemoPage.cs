@@ -1,4 +1,5 @@
 using Orivy.Controls;
+using Orivy.Controls.Markdown;
 using Orivy.Controls.RichText;
 using SkiaSharp;
 using System;
@@ -7,7 +8,7 @@ namespace Orivy.Example;
 
 internal sealed partial class MarkdownViewerDemoPage : Container
 {
-    private RichTextBox viewer = null!;
+    private MarkdownViewer viewer = null!;
     private TextBox editor = null!;
 
     public MarkdownViewerDemoPage()
@@ -41,11 +42,9 @@ internal sealed partial class MarkdownViewerDemoPage : Container
         {
             Name = "markdownViewer",
             Dock = DockStyle.Fill,
-            Mode = RichTextMode.MarkdownPreview,
             Margin = new(0),
             Text = editor.Text,
             AutoScroll = true,
-            Multiline = true,
             //AutoScrollMargin = new(0, 24),
         };
 

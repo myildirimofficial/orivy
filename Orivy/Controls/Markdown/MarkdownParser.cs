@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -34,8 +35,11 @@ public static class MarkdownParser
         {
             var lines = Preprocess(source ?? "");
             lines = ExtractLinkReferenceDefinitions(lines, doc);
+            lines = ExtractFootnoteDefinitions(lines, doc);
             var usedSlugs = new HashSet<string>();
             doc.Blocks.AddRange(ParseBlockSequence(lines, doc, usedSlugs));
+            // Append collected footnote definitions as a FootnotesBlock at the end
+            AppendFootnotesBlock(doc);
         }
         catch
         {
@@ -187,6 +191,130 @@ public static class MarkdownParser
     private static string NormalizeRefLabel(string label) => Regex.Replace(label.Trim(), @"\s+", " ").ToLowerInvariant();
 
     // ------------------------------------------------------------------
+    // Footnote definition extraction (GitHub-flavored Markdown extension)
+    // [^label]: content — must start at column 0
+    // ------------------------------------------------------------------
+    private static readonly System.Text.RegularExpressions.Regex FootnoteDefRegex =
+        new(@"^\[\^([^\]]+)\]:\s*(.*)", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    // Stores raw body lines keyed by label so we can parse them inline later
+    private static readonly System.Collections.Generic.Dictionary<string, List<string>> _fnBodies = new(System.StringComparer.OrdinalIgnoreCase);
+
+    private static List<string> ExtractFootnoteDefinitions(List<string> lines, MarkdownDocument doc)
+    {
+        // We need per-call state (not static) — use a local dict
+        var fnBodies = new System.Collections.Generic.Dictionary<string, List<string>>(System.StringComparer.OrdinalIgnoreCase);
+        var fnOrder  = new List<string>(); // insertion order
+
+        bool inFence = false; string fenceMarker = "";
+        string? currentLabel = null;
+
+        var result = new List<string>(lines.Count);
+
+        foreach (var line in lines)
+        {
+            string ts = line.TrimStart();
+
+            // Track fenced code blocks — don't parse inside them
+            if (!inFence && (ts.StartsWith("```") || ts.StartsWith("~~~")))
+            { inFence = true; fenceMarker = ts[..3]; }
+            else if (inFence && ts.StartsWith(fenceMarker, StringComparison.Ordinal))
+            { inFence = false; }
+
+            if (inFence) { result.Add(line); currentLabel = null; continue; }
+
+            var m = FootnoteDefRegex.Match(line);
+            if (m.Success)
+            {
+                currentLabel = m.Groups[1].Value.Trim();
+                string firstLine = m.Groups[2].Value;
+                if (!fnBodies.ContainsKey(currentLabel))
+                {
+                    fnBodies[currentLabel] = new List<string> { firstLine };
+                    fnOrder.Add(currentLabel);
+                }
+                // Don't add to result — remove from block stream
+                continue;
+            }
+
+            // Continuation lines of a footnote (indented by 4 spaces or 1 tab)
+            if (currentLabel != null && (line.StartsWith("    ") || line.StartsWith("	")))
+            {
+                string body = line.StartsWith("	") ? line[1..] : line[4..];
+                fnBodies[currentLabel].Add(body);
+                continue;
+            }
+
+            // Any other non-empty line ends continuation
+            if (!string.IsNullOrWhiteSpace(line)) currentLabel = null;
+            result.Add(line);
+        }
+
+        // Store parsed footnote body lines into the doc for later use in AppendFootnotesBlock
+        if (fnOrder.Count > 0)
+        {
+            // Attach to doc via a temporary holder using the doc object itself (thread-safe per parse call)
+            doc.LinkReferences["__footnotes__count"] = new LinkReferenceDefinition
+                { Label = "__footnotes__", Url = fnOrder.Count.ToString() };
+            for (int i = 0; i < fnOrder.Count; i++)
+            {
+                string label = fnOrder[i];
+                string bodyKey = $"__fn__{label}";
+                // Store body joined; we'll re-split on parse
+                doc.LinkReferences[bodyKey] = new LinkReferenceDefinition
+                    { Label = label, Url = string.Join("\n", fnBodies[label]) };
+            }
+        }
+
+        return result;
+    }
+
+    private static void AppendFootnotesBlock(MarkdownDocument doc)
+    {
+        if (!doc.LinkReferences.TryGetValue("__footnotes__count", out var countRef)) return;
+        if (!int.TryParse(countRef.Url, out int count) || count == 0) return;
+
+        var fnBlock = new FootnotesBlock();
+        var usedSlugs = new HashSet<string>();
+
+        for (int i = 0; i < count; i++)
+        {
+            // Recover labels in order
+            // We stored them 0-based but need to scan to find them
+        }
+
+        // Reconstruct order by scanning LinkReferences for __fn__ keys
+        var defs = new List<FootnoteDefinition>();
+        var fnKeys = new List<string>();
+        foreach (var key in doc.LinkReferences.Keys)
+            if (key.StartsWith("__fn__", StringComparison.OrdinalIgnoreCase) && !key.StartsWith("__fn__order"))
+                fnKeys.Add(key);
+
+        // Sort by number stored in the ref (Url holds the raw body; we use the label)
+        // We'll build them in the order they were added (dict is ordered in .NET 5+)
+        int num = 1;
+        foreach (var key in fnKeys)
+        {
+            var refDef = doc.LinkReferences[key];
+            string label = refDef.Label;
+            string body  = refDef.Url;
+            var bodyLines = body.Split('\n').ToList();
+            var bodyBlocks = ParseBlockSequence(bodyLines, doc, usedSlugs);
+            defs.Add(new FootnoteDefinition { Label = label, Number = num++, Blocks = bodyBlocks });
+
+            // Also register a link reference so [^label] can resolve anchor
+            string anchor = $"fn-{label.ToLowerInvariant()}";
+            doc.LinkReferences[$"__fnref__{label}"] = new LinkReferenceDefinition
+                { Label = label, Url = $"#fn-{label.ToLowerInvariant()}" };
+        }
+
+        fnBlock.Definitions = defs;
+        if (defs.Count > 0)
+            doc.Blocks.Add(fnBlock);
+    }
+
+
+    // ------------------------------------------------------------------
     // Block sequence (recursive: top level, blockquote contents, list item contents, details contents)
     // ------------------------------------------------------------------
     private static List<MarkdownBlock> ParseBlockSequence(List<string> lines, MarkdownDocument doc, HashSet<string> usedSlugs)
@@ -202,6 +330,31 @@ public static class MarkdownParser
 
             int indent = LeadingSpaces(line);
             string trimmed = line.TrimStart();
+
+            // ── Custom container ::: name ─────────────────────────────────
+            if (indent < 4 && trimmed.StartsWith(":::"))
+            {
+                string name = trimmed[3..].Trim();
+                if (!name.StartsWith(":"))  // avoid :::: being treated as a container
+                {
+                    int endIdx = i + 1;
+                    while (endIdx < n && !lines[endIdx].TrimStart().StartsWith(":::")) endIdx++;
+                    var innerLines = lines.GetRange(i + 1, Math.Max(0, endIdx - i - 1));
+                    var innerBlocks = ParseBlockSequence(innerLines, doc, usedSlugs);
+                    blocks.Add(new ContainerBlock { Name = name, Blocks = innerBlocks, SourceLine = i + 1 });
+                    i = endIdx < n ? endIdx + 1 : endIdx;
+                    continue;
+                }
+            }
+
+            // ── Definition list (Term\n  ~ Def) ──────────────────────────
+            if (indent < 4 && i + 1 < n && IsDefinitionStart(lines[i + 1]))
+            {
+                int consumed = ParseDefinitionList(lines, i, doc, out var defList);
+                blocks.Add(defList);
+                i += Math.Max(1, consumed);
+                continue;
+            }
 
             if (indent < 4 && IsThematicBreak(trimmed))
             {
@@ -778,7 +931,46 @@ public static class MarkdownParser
             RegexOptions.IgnoreCase);
 
     // ------------------------------------------------------------------
-    // Slugs (heading anchors, used by MarkdownViewer's outline / ScrollToHeading API)
+    // Definition list
+    // ------------------------------------------------------------------
+    private static bool IsDefinitionStart(string line)
+    {
+        string t = line.TrimStart();
+        return t.StartsWith("~") && t.Length > 1 && (t[1] == ' ' || t[1] == '\t');
+    }
+
+    private static int ParseDefinitionList(List<string> lines, int start, MarkdownDocument doc, out DefinitionListBlock defList)
+    {
+        defList = new DefinitionListBlock { SourceLine = start + 1 };
+        int i = start, n = lines.Count;
+
+        while (i < n)
+        {
+            if (string.IsNullOrWhiteSpace(lines[i])) { i++; continue; }
+
+            // A non-blank, non-definition line that is followed by a definition line = a term
+            if (i + 1 < n && IsDefinitionStart(lines[i + 1]) && !IsDefinitionStart(lines[i].TrimStart()))
+            {
+                string termText = lines[i].Trim();
+                var entry = new DefinitionEntry { Term = MarkdownInlineParser.Parse(termText, doc.LinkReferences) };
+                i++;
+                while (i < n && IsDefinitionStart(lines[i].TrimStart()))
+                {
+                    string defText = lines[i].TrimStart()[1..].TrimStart();
+                    entry.Definitions.Add(MarkdownInlineParser.Parse(defText, doc.LinkReferences));
+                    i++;
+                }
+                defList.Entries.Add(entry);
+                continue;
+            }
+            break;
+        }
+
+        return i - start;
+    }
+
+    // ------------------------------------------------------------------
+    // Slugs
     // ------------------------------------------------------------------
     private static string MakeSlug(string headingText, HashSet<string> usedSlugs)
     {

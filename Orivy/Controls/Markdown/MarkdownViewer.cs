@@ -48,11 +48,13 @@ public class MarkdownViewer : ElementBase
 
     // ── Code-block horizontal drag-scroll ────────────────────────────────
     private CodeBlockBox? _draggingCodeBlock;
+    private TableBox?     _draggingTable;
     private float _dragStartScrollX;
     private float _dragStartMouseX;
 
     // ── Text selection ───────────────────────────────────────────────────
     private readonly MarkdownSelectionState _selection = new();
+    private SKPoint _mouseDownContent;  // content-space mouse-down point for drag detection
 
     // ── Copy-button "just copied" flash ─────────────────────────────────
     private CodeBlockBox? _copiedCodeBlock;
@@ -139,6 +141,7 @@ public class MarkdownViewer : ElementBase
         for (int idx = from.BoxIndex; idx <= to.BoxIndex && idx < _boxes.Count; idx++)
         {
             if (_boxes[idx] is not TextRunBox run) continue;
+            if (run.IsNewlineSentinel) continue;
             int s = idx == from.BoxIndex ? from.CharOffset : 0;
             int e = idx == to.BoxIndex   ? to.CharOffset   : run.Text.Length;
             if (s < e && e <= run.Text.Length)
@@ -327,14 +330,17 @@ public class MarkdownViewer : ElementBase
         public readonly DetailsBlock?   Details;
         public readonly TextRunBox?     TextRun;
         public readonly int             TextRunBoxIndex;
+        public readonly TableBox?       TableBox;
 
         public HitResult(LinkInline? link, ListItemBlock? checkbox, ImageInline? image,
             CodeBlockBox? codeBlock, bool overCopy, DetailsBlock? details,
-            TextRunBox? textRun = null, int textRunBoxIndex = -1)
+            TextRunBox? textRun = null, int textRunBoxIndex = -1,
+            TableBox? tableBox = null)
         {
             Link = link; Checkbox = checkbox; Image = image;
             CodeBlock = codeBlock; OverCopyButton = overCopy; Details = details;
             TextRun = textRun; TextRunBoxIndex = textRunBoxIndex;
+            TableBox = tableBox;
         }
 
         public static readonly HitResult None = new(null, null, null, null, false, null);
@@ -342,7 +348,6 @@ public class MarkdownViewer : ElementBase
 
     private HitResult HitTestBoxes(SKPoint p)
     {
-        // Traverse back-to-front (highest z-order first)
         for (int i = _boxes.Count - 1; i >= 0; i--)
         {
             var box = _boxes[i];
@@ -352,6 +357,8 @@ public class MarkdownViewer : ElementBase
             {
                 case CodeBlockBox code:
                     return new HitResult(null, null, null, code, code.CopyButtonRect.Contains(p), null);
+                case TableBox tbl:
+                    return new HitResult(null, null, null, null, false, null, tableBox: tbl);
                 case DetailsHeaderBox dh:
                     return new HitResult(null, null, null, null, false, dh.Source);
                 case CheckboxBox cb:
@@ -359,22 +366,82 @@ public class MarkdownViewer : ElementBase
                 case ImageBox img:
                     return new HitResult(img.Link, null, img.Source, null, false, null);
                 case TextRunBox t:
-                    // Link hit-tests on the exact character run that carries the link,
-                    // but we also return the run + index for selection regardless.
-                    return new HitResult(t.Link, null, null, null, false, null, t, i);
+                    return new HitResult(t.Link, null, null, t.CodeOwner, false, null, t, i);
             }
         }
         return HitResult.None;
     }
 
-    /// <summary>Returns the TextRunBox and box-list index at a content point, or null.</summary>
+    /// <summary>
+    /// Returns the TextRunBox and its list index closest to <paramref name="contentPoint"/>.
+    /// Uses Y-band matching first (same text line), then nearest horizontal run.
+    /// This makes selection stable even when the mouse is between word-wrapped lines.
+    /// </summary>
+    private (TextRunBox? run, int index) FindNearestTextRun(SKPoint contentPoint)
+    {
+        TextRunBox? bestRun  = null;
+        int         bestIdx  = -1;
+        float       bestDist = float.MaxValue;
+
+        for (int i = 0; i < _boxes.Count; i++)
+        {
+            if (_boxes[i] is not TextRunBox t) continue;
+            if (t.IsNewlineSentinel) continue;
+
+            // For code-block-owned runs the effective X is shifted by the scroll offset
+            float effectiveX = contentPoint.X + (t.CodeOwner?.Scroll.ScrollX ?? 0f);
+
+            // Vertical: use an expanded hit band (±2px) so gaps between lines still hit
+            float yMid  = (t.Bounds.Top + t.Bounds.Bottom) * 0.5f;
+            float yDist = MathF.Max(0f, MathF.Abs(contentPoint.Y - yMid) - t.Bounds.Height * 0.5f);
+
+            // Skip code runs outside the owner's body rect (clipped by the renderer)
+            if (t.CodeOwner != null)
+            {
+                float scrolledX = t.Bounds.Left - t.CodeOwner.Scroll.ScrollX;
+                if (scrolledX + t.Bounds.Width < t.CodeOwner.BodyRect.Left ||
+                    scrolledX > t.CodeOwner.BodyRect.Right) continue;
+            }
+
+            // Horizontal: clamp to run width
+            float xLeft  = t.Bounds.Left;
+            float xRight = t.Bounds.Right;
+            float xDist  = effectiveX < xLeft  ? xLeft  - effectiveX
+                         : effectiveX > xRight  ? effectiveX - xRight : 0f;
+
+            float dist = yDist * 4f + xDist;   // weight Y more than X
+
+            if (dist < bestDist) { bestDist = dist; bestRun = t; bestIdx = i; }
+        }
+
+        return (bestRun, bestIdx);
+    }
+
+    /// <summary>Returns the character range of the word at <paramref name="charOffset"/> within <paramref name="text"/>.</summary>
+    private static (int Start, int End) FindWordBounds(string text, int charOffset)
+    {
+        if (string.IsNullOrEmpty(text)) return (0, 0);
+        charOffset = Math.Clamp(charOffset, 0, text.Length);
+
+        static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';
+
+        int start = charOffset;
+        while (start > 0 && IsWordChar(text[start - 1])) start--;
+
+        int end = charOffset;
+        while (end < text.Length && IsWordChar(text[end])) end++;
+
+        // If no word chars at offset, select the single non-word char
+        if (start == end && end < text.Length) end++;
+
+        return (start, end);
+    }
+
     private (TextRunBox? run, int index) FindTextRunAt(SKPoint contentPoint)
     {
         for (int i = _boxes.Count - 1; i >= 0; i--)
-        {
             if (_boxes[i] is TextRunBox t && t.Bounds.Contains(contentPoint))
                 return (t, i);
-        }
         return (null, -1);
     }
 
@@ -410,11 +477,22 @@ public class MarkdownViewer : ElementBase
             return;
         }
 
+        // ── Table horizontal drag ──
+        if (_draggingTable != null)
+        {
+            float dx        = e.X - _dragStartMouseX;
+            float maxScroll = Math.Max(0f, _draggingTable.ContentWidth - _draggingTable.ViewportWidth);
+            // Dragging left = positive dx → content moves right → scroll decreases
+            _draggingTable.Scroll.ScrollX = Math.Clamp(_dragStartScrollX - dx, 0f, maxScroll);
+            Invalidate();
+            return;
+        }
+
         // ── Text selection drag ──
         if (_selection.IsSelecting)
         {
             var contentPoint = new SKPoint(e.X, e.Y + GetVerticalScrollOffset());
-            var (run, idx)   = FindTextRunAt(contentPoint);
+            var (run, idx) = FindNearestTextRun(contentPoint);
             if (run != null)
             {
                 float localX = contentPoint.X - run.Bounds.Left;
@@ -445,13 +523,26 @@ public class MarkdownViewer : ElementBase
         var hit = HitTestBoxes(contentPoint);
 
         // Code-block horizontal drag
-        if (hit.CodeBlock != null && hit.CodeBlock.NeedsHorizontalScroll && !hit.OverCopyButton)
+        if (hit.CodeBlock != null && hit.CodeBlock.NeedsHorizontalScroll && !hit.OverCopyButton
+            && hit.TextRun == null)
         {
             _draggingCodeBlock = hit.CodeBlock;
             _dragStartScrollX  = hit.CodeBlock.Scroll.ScrollX;
             _dragStartMouseX   = e.X;
             return;
         }
+
+        // Table horizontal drag
+        if (hit.TableBox != null && hit.TableBox.NeedsHorizontalScroll)
+        {
+            _draggingTable    = hit.TableBox;
+            _dragStartScrollX = hit.TableBox.Scroll.ScrollX;
+            _dragStartMouseX  = e.X;
+            return;
+        }
+
+        // Track the content-space down point for drag vs click detection
+        _mouseDownContent = contentPoint;
 
         // Begin text selection
         if (hit.TextRun != null)
@@ -478,6 +569,7 @@ public class MarkdownViewer : ElementBase
     {
         base.OnMouseUp(e);
         _draggingCodeBlock    = null;
+        _draggingTable        = null;
         _selection.IsSelecting = false;
     }
 
@@ -490,6 +582,7 @@ public class MarkdownViewer : ElementBase
         base.OnMouseLeave(e);
         ClearHover();
         _draggingCodeBlock     = null;
+        _draggingTable         = null;
         _selection.IsSelecting = false;
     }
 
@@ -527,15 +620,17 @@ public class MarkdownViewer : ElementBase
         // ── Link ──
         if (hit.Link != null)
         {
-            var args = new MarkdownLinkEventArgs(hit.Link.Url, hit.Link.Title,
-                MarkdownParser.PlainText(hit.Link.Children));
-            if (LinkClicked != null)
+            // Suppress link navigation when the user dragged to select text
+            var contentPoint2 = new SKPoint(e.X, e.Y + GetVerticalScrollOffset());
+            float dragDist = SKPoint.Distance(contentPoint2, _mouseDownContent);
+            if (dragDist < 4f)
             {
-                LinkClicked.Invoke(this, args);
-            }
-            else if (AutoOpenLinks)
-            {
-                OpenInDefaultBrowser(hit.Link.Url);
+                var args = new MarkdownLinkEventArgs(hit.Link.Url, hit.Link.Title,
+                    MarkdownParser.PlainText(hit.Link.Children));
+                if (LinkClicked != null)
+                    LinkClicked.Invoke(this, args);
+                else if (AutoOpenLinks)
+                    OpenInDefaultBrowser(hit.Link.Url);
             }
             return;
         }
@@ -570,21 +665,46 @@ public class MarkdownViewer : ElementBase
         }
     }
 
+    // ====================================================================
+    // Clipboard — Win32 P/Invoke (reliable on all Windows UI frameworks)
+    // ====================================================================
+
     private static void TryCopyToClipboard(string text)
     {
+        if (string.IsNullOrEmpty(text)) return;
         try
         {
-            // Use the Windows clipboard API via P/Invoke when the framework
-            // doesn't expose its own Clipboard type.
-#if WINDOWS
-            System.Windows.Clipboard.SetText(text);
-#else
-            // Cross-platform fallback: write to a temp file and rely on xclip/pbcopy
-            _ = text; // no-op on unsupported platforms; host should handle CodeCopyRequested
-#endif
+            if (!OpenClipboard(IntPtr.Zero)) return;
+            EmptyClipboard();
+            byte[] bytes = System.Text.Encoding.Unicode.GetBytes(text + "\0");
+            var hMem = GlobalAlloc(0x0042u /* GMEM_MOVEABLE | GMEM_ZEROINIT */, (UIntPtr)(uint)bytes.Length);
+            if (hMem == IntPtr.Zero) { CloseClipboard(); return; }
+            var ptr = GlobalLock(hMem);
+            if (ptr != IntPtr.Zero)
+            {
+                System.Runtime.InteropServices.Marshal.Copy(bytes, 0, ptr, bytes.Length);
+                GlobalUnlock(hMem);
+            }
+            SetClipboardData(13u /* CF_UNICODETEXT */, hMem);
         }
         catch { /* clipboard access can fail silently */ }
+        finally { try { CloseClipboard(); } catch { } }
     }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern bool OpenClipboard(IntPtr hWndNewOwner);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool EmptyClipboard();
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr SetClipboardData(uint uFormat, IntPtr hMem);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool CloseClipboard();
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern IntPtr GlobalAlloc(uint uFlags, UIntPtr dwBytes);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern IntPtr GlobalLock(IntPtr hMem);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern bool GlobalUnlock(IntPtr hMem);
 
     // ====================================================================
     // Mouse — wheel  (vertical page scroll + code-block horizontal scroll)
@@ -592,32 +712,44 @@ public class MarkdownViewer : ElementBase
 
     internal override void OnMouseWheel(MouseEventArgs e)
     {
-        // 1. Horizontal wheel or Shift+wheel on a hovered scrollable code block
-        if (_hover.HoveredCodeBlock != null && _hover.HoveredCodeBlock.NeedsHorizontalScroll)
+        // Horizontal wheel or Shift+wheel → scroll code block / table horizontally
+        bool isHorizontal = e.IsHorizontalWheel || (ModifierKeys & Keys.Shift) != 0;
+
+        if (isHorizontal)
         {
-            bool wantsHorizontal = e.IsHorizontalWheel || WantsHorizontalMouseWheel(e);
-            if (wantsHorizontal)
+            if (_hover.HoveredCodeBlock != null && _hover.HoveredCodeBlock.NeedsHorizontalScroll)
             {
-                ScrollCodeBlockHorizontal(_hover.HoveredCodeBlock, e.Delta);
+                ScrollCodeBlockHorizontal(_hover.HoveredCodeBlock, e.IsHorizontalWheel ? e.Delta : -e.Delta);
                 Invalidate();
+                e.Handled = true;
+                return;
+            }
+            if (_hover.HoveredTableBox != null && _hover.HoveredTableBox.NeedsHorizontalScroll)
+            {
+                ScrollTableHorizontal(_hover.HoveredTableBox, e.IsHorizontalWheel ? e.Delta : -e.Delta);
+                Invalidate();
+                e.Handled = true;
                 return;
             }
         }
 
-        // 2. Plain vertical wheel on a code block body → scroll the code block
-        //    horizontally only if the code block consumes horizontal, otherwise
-        //    fall through to the page-level vertical scroll below.
-        //    (No special horizontal-wheel guard here — vertical wheel scrolls the page.)
-
-        // 3. Delegate to base (vertical page scroll via _vScrollBar.ApplyWheelDelta)
+        // Vertical wheel → always pass to base for page scroll
         base.OnMouseWheel(e);
+    }
+
+    private void ScrollTableHorizontal(TableBox tbl, int delta)
+    {
+        float maxScroll = Math.Max(0f, tbl.ContentWidth - tbl.ViewportWidth);
+        float step = 40f * ScaleFactor * (Math.Abs(delta) / 120f);
+        // Positive delta = wheel up/right → scroll content left (ScrollX decreases)
+        tbl.Scroll.ScrollX = Math.Clamp(tbl.Scroll.ScrollX + (delta > 0 ? -step : step), 0f, maxScroll);
     }
 
     private void ScrollCodeBlockHorizontal(CodeBlockBox cb, int delta)
     {
         float maxScroll = Math.Max(0f, cb.ContentWidth - cb.ViewportWidth);
-        float step      = 40f * ScaleFactor * (delta / 120f);
-        cb.Scroll.ScrollX = Math.Clamp(cb.Scroll.ScrollX - step, 0f, maxScroll);
+        float step = 40f * ScaleFactor * (Math.Abs(delta) / 120f);
+        cb.Scroll.ScrollX = Math.Clamp(cb.Scroll.ScrollX + (delta > 0 ? -step : step), 0f, maxScroll);
     }
 
     // ====================================================================
@@ -693,11 +825,14 @@ public class MarkdownViewer : ElementBase
 
     private void ClearHover()
     {
-        bool changed = _hover.HoveredLink != null || _hover.HoveredCodeBlock != null || _hover.HoveredText;
+        bool changed = _hover.HoveredLink != null || _hover.HoveredCodeBlock != null
+                    || _hover.HoveredCopyButton || _hover.HoveredText
+                    || _hover.HoveredTableBox != null;
         _hover.HoveredLink      = null;
         _hover.HoveredCodeBlock = null;
         _hover.HoveredCopyButton = false;
         _hover.HoveredText      = false;
+        _hover.HoveredTableBox  = null;
         if (changed) Invalidate();
         Cursor = Cursors.Default;
     }
@@ -710,12 +845,14 @@ public class MarkdownViewer : ElementBase
             !ReferenceEquals(_hover.HoveredLink,      hit.Link)      ||
             !ReferenceEquals(_hover.HoveredCodeBlock, hit.CodeBlock) ||
             _hover.HoveredCopyButton != hit.OverCopyButton           ||
-            _hover.HoveredText       != isText;
+            _hover.HoveredText       != isText                       ||
+            !ReferenceEquals(_hover.HoveredTableBox,  hit.TableBox);
 
         _hover.HoveredLink       = hit.Link;
         _hover.HoveredCodeBlock  = hit.CodeBlock;
         _hover.HoveredCopyButton = hit.OverCopyButton;
         _hover.HoveredText       = isText;
+        _hover.HoveredTableBox   = hit.TableBox;
 
         // Cursor
         if (hit.Link != null || hit.OverCopyButton || hit.Checkbox != null || hit.Details != null)
@@ -726,6 +863,30 @@ public class MarkdownViewer : ElementBase
             Cursor = Cursors.Default;
 
         if (changed) Invalidate();
+    }
+
+    // ====================================================================
+    // Double-click — word selection
+    // ====================================================================
+
+    internal override void OnMouseDoubleClick(MouseEventArgs e)
+    {
+        base.OnMouseDoubleClick(e);
+        if (e.Button != MouseButtons.Left) return;
+        if (IsOverOwnScrollBar(e.Location)) return;
+
+        var cp = new SKPoint(e.X, e.Y + GetVerticalScrollOffset());
+        var (run, idx) = FindTextRunAt(cp);
+        if (run == null || idx < 0) return;
+
+        float localX  = cp.X - run.Bounds.Left;
+        int   offset  = run.GetCharOffsetAt(localX);
+        var (ws, we)  = FindWordBounds(run.Text, offset);
+
+        _selection.Start      = new TextPosition { BoxIndex = idx, CharOffset = ws };
+        _selection.End        = new TextPosition { BoxIndex = idx, CharOffset = we };
+        _selection.IsSelecting = false;
+        Invalidate();
     }
 
     // ====================================================================
