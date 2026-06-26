@@ -805,7 +805,7 @@ public partial class TabView : ElementBase
         _onNewTabButtonClick?.Invoke(this, EventArgs.Empty);
     }
 
-    internal override void OnControlAdded(ElementEventArgs e)
+    public override void  OnControlAdded(ElementEventArgs e)
     {
         base.OnControlAdded(e);
 
@@ -830,7 +830,7 @@ public partial class TabView : ElementBase
         CancelTransitionPreservingSelection();
     }
 
-    internal override void OnControlRemoved(ElementEventArgs e)
+    public override void  OnControlRemoved(ElementEventArgs e)
     {
         base.OnControlRemoved(e);
 
@@ -851,7 +851,7 @@ public partial class TabView : ElementBase
         CancelTransitionPreservingSelection();
     }
 
-    internal override void OnVisibleChanged(EventArgs e)
+    public override void  OnVisibleChanged(EventArgs e)
     {
         base.OnVisibleChanged(e);
 
@@ -862,7 +862,7 @@ public partial class TabView : ElementBase
             ResetTitleBarHoverState();
     }
 
-    internal override void OnSizeChanged(EventArgs e)
+    public override void  OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
         SyncAllPageBounds();
@@ -885,13 +885,13 @@ public partial class TabView : ElementBase
         return ReferenceEquals(targetPage, element);
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         FinalizeCompletedTransitionIfPending();
         base.OnPaint(canvas);
     }
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         // Ensure chevron rects and scroll metrics are current before any
         // hit-testing. Without this the chevron rects can be stale after a
@@ -939,7 +939,7 @@ public partial class TabView : ElementBase
         base.OnMouseDown(e);
     }
 
-    protected internal override void OnMouseClick(MouseEventArgs e)
+    public override void  OnMouseClick(MouseEventArgs e)
     {
         base.OnMouseClick(e);
 
@@ -965,7 +965,7 @@ public partial class TabView : ElementBase
             RaiseTabCloseButtonClick(middleClickTabIndex);
     }
 
-    internal override void OnMouseMove(MouseEventArgs e)
+    public override void  OnMouseMove(MouseEventArgs e)
     {
         if (_isResizingTabStrip)
         {
@@ -1061,7 +1061,7 @@ public partial class TabView : ElementBase
         Invalidate();
     }
 
-    internal override void OnMouseWheel(MouseEventArgs e)
+    public override void  OnMouseWheel(MouseEventArgs e)
     {
         if (UsesVerticalTabLayout && ShouldDrawTabStrip && !e.IsHorizontalWheel)
         {
@@ -1101,7 +1101,7 @@ public partial class TabView : ElementBase
         base.OnMouseWheel(e);
     }
 
-    internal override void OnMouseLeave(EventArgs e)
+    public override void  OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
 
@@ -1219,13 +1219,13 @@ public partial class TabView : ElementBase
         }
     }
 
-    protected override void OnImageAlignChanged(EventArgs e)
+    public override void  OnImageAlignChanged(EventArgs e)
     {
         base.OnImageAlignChanged(e);
         InvalidateTabChrome();
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {
@@ -1974,7 +1974,7 @@ public partial class TabView : ElementBase
         }
     }
 
-    internal override void OnMouseUp(MouseEventArgs e)
+    public override void  OnMouseUp(MouseEventArgs e)
     {
         if (_isResizingTabStrip)
         {

@@ -240,7 +240,7 @@ public sealed class NotificationToast : ElementBase
 
 	protected override bool HandlesMouseWheelScroll => false;
 
-	protected override void InvalidateFontCache()
+	public override void  InvalidateFontCache()
 	{
 		ClearFontCache();
 		base.InvalidateFontCache();
@@ -455,7 +455,7 @@ public sealed class NotificationToast : ElementBase
 		ReevaluateVisualStyles();
 	}
 
-	internal override void OnMouseEnter(EventArgs e)
+	public override void  OnMouseEnter(EventArgs e)
 	{
 		base.OnMouseEnter(e);
 
@@ -466,7 +466,7 @@ public sealed class NotificationToast : ElementBase
 		}
 	}
 
-	internal override void OnMouseLeave(EventArgs e)
+	public override void  OnMouseLeave(EventArgs e)
 	{
 		base.OnMouseLeave(e);
 
@@ -484,7 +484,7 @@ public sealed class NotificationToast : ElementBase
 		}
 	}
 
-	internal override void OnMouseMove(MouseEventArgs e)
+	public override void  OnMouseMove(MouseEventArgs e)
 	{
 		if (_dismissState != 0)
 			return;
@@ -501,7 +501,7 @@ public sealed class NotificationToast : ElementBase
 			Invalidate();
 	}
 
-	internal override void OnMouseDown(MouseEventArgs e)
+	public override void  OnMouseDown(MouseEventArgs e)
 	{
 		if (_dismissState != 0)
 			return;
@@ -517,7 +517,7 @@ public sealed class NotificationToast : ElementBase
 			Invalidate();
 	}
 
-	internal override void OnMouseUp(MouseEventArgs e)
+	public override void  OnMouseUp(MouseEventArgs e)
 	{
 		if (_dismissState != 0)
 			return;
@@ -552,7 +552,7 @@ public sealed class NotificationToast : ElementBase
 		Invalidate();
 	}
 
-	internal override void OnMouseWheel(MouseEventArgs e)
+	public override void  OnMouseWheel(MouseEventArgs e)
 	{
 		if (_dismissState != 0)
 			return;
@@ -579,7 +579,7 @@ public sealed class NotificationToast : ElementBase
 		base.OnMouseWheel(e);
 	}
 
-	protected internal override void OnMouseClick(MouseEventArgs e)
+	public override void  OnMouseClick(MouseEventArgs e)
 	{
 		if (e.Button == MouseButtons.Left && (_consumeNextLeftClick || _dismissState != 0))
 		{
@@ -622,7 +622,7 @@ public sealed class NotificationToast : ElementBase
 		Invalidate();
 	}
 
-	public override void OnPaint(SKCanvas canvas)
+	public override void  OnPaint(SKCanvas canvas)
 	{
 		if (Disposing || IsDisposed)
 			return;
@@ -872,7 +872,7 @@ public sealed class NotificationToast : ElementBase
 	}
 
 
-	internal override void OnSizeChanged(EventArgs e)
+	public override void  OnSizeChanged(EventArgs e)
 	{
 		base.OnSizeChanged(e);
 		LayoutInteractiveElements();
@@ -1001,7 +1001,7 @@ public sealed class NotificationToast : ElementBase
 		canvas.DrawRect(barRect, _progressPaint);
 	}
 
-	protected override void OnVisualStyleTransitionCompleted()
+	public override void  OnVisualStyleTransitionCompleted()
 	{
 		if (_dismissState != 0 && Opacity <= 0.001f)
 		{
@@ -1119,7 +1119,7 @@ public sealed class NotificationToast : ElementBase
 		return Math.Clamp(wrappedLines.Count, 1, MaxMessageLines);
 	}
 
-	protected override void Dispose(bool disposing)
+	public override void  Dispose(bool disposing)
 	{
 		if (disposing)
 		{

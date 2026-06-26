@@ -283,7 +283,7 @@ public sealed partial class ColorPicker : ElementBase
     //  Paint
     // ════════════════════════════════════════════════════════════════════════
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
         InitializePaints();
@@ -508,7 +508,7 @@ public sealed partial class ColorPicker : ElementBase
     //  Input handling
     // ════════════════════════════════════════════════════════════════════════
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
         if (!Enabled || e.Button != MouseButtons.Left) return;
@@ -530,7 +530,7 @@ public sealed partial class ColorPicker : ElementBase
         UpdateFromInteraction(e.Location, layout, commit: false);
     }
 
-    internal override void OnMouseMove(MouseEventArgs e)
+    public override void  OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
         var layout = GetLayout();
@@ -549,7 +549,7 @@ public sealed partial class ColorPicker : ElementBase
         Invalidate();
     }
 
-    internal override void OnMouseUp(MouseEventArgs e)
+    public override void  OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
         if (e.Button != MouseButtons.Left) return;
@@ -563,7 +563,7 @@ public sealed partial class ColorPicker : ElementBase
             SelectedColorCommitted?.Invoke(this, EventArgs.Empty);
     }
 
-    internal override void OnMouseLeave(EventArgs e)
+    public override void  OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
         if (_isDragging) return;
@@ -576,7 +576,7 @@ public sealed partial class ColorPicker : ElementBase
         }
     }
 
-    internal override void OnLostFocus(EventArgs e)
+    public override void  OnLostFocus(EventArgs e)
     {
         if (_isDragging)
         {
@@ -588,7 +588,7 @@ public sealed partial class ColorPicker : ElementBase
         base.OnLostFocus(e);
     }
 
-    internal override void OnSizeChanged(EventArgs e)
+    public override void  OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
         InvalidateShaderCaches();
@@ -734,7 +734,7 @@ public sealed partial class ColorPicker : ElementBase
         return _captionFont!;
     }
 
-    protected override void InvalidateFontCache()
+    public override void  InvalidateFontCache()
     {
         base.InvalidateFontCache();
         _detailFont?.Dispose(); _detailFont = null;
@@ -743,7 +743,7 @@ public sealed partial class ColorPicker : ElementBase
         _fontDpi = 0;
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

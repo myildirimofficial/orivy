@@ -139,7 +139,7 @@ public class Button : ElementBase
 
     protected override bool ShouldRenderDefaultText => !ShouldDrawDropDownGlyph;
 
-    public override void OnClick(EventArgs e)
+    public override void  OnClick(EventArgs e)
     {
         if (CheckOnClick)
             Checked = !Checked;
@@ -150,7 +150,7 @@ public class Button : ElementBase
             ShowDropDown();
     }
 
-    protected virtual void OnCheckedChanged(EventArgs e)
+    public virtual void  OnCheckedChanged(EventArgs e)
     {
         CheckedChanged?.Invoke(this, e);
     }
@@ -218,7 +218,7 @@ public class Button : ElementBase
         return new SKSize((float)Math.Ceiling(desiredWidth), (float)Math.Ceiling(desiredHeight));
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
 
@@ -243,7 +243,7 @@ public class Button : ElementBase
         DrawDropDownChevron(canvas, chevronRect);
     }
 
-    protected internal override void OnMouseClick(MouseEventArgs e)
+    public override void  OnMouseClick(MouseEventArgs e)
     {
         if (UseSplitDropDownHitTest && e.Button == MouseButtons.Left && GetDropDownChevronRect().Contains(e.Location))
         {
@@ -255,12 +255,12 @@ public class Button : ElementBase
         base.OnMouseClick(e);
     }
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
     }
 
-    internal override void OnKeyDown(KeyEventArgs e)
+    public override void  OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
 
@@ -274,7 +274,7 @@ public class Button : ElementBase
         e.Handled = true;
     }
 
-    internal override void OnKeyUp(KeyEventArgs e)
+    public override void  OnKeyUp(KeyEventArgs e)
     {
         base.OnKeyUp(e);
 
@@ -291,7 +291,7 @@ public class Button : ElementBase
             PerformClick();
     }
 
-    internal override void OnLostFocus(EventArgs e)
+    public override void  OnLostFocus(EventArgs e)
     {
         _keyboardPressArmed = false;
         base.OnLostFocus(e);
@@ -310,7 +310,7 @@ public class Button : ElementBase
         }
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

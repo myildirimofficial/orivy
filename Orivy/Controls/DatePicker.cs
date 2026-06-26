@@ -302,13 +302,13 @@ public class DatePicker : ElementBase
         _dropDown.UpdateOwnedPopupAnchor();
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
         DrawCalendarIcon(canvas);
     }
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
         if (!Enabled || e.Button != MouseButtons.Left)
@@ -319,7 +319,7 @@ public class DatePicker : ElementBase
         e.Handled = true;
     }
 
-    internal override void OnKeyDown(KeyEventArgs e)
+    public override void  OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
         if (e.Handled || !Enabled)
@@ -342,7 +342,7 @@ public class DatePicker : ElementBase
         }
     }
 
-    internal override void OnVisibleChanged(EventArgs e)
+    public override void  OnVisibleChanged(EventArgs e)
     {
         if (!Visible)
             HideDropDown();
@@ -350,7 +350,7 @@ public class DatePicker : ElementBase
         base.OnVisibleChanged(e);
     }
 
-    internal override void OnEnabledChanged(EventArgs e)
+    public override void  OnEnabledChanged(EventArgs e)
     {
         if (!Enabled)
             HideDropDown();
@@ -358,20 +358,20 @@ public class DatePicker : ElementBase
         base.OnEnabledChanged(e);
     }
 
-    internal override void OnLocationChanged(EventArgs e)
+    public override void  OnLocationChanged(EventArgs e)
     {
         base.OnLocationChanged(e);
         _dropDown.UpdateAnchor();
     }
 
-    internal override void OnSizeChanged(EventArgs e)
+    public override void  OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
         _dropDown.UpdateAnchor();
         UpdateHostedTextBoxBounds();
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {
@@ -813,7 +813,7 @@ public class DatePicker : ElementBase
             window.Invalidate();
         }
 
-        internal override void OnKeyDown(KeyEventArgs e)
+        public override void  OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
             if (!e.Handled)
@@ -849,7 +849,7 @@ public class DatePicker : ElementBase
             Location = new SKPoint(x, y);
         }
 
-        public override void OnPaint(SKCanvas canvas)
+        public override void  OnPaint(SKCanvas canvas)
         {
             base.OnPaint(canvas);
             DrawHeader(canvas);
@@ -857,7 +857,7 @@ public class DatePicker : ElementBase
             DrawDays(canvas);
         }
 
-        internal override void OnMouseMove(MouseEventArgs e)
+        public override void  OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
             var next = HitTestDay(e.Location);
@@ -870,7 +870,7 @@ public class DatePicker : ElementBase
             Invalidate();
         }
 
-        internal override void OnMouseLeave(EventArgs e)
+        public override void  OnMouseLeave(EventArgs e)
         {
             _hoverDayIndex = -1;
             _hoverPart = PickerButtonPart.None;
@@ -879,7 +879,7 @@ public class DatePicker : ElementBase
             Invalidate();
         }
 
-        internal override void OnMouseDown(MouseEventArgs e)
+        public override void  OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
             if (e.Handled)
@@ -914,7 +914,7 @@ public class DatePicker : ElementBase
             }
         }
 
-        internal override void OnMouseUp(MouseEventArgs e)
+        public override void  OnMouseUp(MouseEventArgs e)
         {
             if (_pressedPart != PickerButtonPart.None)
             {
@@ -925,7 +925,7 @@ public class DatePicker : ElementBase
             base.OnMouseUp(e);
         }
 
-        protected override void Dispose(bool disposing)
+        public override void  Dispose(bool disposing)
         {
             if (disposing)
             {

@@ -536,7 +536,7 @@ public class RichTextBox : Orivy.Controls.TextBox
     // to sync our StyledTextDocument. The base class fires OnTextChanged;
     // we hook it here.
 
-    internal override void OnTextChanged(EventArgs e)
+    public override void  OnTextChanged(EventArgs e)
     {
         base.OnTextChanged(e);
 
@@ -560,7 +560,7 @@ public class RichTextBox : Orivy.Controls.TextBox
         // in a PreviewKeyDown handler.
     }
 
-    internal override void OnFontChanged(EventArgs e)
+    public override void  OnFontChanged(EventArgs e)
     {
         base.OnFontChanged(e);
         _fontCache?.Clear();
@@ -572,7 +572,7 @@ public class RichTextBox : Orivy.Controls.TextBox
         _pipeline?.Invalidate();
     }
 
-    internal override void OnDpiChanged(float newDpi, float oldDpi)
+    public override void  OnDpiChanged(float newDpi, float oldDpi)
     {
         base.OnDpiChanged(newDpi, oldDpi);
         if (_fontCache != null)
@@ -583,13 +583,13 @@ public class RichTextBox : Orivy.Controls.TextBox
     }
 
     // v5.1: layout'a etki eden tüm değişikliklerde pipeline invalidate.
-    internal override void OnSizeChanged(EventArgs e)
+    public override void  OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
         _pipeline?.Invalidate();
     }
 
-    internal override void OnPaddingChanged(EventArgs e)
+    public override void  OnPaddingChanged(EventArgs e)
     {
         base.OnPaddingChanged(e);
         _pipeline?.Invalidate();
@@ -681,7 +681,7 @@ public class RichTextBox : Orivy.Controls.TextBox
     // Reusable scratch list for segments — avoids per-frame List allocation.
     private readonly List<(int segStart, int segLen, SKFont font, TextStyle style)> _segmentBuffer = new(16);
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         // In Plain mode, delegate to base for zero overhead.
         if (_mode == RichTextMode.Plain)
@@ -698,7 +698,7 @@ public class RichTextBox : Orivy.Controls.TextBox
         }
 
         // For other modes, we need the run-aware pipeline. The base class's
-        // OnPaint is `public override void OnPaint(SKCanvas)` (it overrides
+        // OnPaint is `public override void  OnPaint(SKCanvas)` (it overrides
         // ElementBase). We can call base.OnPaint for the background, then
         // draw our own text content on top.
 
@@ -1174,7 +1174,7 @@ public class RichTextBox : Orivy.Controls.TextBox
 
     // ── Keyboard shortcuts ─────────────────────────────────────────────
 
-    internal override void OnKeyDown(KeyEventArgs e)
+    public override void  OnKeyDown(KeyEventArgs e)
     {
         // v4: Undo/Redo (works in all editable modes).
         if (e.Control && !e.Alt)
@@ -1379,7 +1379,7 @@ public class RichTextBox : Orivy.Controls.TextBox
     /// mode. If multiple cursors are active, the typed character is inserted
     /// at every cursor; otherwise we fall through to the base class's
     /// single-cursor handling.</summary>
-    internal override void OnKeyPress(KeyPressEventArgs e)
+    public override void  OnKeyPress(KeyPressEventArgs e)
     {
         // Only intercept in multi-cursor mode with multiple active cursors.
         if (EnableMultiCursor && HasMultipleCursors && !_readOnly && Enabled)
@@ -1409,7 +1409,7 @@ public class RichTextBox : Orivy.Controls.TextBox
     /// <summary>v5: Override OnMouseDown to support Ctrl+Click for adding
     /// cursors in multi-cursor mode. Regular clicks fall through to the
     /// base class's single-cursor handling.</summary>
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         // v5: Ctrl+Click in multi-cursor mode adds a cursor at the click point.
         if (EnableMultiCursor && e.Button == MouseButtons.Left
@@ -1456,7 +1456,7 @@ public class RichTextBox : Orivy.Controls.TextBox
         }
     }
 
-    protected internal override void OnMouseClick(MouseEventArgs e)
+    public override void  OnMouseClick(MouseEventArgs e)
     {
         base.OnMouseClick(e);
 
@@ -1481,7 +1481,7 @@ public class RichTextBox : Orivy.Controls.TextBox
 
     // ── Dispose ────────────────────────────────────────────────────────
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

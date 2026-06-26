@@ -146,7 +146,7 @@ public class SimpleLabel : ElementBase
         return new SKSize(textSize.Width + Padding.Left + Padding.Right, textSize.Height + Padding.Top + Padding.Bottom);
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
         using var paint = new SKPaint { Color = ForeColor, IsAntialias = true };
@@ -187,7 +187,7 @@ public class ToggleSwitch : ElementBase
 
 	public override SKSize GetPreferredSize(SKSize proposedSize) => Size;
 
-	public override void OnPaint(SKCanvas canvas)
+	public override void  OnPaint(SKCanvas canvas)
 	{
 		base.OnPaint(canvas);
 		var radius = Math.Min(Height / 2f, 14f);
@@ -200,7 +200,7 @@ public class ToggleSwitch : ElementBase
 		canvas.DrawOval(thumbRect.MidX, thumbRect.MidY, radius-2, radius-2, thumbPaint);
 	}
 
-	protected override void OnMouseUp(MouseEventArgs e)
+	public override void  OnMouseUp(MouseEventArgs e)
 	{
 		base.OnMouseUp(e);
 		if (!Enabled) return;

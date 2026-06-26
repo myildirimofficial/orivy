@@ -127,7 +127,7 @@ public class TreeView : ElementBase
 
     public void ToggleNode(TreeNode node) => SetExpanded(node, !node.Expanded);
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
 
@@ -144,7 +144,7 @@ public class TreeView : ElementBase
         canvas.RestoreToCount(save);
     }
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
         BuildVisibleNodeHitList();
@@ -164,7 +164,7 @@ public class TreeView : ElementBase
         }
     }
 
-    internal override void OnMouseMove(MouseEventArgs e)
+    public override void  OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
         BuildVisibleNodeHitList();
@@ -186,7 +186,7 @@ public class TreeView : ElementBase
         Invalidate();
     }
 
-    internal override void OnMouseLeave(EventArgs e)
+    public override void  OnMouseLeave(EventArgs e)
     {
         if (_hoveredNode != null)
         {
@@ -197,13 +197,13 @@ public class TreeView : ElementBase
         base.OnMouseLeave(e);
     }
 
-    protected override void OnLayout(LayoutEventArgs e)
+    public override void  OnLayout(LayoutEventArgs e)
     {
         UpdateTreeScrollMetrics();
         base.OnLayout(e);
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

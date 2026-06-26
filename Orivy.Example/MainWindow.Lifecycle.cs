@@ -4,7 +4,7 @@ namespace Orivy.Example;
 
 internal partial class MainWindow
 {
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

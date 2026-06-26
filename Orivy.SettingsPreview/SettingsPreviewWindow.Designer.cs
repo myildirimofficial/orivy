@@ -877,7 +877,7 @@ internal sealed partial class SettingsPreviewWindow
         return image;
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

@@ -73,7 +73,7 @@ public class IconLabel : ElementBase
 {
     private SKPaint _textPaint = new SKPaint { Color = SKColors.Black, IsAntialias = true };
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
 
@@ -81,7 +81,7 @@ public class IconLabel : ElementBase
         canvas.DrawText(Text, Padding.Left, Padding.Top + Font.Metrics.Ascent, _textPaint);
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
             _textPaint.Dispose();
@@ -104,7 +104,7 @@ public class FadeInControl : ElementBase
         _animation.StartNewAnimation(AnimationDirection.In);
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
 

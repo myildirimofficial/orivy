@@ -194,7 +194,7 @@ public class MarkdownViewer : ElementBase
     protected override bool ProcessTextEscapeSequences => false;
     protected override bool ShouldRenderDefaultText    => false;
 
-    internal override void OnTextChanged(EventArgs e)
+    public override void  OnTextChanged(EventArgs e)
     {
         base.OnTextChanged(e);
         _document = MarkdownParser.Parse(Text);
@@ -206,25 +206,25 @@ public class MarkdownViewer : ElementBase
         MarkdownParsed?.Invoke(this, EventArgs.Empty);
     }
 
-    internal override void OnSizeChanged(EventArgs e)
+    public override void  OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
         if (Width > 0 && Height > 0) ReflowContent();
     }
 
-    internal override void OnPaddingChanged(EventArgs e)
+    public override void  OnPaddingChanged(EventArgs e)
     {
         base.OnPaddingChanged(e);
         ReflowContent();
     }
 
-    internal override void OnDpiChanged(float newDpi, float oldDpi)
+    public override void  OnDpiChanged(float newDpi, float oldDpi)
     {
         base.OnDpiChanged(newDpi, oldDpi);
         ReflowContent();
     }
 
-    internal override void OnFontChanged(EventArgs e)
+    public override void  OnFontChanged(EventArgs e)
     {
         base.OnFontChanged(e);
         _layoutDirty = true;
@@ -300,7 +300,7 @@ public class MarkdownViewer : ElementBase
     // Painting
     // ====================================================================
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         if (_layoutDirty) ReflowContent();
 
@@ -463,7 +463,7 @@ public class MarkdownViewer : ElementBase
     // Mouse — move
     // ====================================================================
 
-    internal override void OnMouseMove(MouseEventArgs e)
+    public override void  OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
 
@@ -513,7 +513,7 @@ public class MarkdownViewer : ElementBase
     // Mouse — down
     // ====================================================================
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
         if (e.Button != MouseButtons.Left) return;
@@ -565,7 +565,7 @@ public class MarkdownViewer : ElementBase
     // Mouse — up
     // ====================================================================
 
-    internal override void OnMouseUp(MouseEventArgs e)
+    public override void  OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
         _draggingCodeBlock    = null;
@@ -577,7 +577,7 @@ public class MarkdownViewer : ElementBase
     // Mouse — leave
     // ====================================================================
 
-    internal override void OnMouseLeave(EventArgs e)
+    public override void  OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
         ClearHover();
@@ -590,7 +590,7 @@ public class MarkdownViewer : ElementBase
     // Mouse — click (link open, copy button, checkbox, details toggle)
     // ====================================================================
 
-    protected internal override void OnMouseClick(MouseEventArgs e)
+    public override void  OnMouseClick(MouseEventArgs e)
     {
         base.OnMouseClick(e);
         if (e.Button != MouseButtons.Left) return;
@@ -710,7 +710,7 @@ public class MarkdownViewer : ElementBase
     // Mouse — wheel  (vertical page scroll + code-block horizontal scroll)
     // ====================================================================
 
-    internal override void OnMouseWheel(MouseEventArgs e)
+    public override void  OnMouseWheel(MouseEventArgs e)
     {
         // Horizontal wheel or Shift+wheel → scroll code block / table horizontally
         bool isHorizontal = e.IsHorizontalWheel || (ModifierKeys & Keys.Shift) != 0;
@@ -756,7 +756,7 @@ public class MarkdownViewer : ElementBase
     // Keyboard — scrolling + text selection copy
     // ====================================================================
 
-    internal override void OnKeyDown(KeyEventArgs e)
+    public override void  OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
 
@@ -869,7 +869,7 @@ public class MarkdownViewer : ElementBase
     // Double-click — word selection
     // ====================================================================
 
-    internal override void OnMouseDoubleClick(MouseEventArgs e)
+    public override void  OnMouseDoubleClick(MouseEventArgs e)
     {
         base.OnMouseDoubleClick(e);
         if (e.Button != MouseButtons.Left) return;
@@ -893,7 +893,7 @@ public class MarkdownViewer : ElementBase
     // Dispose
     // ====================================================================
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

@@ -148,7 +148,7 @@ public class Card : Container
         Controls.Add(content);
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
         RenderHeader(canvas);
@@ -176,19 +176,19 @@ public class Card : Container
         return new SKSize(size.Width, MathF.Ceiling(size.Height + headerHeight));
     }
 
-    internal override void OnControlAdded(ElementEventArgs e)
+    public override void  OnControlAdded(ElementEventArgs e)
     {
         base.OnControlAdded(e);
         InvalidateMeasure();
     }
 
-    internal override void OnControlRemoved(ElementEventArgs e)
+    public override void  OnControlRemoved(ElementEventArgs e)
     {
         base.OnControlRemoved(e);
         InvalidateMeasure();
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

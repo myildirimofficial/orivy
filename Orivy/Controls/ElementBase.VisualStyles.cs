@@ -230,7 +230,7 @@ public abstract partial class ElementBase
         OnVisualStyleTransitionCompleted();
     }
 
-    protected virtual void OnVisualStyleTransitionCompleted() { }
+    public virtual void  OnVisualStyleTransitionCompleted() { }
 
     private void ApplyOrStartVisualStyleTransition(
         in ElementVisualStyleSnapshot targetSnapshot,

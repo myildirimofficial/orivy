@@ -237,7 +237,7 @@ public sealed class ButtonGroup<TValue> : Container
             RaiseSelectedValueChanged(previousButton, previousValue);
     }
 
-    internal override void OnControlAdded(ElementEventArgs e)
+    public override void  OnControlAdded(ElementEventArgs e)
     {
         if (e.Element is Button incomingButton && !_autoButtons.Contains(incomingButton))
             throw new InvalidOperationException("Use SetItems() or ConfigureButton to manage ButtonGroup contents.");
@@ -251,7 +251,7 @@ public sealed class ButtonGroup<TValue> : Container
         Invalidate();
     }
 
-    internal override void OnControlRemoved(ElementEventArgs e)
+    public override void  OnControlRemoved(ElementEventArgs e)
     {
         UnregisterElement(e.Element as ElementBase);
         base.OnControlRemoved(e);
@@ -279,7 +279,7 @@ public sealed class ButtonGroup<TValue> : Container
         return new SKSize(width, height);
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
             UnregisterElement(this);
@@ -287,7 +287,7 @@ public sealed class ButtonGroup<TValue> : Container
         base.Dispose(disposing);
     }
 
-    protected override void OnLayout(LayoutEventArgs e)
+    public override void  OnLayout(LayoutEventArgs e)
     {
         base.OnLayout(e);
         ArrangeButtonRows(this);

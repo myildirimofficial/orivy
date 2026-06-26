@@ -177,13 +177,13 @@ public class TimePicker : ElementBase
             _dropDown.UpdateAnchor();
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
         DrawClockIcon(canvas);
     }
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
         if (!Enabled || e.Button != MouseButtons.Left)
@@ -194,7 +194,7 @@ public class TimePicker : ElementBase
         e.Handled = true;
     }
 
-    internal override void OnKeyDown(KeyEventArgs e)
+    public override void  OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
         if (e.Handled || !Enabled)
@@ -224,7 +224,7 @@ public class TimePicker : ElementBase
         }
     }
 
-    internal override void OnVisibleChanged(EventArgs e)
+    public override void  OnVisibleChanged(EventArgs e)
     {
         if (!Visible)
             HideDropDown();
@@ -232,7 +232,7 @@ public class TimePicker : ElementBase
         base.OnVisibleChanged(e);
     }
 
-    internal override void OnEnabledChanged(EventArgs e)
+    public override void  OnEnabledChanged(EventArgs e)
     {
         if (!Enabled)
             HideDropDown();
@@ -240,20 +240,20 @@ public class TimePicker : ElementBase
         base.OnEnabledChanged(e);
     }
 
-    internal override void OnLocationChanged(EventArgs e)
+    public override void  OnLocationChanged(EventArgs e)
     {
         base.OnLocationChanged(e);
         _dropDown.UpdateAnchor();
     }
 
-    internal override void OnSizeChanged(EventArgs e)
+    public override void  OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
         _dropDown.UpdateAnchor();
         UpdateHostedTextBoxBounds();
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {
@@ -623,7 +623,7 @@ public class TimePicker : ElementBase
             return window.PointToClient(_owner.PointToScreen(new SKPoint(0, -Height - 6)));
         }
 
-        public override void OnPaint(SKCanvas canvas)
+        public override void  OnPaint(SKCanvas canvas)
         {
             base.OnPaint(canvas);
             DrawHeader(canvas);
@@ -631,7 +631,7 @@ public class TimePicker : ElementBase
             DrawMinutes(canvas);
         }
 
-        internal override void OnMouseMove(MouseEventArgs e)
+        public override void  OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
             var hour = HitTestHour(e.Location);
@@ -644,7 +644,7 @@ public class TimePicker : ElementBase
             Invalidate();
         }
 
-        internal override void OnMouseLeave(EventArgs e)
+        public override void  OnMouseLeave(EventArgs e)
         {
             _hoverHour = -1;
             _hoverMinute = -1;
@@ -654,7 +654,7 @@ public class TimePicker : ElementBase
             Invalidate();
         }
 
-        internal override void OnMouseDown(MouseEventArgs e)
+        public override void  OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
             if (e.Button != MouseButtons.Left)
@@ -685,7 +685,7 @@ public class TimePicker : ElementBase
             }
         }
 
-        internal override void OnMouseUp(MouseEventArgs e)
+        public override void  OnMouseUp(MouseEventArgs e)
         {
             if (_pressedHour >= 0 || _pressedMinute >= 0)
             {
@@ -697,7 +697,7 @@ public class TimePicker : ElementBase
             base.OnMouseUp(e);
         }
 
-        protected override void Dispose(bool disposing)
+        public override void  Dispose(bool disposing)
         {
             if (disposing)
             {

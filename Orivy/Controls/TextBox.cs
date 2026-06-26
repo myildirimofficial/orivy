@@ -519,7 +519,7 @@ public class TextBox : ElementBase
         return new SKSize((float)Math.Ceiling(desiredWidth), (float)Math.Ceiling(desiredHeight));
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
 
@@ -544,7 +544,7 @@ public class TextBox : ElementBase
         canvas.RestoreToCount(saveCount);
     }
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         if (!IsTextInteractionPoint(e.Location))
         {
@@ -593,7 +593,7 @@ public class TextBox : ElementBase
         }
     }
 
-    internal override void OnMouseMove(MouseEventArgs e)
+    public override void  OnMouseMove(MouseEventArgs e)
     {
         if (!_mouseSelecting)
         {
@@ -613,7 +613,7 @@ public class TextBox : ElementBase
             ResetCaretBlink();
     }
 
-    internal override void OnMouseUp(MouseEventArgs e)
+    public override void  OnMouseUp(MouseEventArgs e)
     {
         if (!_mouseSelecting && !IsTextInteractionPoint(e.Location))
         {
@@ -631,7 +631,7 @@ public class TextBox : ElementBase
         Focus();
     }
 
-    protected internal override void OnMouseClick(MouseEventArgs e)
+    public override void  OnMouseClick(MouseEventArgs e)
     {
         if (!IsTextInteractionPoint(e.Location))
         {
@@ -650,7 +650,7 @@ public class TextBox : ElementBase
         Focus();
     }
 
-    internal override void OnMouseDoubleClick(MouseEventArgs e)
+    public override void  OnMouseDoubleClick(MouseEventArgs e)
     {
         base.OnMouseDoubleClick(e);
 
@@ -667,13 +667,13 @@ public class TextBox : ElementBase
             ResetCaretBlink();
     }
 
-    internal override void OnGotFocus(EventArgs e)
+    public override void  OnGotFocus(EventArgs e)
     {
         base.OnGotFocus(e);
         ResetCaretBlink();
     }
 
-    internal override void OnLostFocus(EventArgs e)
+    public override void  OnLostFocus(EventArgs e)
     {
         _mouseSelecting = false;
         GetParentWindow()?.ReleaseMouseCapture(this);
@@ -682,7 +682,7 @@ public class TextBox : ElementBase
         Invalidate();
     }
 
-    internal override void OnTextChanged(EventArgs e)
+    public override void  OnTextChanged(EventArgs e)
     {
         base.OnTextChanged(e);
         ClampSelection();
@@ -690,26 +690,26 @@ public class TextBox : ElementBase
         EnsureCaretVisible();
     }
 
-    internal override void OnFontChanged(EventArgs e)
+    public override void  OnFontChanged(EventArgs e)
     {
         base.OnFontChanged(e);
         InvalidateCachedLayoutFont();
         InvalidateTextLayout();
     }
 
-    internal override void OnPaddingChanged(EventArgs e)
+    public override void  OnPaddingChanged(EventArgs e)
     {
         base.OnPaddingChanged(e);
         InvalidateTextLayout();
     }
 
-    internal override void OnSizeChanged(EventArgs e)
+    public override void  OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
         InvalidateTextLayout();
     }
 
-    internal override void OnVisibleChanged(EventArgs e)
+    public override void  OnVisibleChanged(EventArgs e)
     {
         base.OnVisibleChanged(e);
         if (Visible && Focused)
@@ -718,14 +718,14 @@ public class TextBox : ElementBase
             StopCaretBlink();
     }
 
-    internal override void OnDpiChanged(float newDpi, float oldDpi)
+    public override void  OnDpiChanged(float newDpi, float oldDpi)
     {
         base.OnDpiChanged(newDpi, oldDpi);
         InvalidateCachedLayoutFont();
         InvalidateTextLayout();
     }
 
-    internal override void OnKeyDown(KeyEventArgs e)
+    public override void  OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
 
@@ -843,7 +843,7 @@ public class TextBox : ElementBase
         }
     }
 
-    internal override void OnKeyPress(KeyPressEventArgs e)
+    public override void  OnKeyPress(KeyPressEventArgs e)
     {
         base.OnKeyPress(e);
 
@@ -864,7 +864,7 @@ public class TextBox : ElementBase
         e.Handled = true;
     }
 
-    internal override void OnMouseWheel(MouseEventArgs e)
+    public override void  OnMouseWheel(MouseEventArgs e)
     {
         if (_multiline && (ModifierKeys & Keys.Control) == Keys.Control && !e.IsHorizontalWheel)
         {
@@ -890,7 +890,7 @@ public class TextBox : ElementBase
         return Math.Max(10f, horizontalStep * 1.5f);
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

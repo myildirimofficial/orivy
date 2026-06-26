@@ -751,7 +751,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     /// <summary>
     ///     Override this to clear cached font objects when DPI changes.
     /// </summary>
-    protected virtual void InvalidateFontCache()
+    public virtual void  InvalidateFontCache()
     {
         _defaultTextRenderFont?.Dispose();
         _defaultTextRenderFont = null;
@@ -1815,7 +1815,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     /// <summary>
     ///     Raises the Load event for this element. This is safe to call multiple times; the event will only fire once.
     /// </summary>
-    protected virtual void OnLoad(EventArgs e)
+    public virtual void  OnLoad(EventArgs e)
     {
         if (_isLoaded) return;
         _isLoaded = true;
@@ -1838,7 +1838,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     ///     Raises the Unload event for this element. This is safe to call multiple times; it will fire only when the element
     ///     was previously loaded.
     /// </summary>
-    protected virtual void OnUnload(EventArgs e)
+    public virtual void  OnUnload(EventArgs e)
     {
         if (!_isLoaded) return; // only unload if previously loaded
         _isLoaded = false;
@@ -1883,7 +1883,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         return SkiaSharp.SKRect.Create(suggestedX, suggestedY, proposedWidth, proposedHeight);
     }
 
-    public virtual void OnPaint(SKCanvas canvas)
+    public virtual void  OnPaint(SKCanvas canvas)
     {
         var paintHandler = Paint;
         if (paintHandler == null)
@@ -2041,7 +2041,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     private static SKPoint GetRenderedChildLocation(ElementBase parent, ElementBase child)
     {
         var location = child.GetRenderLocation();
-        
+
         if (!UsesParentScrollTransform(parent, child))
             return location;
 
@@ -2467,23 +2467,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             list[i] = _zOrderSortBuffer[i].Element;
     }
 
-    protected void RenderChildren(SKCanvas canvas)
-    {
-        RenderChildren(canvas, ChildRenderKind.Normal);
-    }
-
-    private void RenderOverflowChildren(SKCanvas canvas)
-    {
-        RenderChildren(canvas, ChildRenderKind.OverflowOnly);
-    }
-
-    private enum ChildRenderKind
-    {
-        Normal,
-        OverflowOnly
-    }
-
-    private void RenderChildren(SKCanvas canvas, ChildRenderKind renderKind)
+    internal void RenderChildren(SKCanvas canvas, ChildRenderKind renderKind = ChildRenderKind.Normal)
     {
         EnsureChildRenderBuffer();
 
@@ -2675,26 +2659,26 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                     if (_border.Top > 0)
                     {
                         borderPaint.StrokeWidth = _border.Top;
-                            var y = _border.Top / 2f;
-                            targetCanvas.DrawLine(0, y, Width, y, borderPaint);
+                        var y = _border.Top / 2f;
+                        targetCanvas.DrawLine(0, y, Width, y, borderPaint);
                     }
                     if (_border.Bottom > 0)
                     {
                         borderPaint.StrokeWidth = _border.Bottom;
-                            var y = Height - _border.Bottom / 2f;
-                            targetCanvas.DrawLine(0, y, Width, y, borderPaint);
+                        var y = Height - _border.Bottom / 2f;
+                        targetCanvas.DrawLine(0, y, Width, y, borderPaint);
                     }
                     if (_border.Left > 0)
                     {
                         borderPaint.StrokeWidth = _border.Left;
-                            var x = _border.Left / 2f;
-                            targetCanvas.DrawLine(x, 0, x, Height, borderPaint);
+                        var x = _border.Left / 2f;
+                        targetCanvas.DrawLine(x, 0, x, Height, borderPaint);
                     }
                     if (_border.Right > 0)
                     {
                         borderPaint.StrokeWidth = _border.Right;
-                            var x = Width - _border.Right / 2f;
-                            targetCanvas.DrawLine(x, 0, x, Height, borderPaint);
+                        var x = Width - _border.Right / 2f;
+                        targetCanvas.DrawLine(x, 0, x, Height, borderPaint);
                     }
                 }
             }
@@ -2727,7 +2711,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             if (shapeClipSaveCount >= 0)
                 targetCanvas.RestoreToCount(shapeClipSaveCount);
 
-            RenderOverflowChildren(targetCanvas);
+            RenderChildren(targetCanvas, ChildRenderKind.OverflowOnly);
 
             if (layerSaveCount >= 0)
                 targetCanvas.RestoreToCount(layerSaveCount);
@@ -3040,12 +3024,12 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             return;
 
         var paint = _renderShadowPaint;
-    paint.Shader = null;
-    paint.ColorFilter = null;
-    paint.PathEffect = null;
-    paint.ImageFilter = null;
-    paint.IsAntialias = true;
-    paint.Style = SKPaintStyle.Fill;
+        paint.Shader = null;
+        paint.ColorFilter = null;
+        paint.PathEffect = null;
+        paint.ImageFilter = null;
+        paint.IsAntialias = true;
+        paint.Style = SKPaintStyle.Fill;
         paint.Color = shadow.Color;
         paint.MaskFilter = GetShadowMaskFilter(shadow.Blur);
 
@@ -3093,12 +3077,12 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             elementRect.Bottom - spread.BottomRight + shadow.OffsetY);
 
         var paint = _renderShadowPaint;
-    paint.Shader = null;
-    paint.ColorFilter = null;
-    paint.PathEffect = null;
-    paint.ImageFilter = null;
-    paint.IsAntialias = true;
-    paint.Style = SKPaintStyle.Fill;
+        paint.Shader = null;
+        paint.ColorFilter = null;
+        paint.PathEffect = null;
+        paint.ImageFilter = null;
+        paint.IsAntialias = true;
+        paint.Style = SKPaintStyle.Fill;
         paint.Color = shadow.Color;
         paint.MaskFilter = GetShadowMaskFilter(shadow.Blur);
 
@@ -3313,7 +3297,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     public bool IsAncestorSiteInDesignMode { get; internal set; }
 
-    protected virtual void AdjustSize()
+    public virtual void  AdjustSize()
     {
         if (!AutoSize)
             return;
@@ -3512,32 +3496,32 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     #region Protected Event Methods
 
-    protected virtual void OnBackgroundImageChanged(EventArgs e)
+    public virtual void  OnBackgroundImageChanged(EventArgs e)
     {
         BackgroundImageChanged?.Invoke(this, e);
     }
 
-    protected virtual void OnBackgroundImageCaptionChanged(EventArgs e)
+    public virtual void  OnBackgroundImageCaptionChanged(EventArgs e)
     {
         BackgroundImageCaptionChanged?.Invoke(this, e);
     }
 
-    protected virtual void OnBackgroundImageLayoutChanged(EventArgs e)
+    public virtual void  OnBackgroundImageLayoutChanged(EventArgs e)
     {
         BackgroundImageLayoutChanged?.Invoke(this, e);
     }
 
-    protected virtual void OnImageAlignChanged(EventArgs e)
+    public virtual void  OnImageAlignChanged(EventArgs e)
     {
         ImageAlignChanged?.Invoke(this, e);
     }
 
-    protected virtual void OnRightToLeftChanged(EventArgs e)
+    public virtual void  OnRightToLeftChanged(EventArgs e)
     {
         RightToLeftChanged?.Invoke(this, e);
     }
 
-    protected virtual void OnAutoScrollChanged(EventArgs e)
+    public virtual void  OnAutoScrollChanged(EventArgs e)
     {
         AutoScrollChanged?.Invoke(this, e);
     }
@@ -3676,7 +3660,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
-    public virtual void OnClick(EventArgs e)
+    public virtual void  OnClick(EventArgs e)
     {
         if (!Enabled || !Visible)
             return;
@@ -3799,7 +3783,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             owner?.GetParentWindow()?.Invalidate();
     }
 
-    internal virtual void OnSizeChanged(EventArgs e)
+    public virtual void  OnSizeChanged(EventArgs e)
     {
         SizeChanged?.Invoke(this, e);
 
@@ -3815,12 +3799,12 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         Invalidate();
     }
 
-    internal virtual void OnDoubleClick(EventArgs e)
+    public virtual void  OnDoubleClick(EventArgs e)
     {
         DoubleClick?.Invoke(this, e);
     }
 
-    internal virtual void OnMouseMove(MouseEventArgs e)
+    public virtual void  OnMouseMove(MouseEventArgs e)
     {
         MouseMove?.Invoke(this, e);
         UpdateToolTipPointer(e.Location);
@@ -3866,7 +3850,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         MouseClick?.Invoke(this, e);
     }
 
-    internal virtual void OnMouseDown(MouseEventArgs e)
+    public virtual void  OnMouseDown(MouseEventArgs e)
     {
         MouseDown?.Invoke(this, e);
         UpdatePressedState(e.Button == MouseButtons.Left);
@@ -3970,7 +3954,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         return null;
     }
 
-    internal virtual void OnMouseUp(MouseEventArgs e)
+    public virtual void  OnMouseUp(MouseEventArgs e)
     {
         MouseUp?.Invoke(this, e);
         UpdatePressedState(false);
@@ -3981,7 +3965,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
-    protected internal virtual void OnMouseClick(MouseEventArgs e)
+    public virtual void  OnMouseClick(MouseEventArgs e)
     {
         MouseClick?.Invoke(this, e);
 
@@ -3997,7 +3981,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
-    internal virtual void OnMouseDoubleClick(MouseEventArgs e)
+    public virtual void  OnMouseDoubleClick(MouseEventArgs e)
     {
         MouseDoubleClick?.Invoke(this, e);
 
@@ -4007,7 +3991,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
-    internal virtual void OnMouseLeave(EventArgs e)
+    public virtual void  OnMouseLeave(EventArgs e)
     {
         MouseLeave?.Invoke(this, e);
         HideToolTip(this);
@@ -4027,7 +4011,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         _lastHoveredElement = null;
     }
 
-    internal virtual void OnMouseHover(EventArgs e)
+    public virtual void  OnMouseHover(EventArgs e)
     {
         MouseHover?.Invoke(this, e);
         //foreach (var control in Controls)
@@ -4040,7 +4024,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         //}
     }
 
-    internal virtual void OnMouseEnter(EventArgs e)
+    public virtual void  OnMouseEnter(EventArgs e)
     {
         MouseEnter?.Invoke(this, e);
         BeginToolTip(this);
@@ -4056,13 +4040,13 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         //}
     }
 
-    internal virtual void OnLocationChanged(EventArgs e)
+    public virtual void  OnLocationChanged(EventArgs e)
     {
         LocationChanged?.Invoke(this, e);
         Invalidate();
     }
 
-    internal virtual void OnVisibleChanged(EventArgs e)
+    public virtual void  OnVisibleChanged(EventArgs e)
     {
         VisibleChanged?.Invoke(this, e);
         UpdateBackgroundImageSlideshowState();
@@ -4096,7 +4080,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         else if (Parent is ElementBase parentElement) parentElement.PerformLayout();
     }
 
-    internal virtual void OnEnabledChanged(EventArgs e)
+    public virtual void  OnEnabledChanged(EventArgs e)
     {
         EnabledChanged?.Invoke(this, e);
         if (!Enabled)
@@ -4105,14 +4089,14 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         Invalidate();
     }
 
-    internal virtual void OnTextChanged(EventArgs e)
+    public virtual void  OnTextChanged(EventArgs e)
     {
         TextChanged?.Invoke(this, e);
         if (CausesValidation)
             ValidateElement();
     }
 
-    internal virtual void OnDataContextChanged(EventArgs e)
+    public virtual void  OnDataContextChanged(EventArgs e)
     {
         DataContextChanged?.Invoke(this, e);
 
@@ -4125,28 +4109,28 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
-    internal virtual void OnBackColorChanged(EventArgs e)
+    public virtual void  OnBackColorChanged(EventArgs e)
     {
         BackColorChanged?.Invoke(this, e);
     }
 
-    internal virtual void OnForeColorChanged(EventArgs e)
+    public virtual void  OnForeColorChanged(EventArgs e)
     {
         ForeColorChanged?.Invoke(this, e);
     }
 
-    internal virtual void OnFontChanged(EventArgs e)
+    public virtual void  OnFontChanged(EventArgs e)
     {
         FontChanged?.Invoke(this, e);
     }
 
-    internal virtual void OnPaddingChanged(EventArgs e)
+    public virtual void  OnPaddingChanged(EventArgs e)
     {
         PaddingChanged?.Invoke(this, e);
         Invalidate();
     }
 
-    internal virtual void OnMarginChanged(EventArgs e)
+    public virtual void  OnMarginChanged(EventArgs e)
     {
         MarginChanged?.Invoke(this, e);
         // Request parent to relayout this control on next pass
@@ -4154,34 +4138,34 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             Invalidate();
     }
 
-    internal virtual void OnTabStopChanged(EventArgs e)
+    public virtual void  OnTabStopChanged(EventArgs e)
     {
         TabStopChanged?.Invoke(this, e);
     }
 
-    internal virtual void OnTabIndexChanged(EventArgs e)
+    public virtual void  OnTabIndexChanged(EventArgs e)
     {
         TabIndexChanged?.Invoke(this, e);
     }
 
-    internal virtual void OnAnchorChanged(EventArgs e)
+    public virtual void  OnAnchorChanged(EventArgs e)
     {
         AnchorChanged?.Invoke(this, e);
         // Don't trigger parent layout - anchor changes will be picked up on next parent resize
         // Forcing layout here causes FPS drops
     }
 
-    internal virtual void OnDockChanged(EventArgs e)
+    public virtual void  OnDockChanged(EventArgs e)
     {
         DockChanged?.Invoke(this, e);
     }
 
-    internal virtual void OnAutoSizeChanged(EventArgs e)
+    public virtual void  OnAutoSizeChanged(EventArgs e)
     {
         AutoSizeChanged?.Invoke(this, e);
     }
 
-    internal virtual void OnAutoSizeModeChanged(EventArgs e)
+    public virtual void  OnAutoSizeModeChanged(EventArgs e)
     {
         AutoSizeModeChanged?.Invoke(this, e);
     }
@@ -4217,8 +4201,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         return true;
     }
 
-
-    internal virtual void OnKeyDown(KeyEventArgs e)
+    public virtual void  OnKeyDown(KeyEventArgs e)
     {
         KeyDown?.Invoke(this, e);
         if (e.KeyCode == Keys.Tab && !e.Control && !e.Alt)
@@ -4231,27 +4214,27 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         if (_focusedElement != null) _focusedElement.OnKeyDown(e);
     }
 
-    internal virtual void OnKeyUp(KeyEventArgs e)
+    public virtual void  OnKeyUp(KeyEventArgs e)
     {
         KeyUp?.Invoke(this, e);
 
         if (_focusedElement != null) _focusedElement.OnKeyUp(e);
     }
 
-    internal virtual void OnKeyPress(KeyPressEventArgs e)
+    public virtual void  OnKeyPress(KeyPressEventArgs e)
     {
         KeyPress?.Invoke(this, e);
 
         if (_focusedElement != null) _focusedElement.OnKeyPress(e);
     }
 
-    internal virtual void OnGotFocus(EventArgs e)
+    public virtual void  OnGotFocus(EventArgs e)
     {
         Focused = true;
         GotFocus?.Invoke(this, e);
     }
 
-    internal virtual void OnLostFocus(EventArgs e)
+    public virtual void  OnLostFocus(EventArgs e)
     {
         Focused = false;
         LostFocus?.Invoke(this, e);
@@ -4259,27 +4242,27 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             ValidateElement();
     }
 
-    internal virtual void OnEnter(EventArgs e)
+    public virtual void  OnEnter(EventArgs e)
     {
         Enter?.Invoke(this, e);
     }
 
-    internal virtual void OnLeave(EventArgs e)
+    public virtual void  OnLeave(EventArgs e)
     {
         Leave?.Invoke(this, e);
     }
 
-    internal virtual void OnValidated(EventArgs e)
+    public virtual void  OnValidated(EventArgs e)
     {
         Validated?.Invoke(this, e);
     }
 
-    internal virtual void OnValidating(CancelEventArgs e)
+    public virtual void  OnValidating(CancelEventArgs e)
     {
         Validating?.Invoke(this, e);
     }
 
-    internal virtual void OnCursorChanged(EventArgs e)
+    public virtual void  OnCursorChanged(EventArgs e)
     {
         CursorChanged?.Invoke(this, e);
         var parentWindow = GetParentWindow();
@@ -4304,7 +4287,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         Invalidate();
     }
 
-    internal virtual void OnMouseWheel(MouseEventArgs e)
+    public virtual void  OnMouseWheel(MouseEventArgs e)
     {
         if (!Enabled || !Visible)
             return;
@@ -4359,7 +4342,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         NeedsRedraw = true;
     }
 
-    internal virtual void OnDpiChanged(float newDpi, float oldDpi)
+    public virtual void  OnDpiChanged(float newDpi, float oldDpi)
     {
         if (oldDpi <= 0)
             oldDpi = _currentDpi <= 0 ? Screen.GetSystemDpi() : _currentDpi;
@@ -4441,7 +4424,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         return IsValid;
     }
 
-    protected virtual void ValidateElement()
+    public virtual void  ValidateElement()
     {
         if (!CausesValidation)
         {
@@ -4563,7 +4546,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         return new SKPoint(clientPoint.X - renderedLocation.X, clientPoint.Y - renderedLocation.Y);
     }
 
-    protected virtual void Dispose(bool disposing)
+    public virtual void  Dispose(bool disposing)
     {
         if (IsDisposed)
             return;
@@ -4719,7 +4702,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
-    protected virtual void OnLayout(LayoutEventArgs e)
+    public virtual void  OnLayout(LayoutEventArgs e)
     {
         Layout?.Invoke(this, e);
         Orivy.Layout.DefaultLayout.Instance.Layout(this, e);
@@ -4824,7 +4807,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             (int)MathF.Ceiling(bottom));
     }
 
-    internal virtual void OnControlAdded(ElementEventArgs e)
+    public virtual void  OnControlAdded(ElementEventArgs e)
     {
         InvalidateChildRenderOrder();
         ControlAdded?.Invoke(this, e);
@@ -4838,7 +4821,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
-    internal virtual void OnControlRemoved(ElementEventArgs e)
+    public virtual void  OnControlRemoved(ElementEventArgs e)
     {
         InvalidateChildRenderOrder();
         if (_lastHoveredElement == e.Element)

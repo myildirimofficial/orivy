@@ -69,7 +69,7 @@ public class FadePanel : ElementBase
     public void AnimateIn() => _fade.StartNewAnimation(AnimationDirection.In);
     public void AnimateOut() => _fade.StartNewAnimation(AnimationDirection.Out);
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
 

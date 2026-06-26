@@ -32,7 +32,7 @@ internal sealed partial class BindingDemoPage : Container
         InitializeComponent();
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

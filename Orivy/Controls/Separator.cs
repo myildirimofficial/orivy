@@ -73,7 +73,7 @@ public class Separator : ElementBase
             : new SKSize(thickness + Padding.Left + Padding.Right + 8f * ScaleFactor, System.Math.Max(1f, proposedSize.Height > 0 ? proposedSize.Height : Size.Height));
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
 
@@ -96,7 +96,7 @@ public class Separator : ElementBase
         }
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
             _linePaint.Dispose();

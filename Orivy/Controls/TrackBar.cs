@@ -122,7 +122,7 @@ public class TrackBar : ElementBase
 
     public event EventHandler? ValueChanged;
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
 
@@ -155,7 +155,7 @@ public class TrackBar : ElementBase
             DrawValue(canvas, rect);
     }
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
         if (!Enabled || e.Button != MouseButtons.Left)
@@ -166,14 +166,14 @@ public class TrackBar : ElementBase
         UpdateValueFromPoint(e.Location);
     }
 
-    internal override void OnMouseMove(MouseEventArgs e)
+    public override void  OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
         if (_dragging)
             UpdateValueFromPoint(e.Location);
     }
 
-    internal override void OnMouseUp(MouseEventArgs e)
+    public override void  OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
         if (e.Button != MouseButtons.Left)
@@ -184,14 +184,14 @@ public class TrackBar : ElementBase
         SetValue(_value, animate: true, raiseChanged: false);
     }
 
-    internal override void OnLostFocus(EventArgs e)
+    public override void  OnLostFocus(EventArgs e)
     {
         _dragging = false;
         GetParentWindow()?.ReleaseMouseCapture(this);
         base.OnLostFocus(e);
     }
 
-    internal override void OnKeyDown(KeyEventArgs e)
+    public override void  OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
         if (e.Handled || !Enabled)
@@ -209,7 +209,7 @@ public class TrackBar : ElementBase
         }
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

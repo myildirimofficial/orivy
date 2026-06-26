@@ -111,7 +111,7 @@ public partial class WindowBase
         }
     }
 
-    internal override void OnSizeChanged(EventArgs e)
+    public override void  OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
 
@@ -539,8 +539,7 @@ public partial class WindowBase
         canvas.Save();
         canvas.ResetMatrix();
         canvas.ClipRect(SKRect.Create(info.Width, info.Height));
-
-        RenderWindowFrame(canvas, info);
+        OnPaint(canvas);
         RenderChildren(canvas);
         RenderActiveToolTip(canvas, new SKSize(info.Width, info.Height));
 
@@ -548,11 +547,6 @@ public partial class WindowBase
             DrawPerfOverlay(canvas);
 
         canvas.Restore();
-    }
-
-    protected virtual void RenderWindowFrame(SKCanvas canvas, SKImageInfo info)
-    {
-        canvas.Clear(ColorScheme.Surface);
     }
 
     private void DrawPerfOverlay(SKCanvas canvas)

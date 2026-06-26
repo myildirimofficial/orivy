@@ -105,7 +105,7 @@ public class Breadcrumb : Container
         return new SKSize(Math.Max(MinimumSize.Width, width), Math.Max(MinimumSize.Height, Math.Max(32f, height)));
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
 
@@ -124,7 +124,7 @@ public class Breadcrumb : Container
         }
     }
 
-    protected override void OnLayout(LayoutEventArgs e)
+    public override void  OnLayout(LayoutEventArgs e)
     {
         base.OnLayout(e);
 
@@ -150,7 +150,7 @@ public class Breadcrumb : Container
         ApplyItemStates();
     }
 
-    protected internal override void OnMouseClick(MouseEventArgs e)
+    public override void  OnMouseClick(MouseEventArgs e)
     {
         base.OnMouseClick(e);
         if (e.Handled)
@@ -165,7 +165,7 @@ public class Breadcrumb : Container
         e.Handled = true;
     }
 
-    internal override void OnControlAdded(ElementEventArgs e)
+    public override void  OnControlAdded(ElementEventArgs e)
     {
         base.OnControlAdded(e);
         if (e.Element is ElementBase child)
@@ -179,7 +179,7 @@ public class Breadcrumb : Container
         Invalidate();
     }
 
-    internal override void OnControlRemoved(ElementEventArgs e)
+    public override void  OnControlRemoved(ElementEventArgs e)
     {
         base.OnControlRemoved(e);
         if (SelectedIndex >= Controls.Count)
@@ -190,7 +190,7 @@ public class Breadcrumb : Container
         Invalidate();
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

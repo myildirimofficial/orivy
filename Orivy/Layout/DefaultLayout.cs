@@ -1107,7 +1107,7 @@ internal partial class DefaultLayout : LayoutEngine
     internal static void SetAnchorInfo(IArrangedElement element, AnchorInfo? value) =>
         element.Properties.AddOrRemoveValue(s_layoutInfoProperty, value);
  
-    private protected override void InitLayoutCore(IArrangedElement element, BoundsSpecified specified)
+    protected override void InitLayoutCore(IArrangedElement element, BoundsSpecified specified)
     {
         Debug.Assert(specified == BoundsSpecified.None || GetCachedBounds(element) == element.Bounds,
             "Attempt to InitLayout while element has active cached bounds.");

@@ -364,7 +364,7 @@ public class GridList : ElementBase
         Invalidate();
     }
 
-    internal override void OnDpiChanged(float newDpi, float oldDpi)
+    public override void OnDpiChanged(float newDpi, float oldDpi)
     {
         var safeOldDpi = oldDpi <= 0 ? 96f : oldDpi;
         var scale = newDpi <= 0 ? 1f : newDpi / safeOldDpi;
@@ -409,20 +409,20 @@ public class GridList : ElementBase
         return Math.Max(8f, scrollBar.SmallChange);
     }
 
-    internal override void OnSizeChanged(EventArgs e)
+    public override void OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
         _geometryDirty = true;
     }
 
-    internal override void OnMouseEnter(EventArgs e)
+    public override void OnMouseEnter(EventArgs e)
     {
         base.OnMouseEnter(e);
         _vScrollBar?.SetHostHover(_vScrollBar.Visible);
         _hScrollBar?.SetHostHover(_hScrollBar.Visible);
     }
 
-    internal override void OnMouseLeave(EventArgs e)
+    public override void OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
         _hoveredHeader = false;
@@ -437,7 +437,7 @@ public class GridList : ElementBase
         Invalidate();
     }
 
-    internal override void OnMouseMove(MouseEventArgs e)
+    public override void OnMouseMove(MouseEventArgs e)
     {
         if (TryGetInputTarget(e, out var target, out var childEventArgs) && target != null && childEventArgs != null)
         {
@@ -495,7 +495,7 @@ public class GridList : ElementBase
         Invalidate();
     }
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
 
@@ -567,7 +567,7 @@ public class GridList : ElementBase
         }
     }
 
-    internal override void OnMouseUp(MouseEventArgs e)
+    public override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
 
@@ -615,7 +615,7 @@ public class GridList : ElementBase
         _pressedItemIndex = -1;
     }
 
-    internal override void OnMouseDoubleClick(MouseEventArgs e)
+    public override void OnMouseDoubleClick(MouseEventArgs e)
     {
         base.OnMouseDoubleClick(e);
 
@@ -641,7 +641,7 @@ public class GridList : ElementBase
         }
     }
 
-    internal override void OnMouseWheel(MouseEventArgs e)
+    public override void OnMouseWheel(MouseEventArgs e)
     {
         if (!Enabled || !Visible)
             return;
@@ -657,7 +657,7 @@ public class GridList : ElementBase
         base.OnMouseWheel(e);
     }
 
-    internal override void OnKeyDown(KeyEventArgs e)
+    public override void  OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
 
@@ -705,7 +705,7 @@ public class GridList : ElementBase
         }
     }
 
-    internal override void OnFontChanged(EventArgs e)
+    public override void OnFontChanged(EventArgs e)
     {
         base.OnFontChanged(e);
         _geometryDirty = true;
@@ -779,7 +779,7 @@ public class GridList : ElementBase
         }
     }
 
-    protected override void Dispose(bool disposing)
+    public override void Dispose(bool disposing)
     {
         if (disposing)
         {

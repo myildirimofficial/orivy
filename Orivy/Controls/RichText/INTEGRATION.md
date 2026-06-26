@@ -139,8 +139,8 @@ bu metotları expose etmenize gerek yok. Ama expose ederseniz RichTextBox
 onları da kullanabilir:
 
 ```csharp
-protected internal virtual void EnsureTextLayout() { ... }
-protected internal virtual void BuildTextLayout(float viewportWidth) { ... }
+public virtual void  EnsureTextLayout() { ... }
+public virtual void  BuildTextLayout(float viewportWidth) { ... }
 // ... diğerleri
 ```
 
@@ -156,7 +156,7 @@ protected virtual bool ShouldDrawTextContent => true;
 `OnPaint` içinde, text çiziminden önce kontrol et:
 
 ```csharp
-public override void OnPaint(SKCanvas canvas)
+public override void  OnPaint(SKCanvas canvas)
 {
     base.OnPaint(canvas);  // ElementBase — background, border
     EnsureTextLayout();

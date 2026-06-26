@@ -49,7 +49,7 @@ internal sealed partial class EmbeddedTabsDemoPage : Container
         return image;
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

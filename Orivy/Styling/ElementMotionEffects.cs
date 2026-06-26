@@ -161,27 +161,27 @@ public sealed class ElementMotionScene : Collection<ElementMotionEffect>
         _owner = owner ?? throw new ArgumentNullException(nameof(owner));
     }
 
-    protected override void InsertItem(int index, ElementMotionEffect item)
+    protected override void  InsertItem(int index, ElementMotionEffect item)
     {
         ArgumentNullException.ThrowIfNull(item);
         base.InsertItem(index, item);
         _owner.OnMotionEffectsChanged();
     }
 
-    protected override void SetItem(int index, ElementMotionEffect item)
+    protected override void  SetItem(int index, ElementMotionEffect item)
     {
         ArgumentNullException.ThrowIfNull(item);
         base.SetItem(index, item);
         _owner.OnMotionEffectsChanged();
     }
 
-    protected override void RemoveItem(int index)
+    protected override void  RemoveItem(int index)
     {
         base.RemoveItem(index);
         _owner.OnMotionEffectsChanged();
     }
 
-    protected override void ClearItems()
+    protected override void  ClearItems()
     {
         base.ClearItems();
         _owner.OnMotionEffectsChanged();

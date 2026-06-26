@@ -321,7 +321,7 @@ public class SwitchButton : ElementBase
 
     protected override bool GetVisualCheckedState() => Checked;
 
-    public override void OnClick(EventArgs e)
+    public override void  OnClick(EventArgs e)
     {
         if (_suppressNextPointerClick)
         {
@@ -378,7 +378,7 @@ public class SwitchButton : ElementBase
         return new SKSize((float)Math.Ceiling(width), (float)Math.Ceiling(height));
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
 
@@ -406,7 +406,7 @@ public class SwitchButton : ElementBase
         DrawSwitchText(canvas, content, switchRect);
     }
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         _toggleArmedByPointer = IsPointInToggleArea(e.Location);
         if (_toggleArmedByPointer && e.Button == MouseButtons.Left)
@@ -421,7 +421,7 @@ public class SwitchButton : ElementBase
         base.OnMouseDown(e);
     }
 
-    internal override void OnMouseUp(MouseEventArgs e)
+    public override void  OnMouseUp(MouseEventArgs e)
     {
         if (e.Button == MouseButtons.Left)
         {
@@ -441,7 +441,7 @@ public class SwitchButton : ElementBase
         base.OnMouseUp(e);
     }
 
-    internal override void OnMouseLeave(EventArgs e)
+    public override void  OnMouseLeave(EventArgs e)
     {
         if (!_pointerPressActive)
             _pressAnimation.StartNewAnimation(AnimationDirection.Out);
@@ -449,7 +449,7 @@ public class SwitchButton : ElementBase
         base.OnMouseLeave(e);
     }
 
-    internal override void OnKeyDown(KeyEventArgs e)
+    public override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
 
@@ -463,7 +463,7 @@ public class SwitchButton : ElementBase
         e.Handled = true;
     }
 
-    internal override void OnKeyUp(KeyEventArgs e)
+    public override void  OnKeyUp(KeyEventArgs e)
     {
         base.OnKeyUp(e);
 
@@ -483,7 +483,7 @@ public class SwitchButton : ElementBase
         }
     }
 
-    internal override void OnLostFocus(EventArgs e)
+    public override void  OnLostFocus(EventArgs e)
     {
         _keyboardPressArmed = false;
         _pointerPressActive = false;
@@ -492,7 +492,7 @@ public class SwitchButton : ElementBase
         base.OnLostFocus(e);
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

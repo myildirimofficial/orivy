@@ -130,7 +130,7 @@ internal sealed class NotificationTray : ElementBase
 		return true;
 	}
 
-	internal override void OnMouseWheel(MouseEventArgs e)
+	public override void  OnMouseWheel(MouseEventArgs e)
 	{
 		if (_layoutMode != NotificationToastLayoutMode.Stack
 			&& _presentationMode != NotificationToastPresentationMode.Dialog
@@ -352,7 +352,7 @@ internal sealed class NotificationTray : ElementBase
 		_scrollShadowPaint.Shader = null;
 	}
 
-	protected override void Dispose(bool disposing)
+	public override void  Dispose(bool disposing)
 	{
 		if (disposing)
 		{

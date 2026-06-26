@@ -51,7 +51,7 @@ public class Accordion : Container
         }
     }
 
-    internal override void OnControlAdded(ElementEventArgs e)
+    public override void  OnControlAdded(ElementEventArgs e)
     {
         base.OnControlAdded(e);
         if (e.Element is Collapse collapse)
@@ -63,7 +63,7 @@ public class Accordion : Container
         PerformLayout();
     }
 
-    internal override void OnControlRemoved(ElementEventArgs e)
+    public override void  OnControlRemoved(ElementEventArgs e)
     {
         if (e.Element is Collapse collapse)
         {
@@ -76,7 +76,7 @@ public class Accordion : Container
         PerformLayout();
     }
 
-    protected override void OnLayout(LayoutEventArgs e)
+    public override void  OnLayout(LayoutEventArgs e)
     {
         base.OnLayout(e);
 

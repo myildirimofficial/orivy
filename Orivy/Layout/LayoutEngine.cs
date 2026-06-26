@@ -27,7 +27,7 @@ public abstract class LayoutEngine
         InitLayoutCore(CastToArrangedElement(child), specified);
     }
 
-    private protected virtual void InitLayoutCore(IArrangedElement element, BoundsSpecified bounds)
+    protected virtual void InitLayoutCore(IArrangedElement element, BoundsSpecified bounds)
     {
     }
 

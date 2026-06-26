@@ -111,7 +111,7 @@ public class Grid : Container
             : GridPlacement.Default;
     }
 
-    protected override void OnLayout(LayoutEventArgs e)
+    public override void  OnLayout(LayoutEventArgs e)
     {
         var display = DisplayRectangle;
         var cellWidth = (display.Width - ColumnGap * (ColumnCount - 1)) / ColumnCount;

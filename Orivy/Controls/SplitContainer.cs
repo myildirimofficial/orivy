@@ -82,7 +82,7 @@ public class SplitContainer : Container
     [DefaultValue(48f)]
     public float PanelMinSize { get; set; } = 48f;
 
-    protected override void OnLayout(LayoutEventArgs e)
+    public override void  OnLayout(LayoutEventArgs e)
     {
         if (Panel1 == null || Panel2 == null)
             return;
@@ -105,7 +105,7 @@ public class SplitContainer : Container
         Panel2.PerformLayout();
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
 
@@ -128,7 +128,7 @@ public class SplitContainer : Container
         }
     }
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
         if (e.Button != MouseButtons.Left || !GetSplitterRect(DisplayRectangle).Contains(e.Location))
@@ -139,7 +139,7 @@ public class SplitContainer : Container
         GetParentWindow()?.SetMouseCapture(this);
     }
 
-    internal override void OnMouseMove(MouseEventArgs e)
+    public override void  OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
         UpdateSplitterHoverState(_dragging || GetSplitterRect(DisplayRectangle).Contains(e.Location));
@@ -152,7 +152,7 @@ public class SplitContainer : Container
             : e.Y - DisplayRectangle.Top;
     }
 
-    internal override void OnMouseUp(MouseEventArgs e)
+    public override void  OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
         if (e.Button != MouseButtons.Left)
@@ -163,7 +163,7 @@ public class SplitContainer : Container
         GetParentWindow()?.ReleaseMouseCapture(this);
     }
 
-    internal override void OnMouseLeave(EventArgs e)
+    public override void  OnMouseLeave(EventArgs e)
     {
         if (!_dragging)
             UpdateSplitterHoverState(false);
@@ -171,7 +171,7 @@ public class SplitContainer : Container
         base.OnMouseLeave(e);
     }
 
-    internal override void OnLostFocus(EventArgs e)
+    public override void  OnLostFocus(EventArgs e)
     {
         _dragging = false;
         UpdateSplitterHoverState(false);
@@ -179,7 +179,7 @@ public class SplitContainer : Container
         base.OnLostFocus(e);
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

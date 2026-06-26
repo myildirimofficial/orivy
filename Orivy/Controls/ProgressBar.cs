@@ -180,7 +180,7 @@ public class ProgressBar : ElementBase
 
     protected override bool ShouldRenderDefaultText => false;
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
 
@@ -197,7 +197,7 @@ public class ProgressBar : ElementBase
             DrawProgressText(canvas, rect);
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

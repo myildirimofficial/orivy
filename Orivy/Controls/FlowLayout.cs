@@ -80,7 +80,7 @@ public class FlowLayout : Container
         }
     }
 
-    protected override void OnLayout(LayoutEventArgs e)
+    public override void  OnLayout(LayoutEventArgs e)
     {
         if (FlowDirection is FlowLayoutDirection.LeftToRight or FlowLayoutDirection.RightToLeft)
             LayoutHorizontal();

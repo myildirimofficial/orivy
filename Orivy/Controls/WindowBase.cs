@@ -659,7 +659,7 @@ private IntPtr _hWnd;
         SendMessage(handle, WM_SYSCOMMAND, SC_MOVE + HTCAPTION, 0);
     }
 
-    protected override void OnLoad(EventArgs e)
+    public override void  OnLoad(EventArgs e)
     {
         base.OnLoad(e);
 
@@ -762,12 +762,12 @@ private IntPtr _hWnd;
         Close(dialogResult);
     }
 
-    protected virtual void OnFormClosing(FormClosingEventArgs e)
+    public virtual void  OnFormClosing(FormClosingEventArgs e)
     {
         FormClosing?.Invoke(this, e);
     }
 
-    protected virtual void OnFormClosed(FormClosedEventArgs e)
+    public virtual void  OnFormClosed(FormClosedEventArgs e)
     {
         FormClosed?.Invoke(this, e);
 
@@ -1339,12 +1339,12 @@ private IntPtr _hWnd;
         return DefWindowProc(hWnd, msg, wParam, lParam);
     }
 
-    protected virtual void OnDeactivate(EventArgs e)
+    public virtual void  OnDeactivate(EventArgs e)
     {
         Deactivated?.Invoke(this, e);
     }
 
-    protected virtual void OnActivated(EventArgs e)
+    public virtual void  OnActivated(EventArgs e)
     {
         Activated?.Invoke(this, e);
     }
@@ -1360,7 +1360,7 @@ private IntPtr _hWnd;
     /// <returns><c>true</c> if point is within draggable caption area.</returns>
     protected virtual bool IsCaptionHit(SKPoint clientPt) => false;
 
-    protected virtual void OnHandleCreated(EventArgs e)
+    public virtual void  OnHandleCreated(EventArgs e)
     {
         ApplyNativeWindowStyles();
         Orivy.Native.Windows.Helpers.ApplyRoundCorner(Handle);
@@ -1410,14 +1410,14 @@ private IntPtr _hWnd;
         }
     }
 
-    internal override void OnBackColorChanged(EventArgs e)
+    public override void  OnBackColorChanged(EventArgs e)
     {
         base.OnBackColorChanged(e);
 
         ApplyThemeToNativeWindow();
     }
 
-    internal override void OnTextChanged(EventArgs e)
+    public override void  OnTextChanged(EventArgs e)
     {
         base.OnTextChanged(e);
         UpdateNativeWindowText();
@@ -1537,7 +1537,7 @@ private IntPtr _hWnd;
         }
     }
 
-    internal override void OnMouseMove(MouseEventArgs e)
+    public override void  OnMouseMove(MouseEventArgs e)
     {
         if (TryDispatchCapturedMouseEvent(e, static (element, args) => element.OnMouseMove(args)))
             return;
@@ -1545,7 +1545,7 @@ private IntPtr _hWnd;
         base.OnMouseMove(e);
     }
 
-    internal override void OnMouseUp(MouseEventArgs e)
+    public override void  OnMouseUp(MouseEventArgs e)
     {
         if (TryDispatchCapturedMouseEvent(e, static (element, args) => element.OnMouseUp(args)))
             return;
@@ -1566,12 +1566,12 @@ private IntPtr _hWnd;
     /// <summary>
     ///     Raises the Shown event. Called when the window is first displayed.
     /// </summary>
-    protected virtual void OnShown(EventArgs e)
+    public virtual void  OnShown(EventArgs e)
     {
         Shown?.Invoke(this, e);
     }
 
-    protected virtual void OnResize(EventArgs e)
+    public virtual void  OnResize(EventArgs e)
     {
         Resize?.Invoke(this, e);
     }
@@ -1579,7 +1579,7 @@ private IntPtr _hWnd;
     /// <summary>
     ///     Raises the HandleDestroyed event. Called when the window handle is destroyed.
     /// </summary>
-    protected virtual void OnHandleDestroyed(EventArgs e)
+    public virtual void  OnHandleDestroyed(EventArgs e)
     {
         _idleMaintenanceTimer?.Stop();
         _idleMaintenanceTimer?.Dispose();
@@ -1663,7 +1663,7 @@ private IntPtr _hWnd;
         return new SKPoint(pt.X, pt.Y);
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

@@ -788,7 +788,7 @@ public partial class Window : WindowBase
         return !_isHandlingDpiChange;
     }
 
-    internal override void OnDpiChanged(float newDpi, float oldDpi)
+    public override void  OnDpiChanged(float newDpi, float oldDpi)
     {
         try
         {
@@ -851,7 +851,7 @@ public partial class Window : WindowBase
         }
     }
 
-    protected override void OnHandleCreated(EventArgs e)
+    public override void  OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
         EnsureInitialLayoutAndDpiSync();
@@ -902,7 +902,7 @@ public partial class Window : WindowBase
         Invalidate();
     }
 
-    internal override void OnControlAdded(ElementEventArgs e)
+    public override void  OnControlAdded(ElementEventArgs e)
     {
         base.OnControlAdded(e);
 
@@ -1132,7 +1132,7 @@ public partial class Window : WindowBase
         return true;
     }
 
-    protected internal override void OnMouseClick(MouseEventArgs e)
+    public override void  OnMouseClick(MouseEventArgs e)
     {
         if (_suppressNextPopupClick)
         {
@@ -1214,7 +1214,7 @@ public partial class Window : WindowBase
             _tabView.RaiseTabCloseButtonClick(middleClickTabIndex);
     }
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         // Make sure this Form receives keyboard input.
         var hitElement = FindHitTestElement(e.Location, requireEnabled: true);
@@ -1289,7 +1289,7 @@ public partial class Window : WindowBase
         return false;
     }
 
-    internal override void OnMouseDoubleClick(MouseEventArgs e)
+    public override void  OnMouseDoubleClick(MouseEventArgs e)
     {
         if (TryRouteMouseEventToFloatingOverlay(e, static (popup, localEvent) => popup.OnMouseDoubleClick(localEvent)))
             return;
@@ -1324,7 +1324,7 @@ public partial class Window : WindowBase
         }
     }
 
-    internal override void OnMouseUp(MouseEventArgs e)
+    public override void  OnMouseUp(MouseEventArgs e)
     {
         if (_popupMouseInteractionActive)
         {
@@ -1413,7 +1413,7 @@ public partial class Window : WindowBase
         }
     }
 
-    internal override void OnMouseMove(MouseEventArgs e)
+    public override void  OnMouseMove(MouseEventArgs e)
     {
         // Window drag always takes priority over element capture.
         // Without this ordering, a child control that accidentally captured the mouse
@@ -1531,7 +1531,7 @@ public partial class Window : WindowBase
         base.OnMouseMove(e);
     }
 
-    internal override void OnMouseLeave(EventArgs e)
+    public override void  OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
         _inExtendBox = _inCloseBox = _inMaxBox = _inMinBox = _inFormMenuBox = false;
@@ -1545,12 +1545,12 @@ public partial class Window : WindowBase
         Invalidate();
     }
 
-    internal override void OnMouseEnter(EventArgs e)
+    public override void  OnMouseEnter(EventArgs e)
     {
         base.OnMouseEnter(e);
     }
 
-    internal override void OnMouseWheel(MouseEventArgs e)
+    public override void  OnMouseWheel(MouseEventArgs e)
     {
         if (TryRouteMouseEventToFloatingOverlay(e, static (popup, localEvent) => popup.OnMouseWheel(localEvent)))
             return;
@@ -1589,7 +1589,7 @@ public partial class Window : WindowBase
         Invalidate();
     }
 
-    protected override void OnActivated(EventArgs e)
+    public override void  OnActivated(EventArgs e)
     {
         base.OnActivated(e);
 
@@ -1597,23 +1597,15 @@ public partial class Window : WindowBase
         Invalidate();
     }
 
-    protected override void OnDeactivate(EventArgs e)
+    public override void  OnDeactivate(EventArgs e)
     {
         base.OnDeactivate(e);
         Debug.WriteLine("OnDeactivate");
         Invalidate();
     }
 
-    protected override void RenderWindowFrame(SKCanvas canvas, SKImageInfo info)
+    public override void  OnPaint(SKCanvas canvas)
     {
-        PaintSurface(canvas, info);
-    }
-
-    private void PaintSurface(SKCanvas canvas, SKImageInfo info)
-    {
-        if (info.Width <= 0 || info.Height <= 0)
-            return;
-
         SyncTitleBarMenuStripLayout();
 
         bool revealNativeBackdrop = UsesNativeBackdropMaterial && DwmMargin != 0;
@@ -2024,25 +2016,25 @@ public partial class Window : WindowBase
         _hasCachedTitleBarTitleSampleColor = false;
     }
 
-    protected override void OnBackgroundImageChanged(EventArgs e)
+    public override void  OnBackgroundImageChanged(EventArgs e)
     {
         ResetTitleBarTitleSampleCache();
         base.OnBackgroundImageChanged(e);
     }
 
-    protected override void OnBackgroundImageLayoutChanged(EventArgs e)
+    public override void  OnBackgroundImageLayoutChanged(EventArgs e)
     {
         ResetTitleBarTitleSampleCache();
         base.OnBackgroundImageLayoutChanged(e);
     }
 
-    internal override void OnTextChanged(EventArgs e)
+    public override void  OnTextChanged(EventArgs e)
     {
         base.OnTextChanged(e);
         Invalidate();
     }
 
-    internal override void OnSizeChanged(EventArgs e)
+    public override void  OnSizeChanged(EventArgs e)
     {
         ResetTitleBarTitleSampleCache();
         CalcSystemBoxPos();
@@ -2051,7 +2043,7 @@ public partial class Window : WindowBase
         base.OnSizeChanged(e);
     }
 
-    protected override void OnShown(EventArgs e)
+    public override void  OnShown(EventArgs e)
     {
         base.OnShown(e);
 
@@ -2146,7 +2138,7 @@ public partial class Window : WindowBase
         return font;
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

@@ -70,7 +70,7 @@ public class Collapse : Container
         return new SKSize(Math.Max(MinimumSize.Width, width), HeaderHeight + contentHeight * _progress);
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
 
@@ -83,7 +83,7 @@ public class Collapse : Container
         DrawChevron(canvas, header);
     }
 
-    protected override void OnLayout(LayoutEventArgs e)
+    public override void  OnLayout(LayoutEventArgs e)
     {
         base.OnLayout(e);
 
@@ -100,7 +100,7 @@ public class Collapse : Container
         }
     }
 
-    protected internal override void OnMouseClick(MouseEventArgs e)
+    public override void  OnMouseClick(MouseEventArgs e)
     {
         if (e.Button == MouseButtons.Left && e.Y <= HeaderHeight)
         {
@@ -112,7 +112,7 @@ public class Collapse : Container
         base.OnMouseClick(e);
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

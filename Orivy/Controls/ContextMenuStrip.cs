@@ -392,7 +392,7 @@ public class ContextMenuStrip : MenuStrip
         ReevaluateVisualStyles();
     }
 
-    protected override void OnVisualStyleTransitionCompleted()
+    public override void  OnVisualStyleTransitionCompleted()
     {
         if (_isClosing && Opacity <= 0.001f)
             CompleteHide();
@@ -488,7 +488,7 @@ public class ContextMenuStrip : MenuStrip
         _ownerWindow.InvalidateRenderTree();
     }
 
-    protected override void OnItemClicked(MenuItem item)
+    public override void  OnItemClicked(MenuItem item)
     {
         if (UseAccordionSubmenus && item.HasDropDown)
         {
@@ -996,7 +996,7 @@ public class ContextMenuStrip : MenuStrip
         return new SKRect(left, top, right, bottom);
     }
 
-    internal override void OnSizeChanged(EventArgs e)
+    public override void  OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
         UpdateScrollState();
@@ -1278,7 +1278,7 @@ public class ContextMenuStrip : MenuStrip
         return new SKSize((int)Math.Ceiling(totalWidth), (int)Math.Ceiling(totalHeight));
     }
 
-    internal override void OnDpiChanged(float newDpi, float oldDpi)
+    public override void  OnDpiChanged(float newDpi, float oldDpi)
     {
         ApplyDpiMetrics(newDpi);
         _stableAccordionPopupSize = SKSize.Empty;
@@ -1286,7 +1286,7 @@ public class ContextMenuStrip : MenuStrip
         UpdateScrollState();
     }
 
-    internal override void OnMouseWheel(MouseEventArgs e)
+    public override void  OnMouseWheel(MouseEventArgs e)
     {
         base.OnMouseWheel(e);
 
@@ -1297,7 +1297,7 @@ public class ContextMenuStrip : MenuStrip
         Invalidate();
     }
 
-    internal override void OnMouseMove(MouseEventArgs e)
+    public override void  OnMouseMove(MouseEventArgs e)
     {
         ParentMenuHost?.NotifyPopupPointerEnter();
 
@@ -1379,7 +1379,7 @@ public class ContextMenuStrip : MenuStrip
             CloseSubmenu();
     }
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         if (e.Button == MouseButtons.Left)
             RaiseMouseDown(e);
@@ -1408,7 +1408,7 @@ public class ContextMenuStrip : MenuStrip
         CloseSubmenu();
     }
 
-    internal override void OnMouseLeave(EventArgs e)
+    public override void  OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
         ParentMenuHost?.NotifyPopupPointerLeave();
@@ -1457,7 +1457,7 @@ public class ContextMenuStrip : MenuStrip
         return engine;
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         EnsureSkiaCaches();
 
@@ -1998,7 +1998,7 @@ public class ContextMenuStrip : MenuStrip
         return w;
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

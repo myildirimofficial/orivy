@@ -389,7 +389,7 @@ public class MenuStrip : ElementBase
         }
     }
 
-    protected override void InvalidateFontCache()
+    public override void  InvalidateFontCache()
     {
         base.InvalidateFontCache();
         _defaultSkFont?.Dispose();
@@ -411,7 +411,7 @@ public class MenuStrip : ElementBase
         _shortcutSkFontDpi = 0;
     }
 
-    internal override void OnPaddingChanged(EventArgs e)
+    public override void  OnPaddingChanged(EventArgs e)
     {
         base.OnPaddingChanged(e);
         UpdateMenuStripHeight();
@@ -632,7 +632,7 @@ public class MenuStrip : ElementBase
         Invalidate();
     }
 
-    internal override void OnDpiChanged(float newDpi, float oldDpi)
+    public override void  OnDpiChanged(float newDpi, float oldDpi)
     {
         if (this is ContextMenuStrip)
         {
@@ -652,13 +652,13 @@ public class MenuStrip : ElementBase
         base.OnDpiChanged(newDpi, oldDpi);
     }
 
-    internal override void OnSizeChanged(EventArgs e)
+    public override void  OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
         RefreshOpenSubmenuAnchor();
     }
 
-    internal override void OnLocationChanged(EventArgs e)
+    public override void  OnLocationChanged(EventArgs e)
     {
         base.OnLocationChanged(e);
         RefreshOpenSubmenuAnchor();
@@ -738,7 +738,7 @@ public class MenuStrip : ElementBase
         return new SKSize(Padding.Horizontal + (_itemPadding * 2f) + maxWidth, height);
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
         var bounds = ClientRectangle;
@@ -1063,7 +1063,7 @@ public class MenuStrip : ElementBase
         return SkiaSharp.SKRect.Empty;
     }
 
-    internal override void OnMouseMove(MouseEventArgs e)
+    public override void  OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
         var entries = GetItemEntries();
@@ -1128,7 +1128,7 @@ public class MenuStrip : ElementBase
         }
     }
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
         if (e.Button != MouseButtons.Left) return;
@@ -1144,7 +1144,7 @@ public class MenuStrip : ElementBase
         CloseSubmenu();
     }
 
-    protected virtual void OnItemClicked(MenuItem item)
+    public virtual void  OnItemClicked(MenuItem item)
     {
         if (item.HasDropDown)
         {
@@ -1164,7 +1164,7 @@ public class MenuStrip : ElementBase
         }
     }
 
-    internal override void OnMouseLeave(EventArgs e)
+    public override void  OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
         if (_hoveredItem != null)
@@ -1561,7 +1561,7 @@ public class MenuStrip : ElementBase
         return ForeColor;
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

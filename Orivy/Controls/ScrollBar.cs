@@ -352,7 +352,7 @@ public class ScrollBar : ElementBase
     // Dispose
     // =========================================================================
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (IsDisposed) { base.Dispose(disposing); return; }
 
@@ -402,7 +402,7 @@ public class ScrollBar : ElementBase
         Invalidate();
     }
 
-    internal override void OnDpiChanged(float newDpi, float oldDpi)
+    public override void  OnDpiChanged(float newDpi, float oldDpi)
     {
         base.OnDpiChanged(newDpi, oldDpi);
         ApplyScaledThickness();
@@ -450,7 +450,7 @@ public class ScrollBar : ElementBase
             : new SKRect(thumbPos, 0, thumbPos + thumbLength, Height);
     }
 
-    internal override void OnSizeChanged(EventArgs e)
+    public override void  OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
         UpdateThumbRect();
@@ -460,7 +460,7 @@ public class ScrollBar : ElementBase
     // Painting
     // =========================================================================
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         float visibility = _autoHide ? (float)_visibilityAnim.GetProgress() : 1f;
         if (visibility <= 0f || _maximum <= _minimum) return;
@@ -820,7 +820,7 @@ public class ScrollBar : ElementBase
     // Mouse events
     // =========================================================================
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
         if (e.Button != MouseButtons.Left) return;
@@ -855,7 +855,7 @@ public class ScrollBar : ElementBase
         Invalidate();
     }
 
-    internal override void OnMouseMove(MouseEventArgs e)
+    public override void  OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
 
@@ -881,7 +881,7 @@ public class ScrollBar : ElementBase
         ShowWithAutoHide();
     }
 
-    internal override void OnMouseUp(MouseEventArgs e)
+    public override void  OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
         if (e.Button != MouseButtons.Left) return;
@@ -896,7 +896,7 @@ public class ScrollBar : ElementBase
         if (_autoHide) { _hideTimer.Stop(); _hideTimer.Start(); }
     }
 
-    internal override void OnMouseWheel(MouseEventArgs e)
+    public override void  OnMouseWheel(MouseEventArgs e)
     {
         base.OnMouseWheel(e);
 
@@ -907,14 +907,14 @@ public class ScrollBar : ElementBase
         ShowWithAutoHide();
     }
 
-    internal override void OnMouseEnter(EventArgs e)
+    public override void  OnMouseEnter(EventArgs e)
     {
         base.OnMouseEnter(e);
         _isHovered = true;
         ShowWithAutoHide();
     }
 
-    internal override void OnMouseLeave(EventArgs e)
+    public override void  OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
         _isHovered = false;
@@ -928,13 +928,13 @@ public class ScrollBar : ElementBase
     // Overridable event raisers
     // =========================================================================
 
-    protected virtual void OnValueChanged(EventArgs e)
+    public virtual void  OnValueChanged(EventArgs e)
     {
         ValueChanged?.Invoke(this, e);
         ShowWithAutoHide();
     }
 
-    protected virtual void OnScroll(EventArgs e) => Scroll?.Invoke(this, e);
+    public virtual void  OnScroll(EventArgs e) => Scroll?.Invoke(this, e);
 
     // =========================================================================
     // Layout

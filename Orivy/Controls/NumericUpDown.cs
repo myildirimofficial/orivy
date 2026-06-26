@@ -344,7 +344,7 @@ public class NumericUpDown : ElementBase
 
     protected override bool HandlesMouseWheelInput => MouseWheelEnabled;
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
 
@@ -358,14 +358,14 @@ public class NumericUpDown : ElementBase
             DrawAnimatedValue(canvas, GetTextRect(rect));
     }
 
-    internal override void OnMouseEnter(EventArgs e)
+    public override void  OnMouseEnter(EventArgs e)
     {
         _mouseOverControl = true;
         base.OnMouseEnter(e);
         Invalidate();
     }
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         if (!Enabled || e.Button != MouseButtons.Left)
         {
@@ -383,7 +383,7 @@ public class NumericUpDown : ElementBase
         PressStepper(e, raiseMouseDown: true);
     }
 
-    internal override void OnMouseDoubleClick(MouseEventArgs e)
+    public override void  OnMouseDoubleClick(MouseEventArgs e)
     {
         if (!Enabled || e.Button != MouseButtons.Left)
         {
@@ -401,7 +401,7 @@ public class NumericUpDown : ElementBase
         PressStepper(e, raiseMouseDown: false);
     }
 
-    internal override void OnMouseMove(MouseEventArgs e)
+    public override void  OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
         var hit = HitTest(e.Location);
@@ -412,7 +412,7 @@ public class NumericUpDown : ElementBase
         Invalidate();
     }
 
-    internal override void OnMouseUp(MouseEventArgs e)
+    public override void  OnMouseUp(MouseEventArgs e)
     {
         if (!_stepperMouseDown)
             base.OnMouseUp(e);
@@ -432,7 +432,7 @@ public class NumericUpDown : ElementBase
         Invalidate();
     }
 
-    internal override void OnMouseLeave(EventArgs e)
+    public override void  OnMouseLeave(EventArgs e)
     {
         _hoverPart = ButtonPart.None;
         _pressedPart = ButtonPart.None;
@@ -444,7 +444,7 @@ public class NumericUpDown : ElementBase
         Invalidate();
     }
 
-    protected internal override void OnMouseClick(MouseEventArgs e)
+    public override void  OnMouseClick(MouseEventArgs e)
     {
         if (_suppressNextStepperClick)
         {
@@ -456,7 +456,7 @@ public class NumericUpDown : ElementBase
         base.OnMouseClick(e);
     }
 
-    internal override void OnMouseWheel(MouseEventArgs e)
+    public override void  OnMouseWheel(MouseEventArgs e)
     {
         if (!Enabled || !MouseWheelEnabled)
         {
@@ -468,7 +468,7 @@ public class NumericUpDown : ElementBase
         e.Handled = true;
     }
 
-    internal override void OnKeyDown(KeyEventArgs e)
+    public override void  OnKeyDown(KeyEventArgs e)
     {
         if (TryHandleKeyboardStep(e))
             return;
@@ -476,7 +476,7 @@ public class NumericUpDown : ElementBase
         base.OnKeyDown(e);
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

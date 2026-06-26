@@ -13,19 +13,19 @@ public class AnimatedButton : Button
         _hoverAnim.OnAnimationProgress += (_) => Invalidate();
     }
 
-    protected override void OnMouseEnter(EventArgs e)
+    public override void  OnMouseEnter(EventArgs e)
     {
         base.OnMouseEnter(e);
         _hoverAnim.StartNewAnimation(AnimationDirection.In);
     }
 
-    protected override void OnMouseLeave(EventArgs e)
+    public override void  OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
         _hoverAnim.StartNewAnimation(AnimationDirection.Out);
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
         var progress = (float)_hoverAnim.GetProgress();

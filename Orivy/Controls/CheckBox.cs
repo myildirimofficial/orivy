@@ -95,7 +95,7 @@ public class CheckBox : ElementBase
 
     protected override bool GetVisualCheckedState() => Checked;
 
-    public override void OnClick(EventArgs e)
+    public override void  OnClick(EventArgs e)
     {
         ToggleCheckState();
         base.OnClick(e);
@@ -147,7 +147,7 @@ public class CheckBox : ElementBase
         return new SKSize((float)Math.Ceiling(width), (float)Math.Ceiling(height));
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
 
@@ -160,7 +160,7 @@ public class CheckBox : ElementBase
         DrawCheckBoxText(canvas, content, boxRect);
     }
 
-    internal override void OnKeyDown(KeyEventArgs e)
+    public override void  OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
 
@@ -174,7 +174,7 @@ public class CheckBox : ElementBase
         e.Handled = true;
     }
 
-    internal override void OnKeyUp(KeyEventArgs e)
+    public override void  OnKeyUp(KeyEventArgs e)
     {
         base.OnKeyUp(e);
 
@@ -191,23 +191,23 @@ public class CheckBox : ElementBase
             PerformClick();
     }
 
-    internal override void OnLostFocus(EventArgs e)
+    public override void  OnLostFocus(EventArgs e)
     {
         _keyboardPressArmed = false;
         base.OnLostFocus(e);
     }
 
-    protected virtual void OnCheckedChanged(EventArgs e)
+    public virtual void  OnCheckedChanged(EventArgs e)
     {
         CheckedChanged?.Invoke(this, e);
     }
 
-    protected virtual void OnCheckStateChanged(EventArgs e)
+    public virtual void  OnCheckStateChanged(EventArgs e)
     {
         CheckStateChanged?.Invoke(this, e);
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {

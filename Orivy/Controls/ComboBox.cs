@@ -436,7 +436,7 @@ public class ComboBox : ElementBase
         return new SKSize((float)Math.Ceiling(width), (float)Math.Ceiling(height));
     }
 
-    public override void OnPaint(SKCanvas canvas)
+    public override void  OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
 
@@ -509,7 +509,7 @@ public class ComboBox : ElementBase
         }
     }
 
-    internal override void OnMouseDown(MouseEventArgs e)
+    public override void  OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
 
@@ -529,7 +529,7 @@ public class ComboBox : ElementBase
         UpdatePressedState(false);
     }
 
-    internal override void OnMouseWheel(MouseEventArgs e)
+    public override void  OnMouseWheel(MouseEventArgs e)
     {
         base.OnMouseWheel(e);
 
@@ -539,7 +539,7 @@ public class ComboBox : ElementBase
         SelectRelative(e.Delta > 0 ? -1 : 1, raiseCommitted: true);
     }
 
-    internal override void OnKeyDown(KeyEventArgs e)
+    public override void  OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
 
@@ -602,7 +602,7 @@ public class ComboBox : ElementBase
         }
     }
 
-    internal override void OnLostFocus(EventArgs e)
+    public override void  OnLostFocus(EventArgs e)
     {
         //if (DroppedDown && !IsDropDownDescendant(ParentWindow?.FocusedElement))
             //CloseDropDown();
@@ -610,7 +610,7 @@ public class ComboBox : ElementBase
         base.OnLostFocus(e);
     }
 
-    internal override void OnVisibleChanged(EventArgs e)
+    public override void  OnVisibleChanged(EventArgs e)
     {
         if (!Visible && DroppedDown)
             CloseDropDown();
@@ -618,7 +618,7 @@ public class ComboBox : ElementBase
         base.OnVisibleChanged(e);
     }
 
-    internal override void OnEnabledChanged(EventArgs e)
+    public override void  OnEnabledChanged(EventArgs e)
     {
         if (!Enabled && DroppedDown)
             CloseDropDown();
@@ -626,19 +626,19 @@ public class ComboBox : ElementBase
         base.OnEnabledChanged(e);
     }
 
-    internal override void OnLocationChanged(EventArgs e)
+    public override void  OnLocationChanged(EventArgs e)
     {
         base.OnLocationChanged(e);
         UpdateDropDownAnchor();
     }
 
-    internal override void OnSizeChanged(EventArgs e)
+    public override void  OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
         UpdateDropDownAnchor();
     }
 
-    protected override void InvalidateFontCache()
+    public override void  InvalidateFontCache()
     {
         base.InvalidateFontCache();
 
@@ -648,7 +648,7 @@ public class ComboBox : ElementBase
         _renderFontDpi = 0;
     }
 
-    protected override void Dispose(bool disposing)
+    public override void  Dispose(bool disposing)
     {
         if (disposing)
         {
@@ -1612,7 +1612,7 @@ public class ComboBox : ElementBase
             ApplyOwnerAppearance();
         }
 
-        public override void OnPaint(SKCanvas canvas)
+        public override void  OnPaint(SKCanvas canvas)
         {
             base.OnPaint(canvas);
             DrawSelectionIndicators(canvas);
@@ -1682,7 +1682,7 @@ public class ComboBox : ElementBase
             _owner.ParentWindow?.InvalidateRenderTree();
         }
 
-        protected override void Dispose(bool disposing)
+        public override void  Dispose(bool disposing)
         {
             if (disposing)
             {
@@ -1704,7 +1704,7 @@ public class ComboBox : ElementBase
             _owner.CommitSelectionFromDropDown(index);
         }
 
-        protected override void OnItemClicked(MenuItem item)
+        public override void  OnItemClicked(MenuItem item)
         {
             if (_owner.MultiSelect && !item.HasDropDown)
             {
