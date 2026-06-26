@@ -743,7 +743,7 @@ public sealed partial class ColorPicker : ElementBase
         _fontDpi = 0;
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {

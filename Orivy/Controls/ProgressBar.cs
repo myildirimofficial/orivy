@@ -197,7 +197,7 @@ public class ProgressBar : ElementBase
             DrawProgressText(canvas, rect);
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {

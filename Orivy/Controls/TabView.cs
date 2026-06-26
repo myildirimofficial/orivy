@@ -1225,7 +1225,7 @@ public partial class TabView : ElementBase
         InvalidateTabChrome();
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {

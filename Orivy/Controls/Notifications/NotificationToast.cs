@@ -1119,7 +1119,7 @@ public sealed class NotificationToast : ElementBase
 		return Math.Clamp(wrappedLines.Count, 1, MaxMessageLines);
 	}
 
-	public override void  Dispose(bool disposing)
+	protected override void Dispose(bool disposing)
 	{
 		if (disposing)
 		{

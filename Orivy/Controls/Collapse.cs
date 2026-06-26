@@ -112,7 +112,7 @@ public class Collapse : Container
         base.OnMouseClick(e);
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {

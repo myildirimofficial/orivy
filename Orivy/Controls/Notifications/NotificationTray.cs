@@ -352,7 +352,7 @@ internal sealed class NotificationTray : ElementBase
 		_scrollShadowPaint.Shader = null;
 	}
 
-	public override void  Dispose(bool disposing)
+	protected override void Dispose(bool disposing)
 	{
 		if (disposing)
 		{

@@ -179,7 +179,7 @@ public class SplitContainer : Container
         base.OnLostFocus(e);
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {

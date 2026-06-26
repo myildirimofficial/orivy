@@ -1663,7 +1663,7 @@ private IntPtr _hWnd;
         return new SKPoint(pt.X, pt.Y);
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {

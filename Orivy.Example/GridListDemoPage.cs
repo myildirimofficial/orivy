@@ -187,7 +187,7 @@ internal sealed partial class GridListDemoPage : Container
         gridListStatus.Text = $"{title}\n{body}";
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {

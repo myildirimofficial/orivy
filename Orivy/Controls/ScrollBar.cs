@@ -352,7 +352,7 @@ public class ScrollBar : ElementBase
     // Dispose
     // =========================================================================
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (IsDisposed) { base.Dispose(disposing); return; }
 

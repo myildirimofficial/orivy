@@ -81,7 +81,7 @@ public class IconLabel : ElementBase
         canvas.DrawText(Text, Padding.Left, Padding.Top + Font.Metrics.Ascent, _textPaint);
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void  Dispose(bool disposing)
     {
         if (disposing)
             _textPaint.Dispose();

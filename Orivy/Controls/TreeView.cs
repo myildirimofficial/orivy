@@ -203,7 +203,7 @@ public class TreeView : ElementBase
         base.OnLayout(e);
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {

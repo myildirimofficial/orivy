@@ -279,7 +279,7 @@ public sealed class ButtonGroup<TValue> : Container
         return new SKSize(width, height);
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
             UnregisterElement(this);

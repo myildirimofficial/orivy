@@ -648,7 +648,7 @@ public class ComboBox : ElementBase
         _renderFontDpi = 0;
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
@@ -1682,7 +1682,7 @@ public class ComboBox : ElementBase
             _owner.ParentWindow?.InvalidateRenderTree();
         }
 
-        public override void  Dispose(bool disposing)
+        protected override void Dispose(bool disposing)
         {
             if (disposing)
             {

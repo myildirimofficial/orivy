@@ -476,7 +476,7 @@ public class NumericUpDown : ElementBase
         base.OnKeyDown(e);
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {

@@ -1998,7 +1998,7 @@ public class ContextMenuStrip : MenuStrip
         return w;
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {

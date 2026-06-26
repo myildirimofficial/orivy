@@ -19,7 +19,7 @@ internal sealed partial class NotificationsDemoPage : Container
         InitializeComponent();
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {

@@ -77,7 +77,7 @@ public class Badge : ElementBase
         Invalidate();
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void  Dispose(bool disposing)
     {
         if (disposing)
             ColorScheme.ThemeChanged -= HandleThemeChanged;

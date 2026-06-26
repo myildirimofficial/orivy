@@ -371,7 +371,7 @@ public class DatePicker : ElementBase
         UpdateHostedTextBoxBounds();
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
@@ -925,7 +925,7 @@ public class DatePicker : ElementBase
             base.OnMouseUp(e);
         }
 
-        public override void  Dispose(bool disposing)
+        protected override void Dispose(bool disposing)
         {
             if (disposing)
             {

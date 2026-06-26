@@ -492,7 +492,7 @@ public class SwitchButton : ElementBase
         base.OnLostFocus(e);
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {

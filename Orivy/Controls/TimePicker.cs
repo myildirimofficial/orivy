@@ -253,7 +253,7 @@ public class TimePicker : ElementBase
         UpdateHostedTextBoxBounds();
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
@@ -697,7 +697,7 @@ public class TimePicker : ElementBase
             base.OnMouseUp(e);
         }
 
-        public override void  Dispose(bool disposing)
+        protected override void Dispose(bool disposing)
         {
             if (disposing)
             {

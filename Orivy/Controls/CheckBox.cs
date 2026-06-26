@@ -207,7 +207,7 @@ public class CheckBox : ElementBase
         CheckStateChanged?.Invoke(this, e);
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {

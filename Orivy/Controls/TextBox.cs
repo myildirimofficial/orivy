@@ -890,7 +890,7 @@ public class TextBox : ElementBase
         return Math.Max(10f, horizontalStep * 1.5f);
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {

@@ -200,7 +200,7 @@ public class RadioButton : ElementBase
         CheckedChanged?.Invoke(this, e);
     }
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
