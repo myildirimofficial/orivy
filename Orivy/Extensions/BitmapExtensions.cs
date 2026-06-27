@@ -37,29 +37,14 @@ public static class BitmapExtensions
         {
             bitmap.UnlockBits(bmpData);
         }
-    }/// <summary>
-     /// Converts a System.Drawing.Bitmap to a SkiaSharp.SKImage.
-     /// The caller is responsible for disposing the returned SKImage.
-     /// </summary>
-    public unsafe static SKImage ToSKImage(this Bitmap bitmap)
+    }
+
+    /// <summary>
+    /// Converts a System.Drawing.Bitmap to a SkiaSharp.SKImage.
+    /// The caller is responsible for disposing the returned SKImage.
+    /// </summary>
+    public static SKImage ToSKImage(this Bitmap bitmap)
     {
-        if (bitmap == null)
-            throw new ArgumentNullException(nameof(bitmap));
-
-        // Lock the bitmap's bits
-        var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
-        var bmpData = bitmap.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
-
-        try
-        {
-            // Create SKImage with the same dimensions
-            var skImage = SKImage.FromPixels(new SKImageInfo(bitmap.Width, bitmap.Height, SKColorType.Bgra8888, SKAlphaType.Premul), bmpData.Scan0, bmpData.Stride);
-
-            return skImage;
-        }
-        finally
-        {
-            bitmap.UnlockBits(bmpData);
-        }
+        return SKImage.FromBitmap(bitmap.ToSKBitmap());
     }
 }

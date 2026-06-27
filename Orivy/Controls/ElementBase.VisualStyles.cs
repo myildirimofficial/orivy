@@ -22,7 +22,7 @@ public abstract partial class ElementBase
     private bool _styleBaseOverridesWidth;
     private bool _styleBaseOverridesHeight;
     private bool _isPressed;
-    private bool _isPointerOver;
+    protected bool _isPointerOver;
     private bool _visualStylesEnabled;
     private bool _visualStylesInitialized;
 

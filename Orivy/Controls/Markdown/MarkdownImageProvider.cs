@@ -17,26 +17,26 @@ public interface IMarkdownImageProvider
     /// <summary>Returns a cached decoded image if already available, without starting a load.</summary>
     SKImage? TryGetCached(string url);
 
-    /// <summary>Begins loading <paramref name="url"/> if not already cached/in-flight. Fire-and-forget
-    /// is fine; call <paramref name="onLoaded"/> when the image becomes available (or failed,
-    /// in which case it may be called with <c>null</c>). May be invoked from any thread.</summary>
+    /// <summary>Begins loading <paramref name="url"/> if not already cached/in-flight.
+    /// Call <paramref name="onLoaded"/> when the image becomes available (or on failure, with null).
+    /// May be invoked from any thread.</summary>
     void RequestLoad(string url, Action<string, SKImage?> onLoaded);
 }
 
 /// <summary>
 /// Default <see cref="IMarkdownImageProvider"/>: downloads over HTTP(S) with an in-memory
-/// decode cache. A single static <see cref="HttpClient"/> is shared across instances.
+/// decode cache.
 ///
-/// THREADING NOTE: <paramref name="onLoaded"/> callbacks fire on a background thread pool
-/// thread (via <c>Task.Run</c>), not marshaled onto any particular UI thread -- because
-/// <c>ElementBase.BeginInvoke</c> in this version of the framework executes synchronously
-/// rather than marshaling across threads, there is no safe generic hand-off point to use
-/// here. <see cref="MarkdownViewer"/> only flips a couple of plain fields and calls
-/// <c>Invalidate()</c> from this callback, which appears safe given how <c>Invalidate()</c>
-/// is implemented (simple dirty-flag sets), but if your render loop assumes single-threaded
-/// access you should marshal <paramref name="onLoaded"/> onto your UI thread/dispatcher
-/// before it reaches MarkdownViewer (e.g. wrap this provider and post through your own
-/// scheduler).
+/// Supported formats: JPEG, PNG, GIF, BMP, ICO, WebP, WBMP (via SkiaSharp built-in),
+/// and SVG (via SkiaSharp.Extended.Svg when that assembly is present at runtime — no hard
+/// dependency; falls back to a null/placeholder when the assembly is absent).
+///
+/// data: URIs are also decoded inline (base64 encoded PNG/JPEG/etc and SVG+xml).
+///
+/// THREADING: <paramref name="onLoaded"/> fires on a thread-pool thread. MarkdownViewer
+/// only sets a dirty flag and calls Invalidate() from the callback which is safe, but if
+/// your render loop is strictly single-threaded, wrap this provider and marshal through
+/// your own dispatcher.
 /// </summary>
 public sealed class HttpMarkdownImageProvider : IMarkdownImageProvider
 {
@@ -49,8 +49,8 @@ public sealed class HttpMarkdownImageProvider : IMarkdownImageProvider
         return client;
     }
 
-    private readonly ConcurrentDictionary<string, SKImage> _cache = new();
-    private readonly ConcurrentDictionary<string, byte> _inFlight = new();
+    private readonly ConcurrentDictionary<string, SKImage>  _cache    = new();
+    private readonly ConcurrentDictionary<string, byte>     _inFlight = new();
 
     public SKImage? TryGetCached(string url) =>
         !string.IsNullOrEmpty(url) && _cache.TryGetValue(url, out var img) ? img : null;
@@ -58,7 +58,7 @@ public sealed class HttpMarkdownImageProvider : IMarkdownImageProvider
     public void RequestLoad(string url, Action<string, SKImage?> onLoaded)
     {
         if (string.IsNullOrWhiteSpace(url)) return;
-        if (_cache.ContainsKey(url)) { onLoaded(url, _cache[url]); return; }
+        if (_cache.TryGetValue(url, out var hit)) { onLoaded(url, hit); return; }
         if (!_inFlight.TryAdd(url, 0)) return;
 
         _ = Task.Run(async () =>
@@ -67,39 +67,109 @@ public sealed class HttpMarkdownImageProvider : IMarkdownImageProvider
             try
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
                 if (url.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
                 {
                     decoded = DecodeDataUri(url);
                 }
                 else
                 {
-                    byte[] bytes = await SharedClient.GetByteArrayAsync(url, cts.Token).ConfigureAwait(false);
-                    using var data = SKData.CreateCopy(bytes);
-                    decoded = SKImage.FromEncodedData(data);
+                    byte[] bytes = await SharedClient
+                        .GetByteArrayAsync(url, cts.Token)
+                        .ConfigureAwait(false);
+                    decoded = DecodeBytes(bytes, url);
                 }
             }
-            catch
-            {
-                decoded = null;
-            }
-            finally
-            {
-                _inFlight.TryRemove(url, out _);
-            }
+            catch { decoded = null; }
+            finally { _inFlight.TryRemove(url, out _); }
 
             if (decoded != null) _cache[url] = decoded;
             onLoaded(url, decoded);
         });
     }
 
+    // ----------------------------------------------------------------
+    // Decoding
+    // ----------------------------------------------------------------
+
+    /// <summary>
+    /// Decode raw bytes to an SKImage.
+    /// Tries SVG first (when the URL ends with .svg or bytes look like SVG),
+    /// then falls back to SkiaSharp's built-in codec (PNG/JPEG/GIF/BMP/WebP/ICO/WBMP).
+    /// </summary>
+    private static SKImage? DecodeBytes(byte[] bytes, string urlHint)
+    {
+        bool looksLikeSvg = IsSvgBytes(bytes) ||
+                            urlHint.EndsWith(".svg",  StringComparison.OrdinalIgnoreCase) ||
+                            urlHint.EndsWith(".svgz", StringComparison.OrdinalIgnoreCase);
+
+        if (looksLikeSvg)
+        {
+            var svgImg = TryDecodeSvg(bytes, urlHint);
+            if (svgImg != null) return svgImg;
+        }
+
+        // Standard raster formats (JPEG, PNG, GIF, BMP, WebP, ICO, WBMP)
+        using var data = SKData.CreateCopy(bytes);
+        return SKImage.FromEncodedData(data);
+    }
+
+    /// <summary>Quick check: first non-whitespace bytes are &lt;? or &lt;s or PK (gzip svg)</summary>
+    private static bool IsSvgBytes(byte[] b)
+    {
+        int i = 0;
+        while (i < b.Length && b[i] <= 0x20) i++;
+        if (i + 4 >= b.Length) return false;
+        // Plain SVG starts with '<' ('<?xml' or '<svg')
+        if (b[i] == (byte)'<') return true;
+        // Gzip magic bytes 1F 8B (svgz)
+        if (b[i] == 0x1F && i + 1 < b.Length && b[i + 1] == 0x8B) return true;
+        return false;
+    }
+
+    // ----------------------------------------------------------------
+    // SVG via AdvancedSvgRenderer (built-in, no external dependency)
+    // ----------------------------------------------------------------
+
+    private static SKImage? TryDecodeSvg(byte[] bytes, string urlHint) =>
+        SvgRenderer.Render(bytes);
+
+    // ----------------------------------------------------------------
+    // data: URI decoding
+    // ----------------------------------------------------------------
+
     private static SKImage? DecodeDataUri(string uri)
     {
+        // data:[<mediatype>][;base64],<data>
         int comma = uri.IndexOf(',');
         if (comma < 0) return null;
-        string meta = uri[5..comma];
+
+        string meta    = uri[5..comma];           // skip "data:"
         string payload = uri[(comma + 1)..];
-        if (!meta.Contains("base64", StringComparison.OrdinalIgnoreCase)) return null;
-        byte[] bytes = Convert.FromBase64String(payload);
+
+        bool isBase64 = meta.Contains("base64", StringComparison.OrdinalIgnoreCase);
+        bool isSvg    = meta.Contains("svg",    StringComparison.OrdinalIgnoreCase);
+
+        byte[] bytes;
+        if (isBase64)
+        {
+            try { bytes = Convert.FromBase64String(payload); }
+            catch { return null; }
+        }
+        else if (isSvg)
+        {
+            // URL-encoded or plain SVG text
+            string decoded = Uri.UnescapeDataString(payload);
+            bytes = System.Text.Encoding.UTF8.GetBytes(decoded);
+        }
+        else
+        {
+            return null;
+        }
+
+        if (isSvg)
+            return TryDecodeSvg(bytes, "data:image/svg+xml") ?? null;
+
         using var data = SKData.CreateCopy(bytes);
         return SKImage.FromEncodedData(data);
     }

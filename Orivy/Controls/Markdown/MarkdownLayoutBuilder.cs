@@ -672,6 +672,9 @@ internal static class MarkdownLayoutBuilder
     private static void LayoutFootnotes(Ctx ctx, FootnotesBlock fn, float x, float width)
     {
         if (fn.Definitions.Count == 0) return;
+        // Register the footnotes section top as a named anchor "fn-<label>"
+        // so #fn-label links (from FootnoteRefInline) can scroll here.
+        ctx.HeadingPositions["footnotes"] = ctx.Y;
 
         float scale     = ctx.Scale;
         float hairH     = MathF.Max(1f, scale);
@@ -693,6 +696,8 @@ internal static class MarkdownLayoutBuilder
 
         foreach (var def in fn.Definitions)
         {
+            // Register anchor for #fn-<label> links
+            ctx.HeadingPositions[$"fn-{def.Label.ToLowerInvariant()}"] = ctx.Y;
             float startY = ctx.Y;
 
             // Number label

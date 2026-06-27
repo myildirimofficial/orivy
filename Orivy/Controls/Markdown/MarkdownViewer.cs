@@ -62,11 +62,11 @@ public class MarkdownViewer : ElementBase
 
     public MarkdownViewer()
     {
-        AutoScroll = true;
         Padding    = new Thickness(16, 16, 16, 16);
         BackColor  = SKColors.Transparent;
         CanSelect  = true;
         TabStop    = true;
+        AutoScroll = true;
 
         _interaction.ImageProvider  = _imageProvider;
         _interaction.OnImageLoaded  = OnImageLoaded;
@@ -162,6 +162,26 @@ public class MarkdownViewer : ElementBase
         return true;
     }
 
+    /// <summary>
+    /// Scrolls to any named anchor: heading slugs AND footnote anchors (fn-label).
+    /// Called automatically when a #fragment link is clicked.
+    /// </summary>
+    public bool ScrollToAnchor(string anchor, bool animate = true)
+    {
+        if (string.IsNullOrEmpty(anchor)) return false;
+        // Headings first
+        if (ScrollToHeading(anchor, animate)) return true;
+        // Footnote anchors registered under "fn-<label>"
+        if (_headingPositions.TryGetValue(anchor, out var y))
+        {
+            if (_vScrollBar == null) return false;
+            float target = Math.Clamp(y - 8f * ScaleFactor, _vScrollBar.Minimum, _vScrollBar.Maximum);
+            if (animate) _vScrollBar.Value = target; else _vScrollBar.SetValueImmediate(target);
+            return true;
+        }
+        return false;
+    }
+
     public void ScrollToTop(bool animate = true)
     {
         if (_vScrollBar == null) return;
@@ -194,7 +214,7 @@ public class MarkdownViewer : ElementBase
     protected override bool ProcessTextEscapeSequences => false;
     protected override bool ShouldRenderDefaultText    => false;
 
-    public override void  OnTextChanged(EventArgs e)
+    public override void OnTextChanged(EventArgs e)
     {
         base.OnTextChanged(e);
         _document = MarkdownParser.Parse(Text);
@@ -206,25 +226,25 @@ public class MarkdownViewer : ElementBase
         MarkdownParsed?.Invoke(this, EventArgs.Empty);
     }
 
-    public override void  OnSizeChanged(EventArgs e)
+    public override void OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
         if (Width > 0 && Height > 0) ReflowContent();
     }
 
-    public override void  OnPaddingChanged(EventArgs e)
+    public override void OnPaddingChanged(EventArgs e)
     {
         base.OnPaddingChanged(e);
         ReflowContent();
     }
 
-    public override void  OnDpiChanged(float newDpi, float oldDpi)
+    public override void OnDpiChanged(float newDpi, float oldDpi)
     {
         base.OnDpiChanged(newDpi, oldDpi);
         ReflowContent();
     }
 
-    public override void  OnFontChanged(EventArgs e)
+    public override void OnFontChanged(EventArgs e)
     {
         base.OnFontChanged(e);
         _layoutDirty = true;
@@ -282,25 +302,60 @@ public class MarkdownViewer : ElementBase
         _layoutDirty      = false;
         _selection.Clear();   // box indices are stale after a reflow
 
-        AutoScrollMinSize = new SKSize(0, _contentHeight);
         UpdateScrollBars();
         Invalidate();
     }
 
-    private void OnImageLoaded(string url, SKImage? image)
+private void OnImageLoaded(string url, SKImage? image)
     {
+        // Mark layout dirty so the next paint recalculates image sizes;
+        // don't call ReflowContent() here — it runs synchronously and may be called
+        // from a background thread (HttpMarkdownImageProvider fires callbacks on the thread pool).
+        // OnPaint will call ReflowContent() on the UI thread when _layoutDirty is true.
         _layoutDirty = true;
-        ReflowContent();
+        Invalidate();
     }
 
     private float GetVerticalScrollOffset() =>
-        _vScrollBar != null && _vScrollBar.Visible ? _vScrollBar.DisplayValue : 0f;
+        _vScrollBar?.Visible == true ? _vScrollBar.DisplayValue : 0f;
+
+    protected override void UpdateScrollBars()
+    {
+        if (_vScrollBar == null || _hScrollBar == null)
+            return;
+
+        var contentHeight = _contentHeight + AutoScrollMargin.Height;
+
+        var needsVScroll = contentHeight > Height;
+
+        _vScrollBar.Visible = needsVScroll;
+        _hScrollBar.Visible = false;
+        _hScrollBar.Maximum = 0;
+        _hScrollBar.Value = 0;
+        PositionOverlayScrollBars(needsVScroll, false);
+        UpdateHostedScrollBarHoverState(_isPointerOver);
+        EnsureOverlayScrollBarsAreTopmost();
+
+        if (needsVScroll)
+        {
+            _vScrollBar.Maximum = Math.Max(0, contentHeight - Height);
+            _vScrollBar.SmallChange = Math.Max(8f, 14f * ScaleFactor);
+            _vScrollBar.LargeChange = Math.Max(1, Height / 2);
+            if (_vScrollBar.Value > _vScrollBar.Maximum)
+                _vScrollBar.Value = _vScrollBar.Maximum;
+        }
+        else
+        {
+            _vScrollBar.Maximum = 0;
+            _vScrollBar.Value = 0;
+        }
+    }
 
     // ====================================================================
     // Painting
     // ====================================================================
 
-    public override void  OnPaint(SKCanvas canvas)
+    public override void OnPaint(SKCanvas canvas)
     {
         if (_layoutDirty) ReflowContent();
 
@@ -463,7 +518,7 @@ public class MarkdownViewer : ElementBase
     // Mouse — move
     // ====================================================================
 
-    public override void  OnMouseMove(MouseEventArgs e)
+    public override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
 
@@ -513,7 +568,7 @@ public class MarkdownViewer : ElementBase
     // Mouse — down
     // ====================================================================
 
-    public override void  OnMouseDown(MouseEventArgs e)
+    public override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
         if (e.Button != MouseButtons.Left) return;
@@ -565,7 +620,7 @@ public class MarkdownViewer : ElementBase
     // Mouse — up
     // ====================================================================
 
-    public override void  OnMouseUp(MouseEventArgs e)
+    public override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
         _draggingCodeBlock    = null;
@@ -577,7 +632,7 @@ public class MarkdownViewer : ElementBase
     // Mouse — leave
     // ====================================================================
 
-    public override void  OnMouseLeave(EventArgs e)
+    public override void OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
         ClearHover();
@@ -590,7 +645,7 @@ public class MarkdownViewer : ElementBase
     // Mouse — click (link open, copy button, checkbox, details toggle)
     // ====================================================================
 
-    public override void  OnMouseClick(MouseEventArgs e)
+    public override void OnMouseClick(MouseEventArgs e)
     {
         base.OnMouseClick(e);
         if (e.Button != MouseButtons.Left) return;
@@ -612,7 +667,7 @@ public class MarkdownViewer : ElementBase
             else
             {
                 // Default: put code on the clipboard
-                TryCopyToClipboard(code);
+                ClipboardHelper.TrySetText(code);
             }
             return;
         }
@@ -629,6 +684,8 @@ public class MarkdownViewer : ElementBase
                     MarkdownParser.PlainText(hit.Link.Children));
                 if (LinkClicked != null)
                     LinkClicked.Invoke(this, args);
+                else if (hit.Link.Url.StartsWith('#'))
+                    ScrollToAnchor(hit.Link.Url[1..]);   // internal anchor
                 else if (AutoOpenLinks)
                     OpenInDefaultBrowser(hit.Link.Url);
             }
@@ -666,74 +723,42 @@ public class MarkdownViewer : ElementBase
     }
 
     // ====================================================================
-    // Clipboard — Win32 P/Invoke (reliable on all Windows UI frameworks)
-    // ====================================================================
-
-    private static void TryCopyToClipboard(string text)
-    {
-        if (string.IsNullOrEmpty(text)) return;
-        try
-        {
-            if (!OpenClipboard(IntPtr.Zero)) return;
-            EmptyClipboard();
-            byte[] bytes = System.Text.Encoding.Unicode.GetBytes(text + "\0");
-            var hMem = GlobalAlloc(0x0042u /* GMEM_MOVEABLE | GMEM_ZEROINIT */, (UIntPtr)(uint)bytes.Length);
-            if (hMem == IntPtr.Zero) { CloseClipboard(); return; }
-            var ptr = GlobalLock(hMem);
-            if (ptr != IntPtr.Zero)
-            {
-                System.Runtime.InteropServices.Marshal.Copy(bytes, 0, ptr, bytes.Length);
-                GlobalUnlock(hMem);
-            }
-            SetClipboardData(13u /* CF_UNICODETEXT */, hMem);
-        }
-        catch { /* clipboard access can fail silently */ }
-        finally { try { CloseClipboard(); } catch { } }
-    }
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-    private static extern bool OpenClipboard(IntPtr hWndNewOwner);
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern bool EmptyClipboard();
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern IntPtr SetClipboardData(uint uFormat, IntPtr hMem);
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern bool CloseClipboard();
-    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
-    private static extern IntPtr GlobalAlloc(uint uFlags, UIntPtr dwBytes);
-    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
-    private static extern IntPtr GlobalLock(IntPtr hMem);
-    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
-    private static extern bool GlobalUnlock(IntPtr hMem);
-
-    // ====================================================================
     // Mouse — wheel  (vertical page scroll + code-block horizontal scroll)
     // ====================================================================
 
-    public override void  OnMouseWheel(MouseEventArgs e)
+public override void OnMouseWheel(MouseEventArgs e)
     {
-        // Horizontal wheel or Shift+wheel → scroll code block / table horizontally
-        bool isHorizontal = e.IsHorizontalWheel || (ModifierKeys & Keys.Shift) != 0;
-
-        if (isHorizontal)
+        // Native horizontal wheel (trackpad two-finger horizontal, horizontal scroll wheel)
+        if (e.IsHorizontalWheel)
         {
             if (_hover.HoveredCodeBlock != null && _hover.HoveredCodeBlock.NeedsHorizontalScroll)
-            {
-                ScrollCodeBlockHorizontal(_hover.HoveredCodeBlock, e.IsHorizontalWheel ? e.Delta : -e.Delta);
-                Invalidate();
-                e.Handled = true;
-                return;
-            }
+            { ScrollCodeBlockHorizontal(_hover.HoveredCodeBlock, e.Delta); Invalidate(); e.Handled = true; return; }
             if (_hover.HoveredTableBox != null && _hover.HoveredTableBox.NeedsHorizontalScroll)
-            {
-                ScrollTableHorizontal(_hover.HoveredTableBox, e.IsHorizontalWheel ? e.Delta : -e.Delta);
-                Invalidate();
-                e.Handled = true;
-                return;
-            }
+            { ScrollTableHorizontal(_hover.HoveredTableBox, e.Delta); Invalidate(); e.Handled = true; return; }
         }
 
-        // Vertical wheel → always pass to base for page scroll
+        // Vertical wheel over a scrollable code block → scroll the code block horizontally
+        // (most common UX for wide code blocks: just scroll the wheel to pan left/right)
+        if (!e.IsHorizontalWheel && _hover.HoveredCodeBlock != null
+            && _hover.HoveredCodeBlock.NeedsHorizontalScroll)
+        {
+            ScrollCodeBlockHorizontal(_hover.HoveredCodeBlock, -e.Delta);
+            Invalidate();
+            e.Handled = true;
+            return;
+        }
+
+        // Vertical wheel over a scrollable table → scroll the table horizontally
+        if (!e.IsHorizontalWheel && _hover.HoveredTableBox != null
+            && _hover.HoveredTableBox.NeedsHorizontalScroll)
+        {
+            ScrollTableHorizontal(_hover.HoveredTableBox, -e.Delta);
+            Invalidate();
+            e.Handled = true;
+            return;
+        }
+
+        // Fall through: normal vertical page scroll
         base.OnMouseWheel(e);
     }
 
@@ -756,7 +781,7 @@ public class MarkdownViewer : ElementBase
     // Keyboard — scrolling + text selection copy
     // ====================================================================
 
-    public override void  OnKeyDown(KeyEventArgs e)
+    public override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
 
@@ -764,7 +789,7 @@ public class MarkdownViewer : ElementBase
         if (e.Control && e.KeyCode == Keys.C)
         {
             string sel = GetSelectedText();
-            if (!string.IsNullOrEmpty(sel)) TryCopyToClipboard(sel);
+            if (!string.IsNullOrEmpty(sel))  ClipboardHelper.TrySetText(sel);
             e.Handled = true;
             return;
         }
@@ -869,7 +894,7 @@ public class MarkdownViewer : ElementBase
     // Double-click — word selection
     // ====================================================================
 
-    public override void  OnMouseDoubleClick(MouseEventArgs e)
+    public override void OnMouseDoubleClick(MouseEventArgs e)
     {
         base.OnMouseDoubleClick(e);
         if (e.Button != MouseButtons.Left) return;
@@ -893,7 +918,7 @@ public class MarkdownViewer : ElementBase
     // Dispose
     // ====================================================================
 
-    public override void  Dispose(bool disposing)
+    protected override void Dispose(bool disposing)
     {
         if (disposing)
         {

@@ -18,9 +18,9 @@ internal static class MarkdownBoxRenderer
         IMarkdownImageProvider? imageProvider,
         MarkdownSelectionState? selection)
     {
-        using var fillPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
+        using var fillPaint   = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
         using var strokePaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke };
-        using var textPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
+        using var textPaint   = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
 
         // Pre-compute ordered selection bounds for O(1) per-box check
         bool hasSelection = selection?.HasSelection == true;
@@ -75,7 +75,7 @@ internal static class MarkdownBoxRenderer
 
         // ── Pass 2: CodeOwner runs grouped by owner (one clip+translate per owner) ──
         CodeBlockBox? currentOwner = null;
-        int ownerSave = 0;
+        int           ownerSave    = 0;
         for (int idx = 0; idx < boxes.Count; idx++)
         {
             if (boxes[idx] is not TextRunBox t || t.CodeOwner == null || t.IsNewlineSentinel) continue;
@@ -86,21 +86,23 @@ internal static class MarkdownBoxRenderer
             {
                 if (currentOwner != null) canvas.RestoreToCount(ownerSave);
                 // Quick visibility check: any run from this owner in the view?
-                ownerSave = canvas.Save();
+                ownerSave    = canvas.Save();
                 canvas.ClipRect(owner.BodyRect);
                 canvas.Translate(-owner.Scroll.ScrollX, 0f);
                 currentOwner = owner;
             }
 
             // Visibility check in scroll-space
-            float visibleLeft = owner.BodyRect.Left + owner.Scroll.ScrollX;
+            float visibleLeft  = owner.BodyRect.Left  + owner.Scroll.ScrollX;
             float visibleRight = owner.BodyRect.Right + owner.Scroll.ScrollX;
             if (t.Bounds.Right < visibleLeft || t.Bounds.Left > visibleRight) continue;
 
             DrawTextRun(canvas, t, idx, theme, hover, textPaint,
                 fillPaint, hasSelection, selFrom, selTo);
         }
-        if (currentOwner != null) canvas.RestoreToCount(ownerSave);
+
+        if (currentOwner != null) 
+            canvas.RestoreToCount(ownerSave);
     }
 
     private static void DrawRect(SKCanvas canvas, RectBox r, SKPaint fillPaint, SKPaint strokePaint)
@@ -137,7 +139,7 @@ internal static class MarkdownBoxRenderer
         if (hasSelection && boxIdx >= selFrom.BoxIndex && boxIdx <= selTo.BoxIndex)
         {
             int startChar = boxIdx == selFrom.BoxIndex ? selFrom.CharOffset : 0;
-            int endChar = boxIdx == selTo.BoxIndex ? selTo.CharOffset : t.Text.Length;
+            int endChar   = boxIdx == selTo.BoxIndex   ? selTo.CharOffset   : t.Text.Length;
             if (startChar < endChar && endChar <= t.Text.Length && startChar >= 0)
             {
                 float selX0 = t.Bounds.Left + t.GetXAtOffset(startChar);
@@ -238,8 +240,8 @@ internal static class MarkdownBoxRenderer
         canvas.RestoreToCount(headerClip);
 
         // Copy button
-        bool isHoveredBlock = ReferenceEquals(hover.HoveredCodeBlock, box);
-        bool isCopyHovered = isHoveredBlock && hover.HoveredCopyButton;
+        bool isHoveredBlock  = ReferenceEquals(hover.HoveredCodeBlock, box);
+        bool isCopyHovered   = isHoveredBlock && hover.HoveredCopyButton;
         DrawCopyButton(canvas, box.CopyButtonRect, theme, fillPaint, strokePaint, isCopyHovered);
 
         // Code text (clipped to body, translated by horizontal scroll)
@@ -260,11 +262,11 @@ internal static class MarkdownBoxRenderer
         // Horizontal scroll thumb
         if (box.NeedsHorizontalScroll && box.ContentWidth > 0.5f)
         {
-            float trackW = box.ViewportWidth;
-            float thumbW = MathF.Max(32f, trackW * MathF.Min(1f, trackW / box.ContentWidth));
+            float trackW  = box.ViewportWidth;
+            float thumbW  = MathF.Max(32f, trackW * MathF.Min(1f, trackW / box.ContentWidth));
             float maxScrl = MathF.Max(1f, box.ContentWidth - trackW);
-            float thumbX = box.BodyOrigin.X + (trackW - thumbW) * (box.Scroll.ScrollX / maxScrl);
-            float thumbY = box.Bounds.Bottom - 6f;
+            float thumbX  = box.BodyOrigin.X + (trackW - thumbW) * (box.Scroll.ScrollX / maxScrl);
+            float thumbY  = box.Bounds.Bottom - 6f;
             fillPaint.Color = theme.ScrollIndicatorColor;
             canvas.DrawRoundRect(new SKRect(thumbX, thumbY, thumbX + thumbW, thumbY + 4f), 2f, 2f, fillPaint);
         }
@@ -293,7 +295,7 @@ internal static class MarkdownBoxRenderer
         float off = iconSize * 0.28f;  // offset between back and front square
 
         // Back square (content / source)
-        var back = new SKRect(cx - sq / 2f - off * 0.5f, cy - sq / 2f - off * 0.5f,
+        var back  = new SKRect(cx - sq / 2f - off * 0.5f, cy - sq / 2f - off * 0.5f,
                                cx + sq / 2f - off * 0.5f, cy + sq / 2f - off * 0.5f);
         // Front square (blank page / clipboard)
         var front = new SKRect(cx - sq / 2f + off * 0.5f, cy - sq / 2f + off * 0.5f,
@@ -301,8 +303,8 @@ internal static class MarkdownBoxRenderer
 
         float sw = MathF.Max(1.2f, iconSize * 0.1f);
         strokePaint.StrokeWidth = sw;
-        strokePaint.StrokeCap = SKStrokeCap.Round;
-        strokePaint.StrokeJoin = SKStrokeJoin.Round;
+        strokePaint.StrokeCap   = SKStrokeCap.Round;
+        strokePaint.StrokeJoin  = SKStrokeJoin.Round;
 
         // Draw back square (outline)
         strokePaint.Color = theme.MutedColor.WithAlpha(180);
@@ -320,17 +322,17 @@ internal static class MarkdownBoxRenderer
         strokePaint.Color = strokePaint.Color.WithAlpha(100);
         strokePaint.StrokeWidth = MathF.Max(1f, sw * 0.7f);
         float lineInset = front.Width * 0.18f;
-        float lineStep = front.Height * 0.22f;
-        float lx0 = front.Left + lineInset;
+        float lineStep  = front.Height * 0.22f;
+        float lx0 = front.Left  + lineInset;
         float lx1 = front.Right - lineInset;
-        float ly0 = front.Top + lineStep;
+        float ly0 = front.Top   + lineStep;
         for (int k = 0; k < 3; k++)
         {
             float lxEnd = k == 1 ? lx0 + (lx1 - lx0) * 0.65f : lx1; // middle line shorter
             canvas.DrawLine(lx0, ly0 + k * lineStep, lxEnd, ly0 + k * lineStep, strokePaint);
         }
 
-        strokePaint.StrokeCap = SKStrokeCap.Butt;
+        strokePaint.StrokeCap  = SKStrokeCap.Butt;
         strokePaint.StrokeJoin = SKStrokeJoin.Miter;
     }
 
@@ -340,7 +342,7 @@ internal static class MarkdownBoxRenderer
         float viewTop, float viewBottom, bool hasSelection, TextPosition selFrom, TextPosition selTo)
     {
         float radius = theme.CornerRadius;
-        float hair = 1f;
+        float hair   = 1f;
 
         int clipSave = canvas.Save();
         canvas.ClipRoundRect(new SKRoundRect(tbl.Bounds, radius, radius), antialias: true);
@@ -351,12 +353,12 @@ internal static class MarkdownBoxRenderer
         foreach (var child in tbl.Children)
         {
             // viewTop/viewBottom are in content-space (before translation), so compare using table-relative Y
-            float absTop = child.Bounds.Top + tbl.Bounds.Top;
+            float absTop    = child.Bounds.Top    + tbl.Bounds.Top;
             float absBottom = child.Bounds.Bottom + tbl.Bounds.Top;
             if (absBottom < viewTop || absTop > viewBottom) continue;
             switch (child)
             {
-                case RectBox r: DrawRect(canvas, r, fillPaint, strokePaint); break;
+                case RectBox r:  DrawRect(canvas, r, fillPaint, strokePaint); break;
                 case TextRunBox t:
                     DrawTextRun(canvas, t, -1, theme, hover, textPaint,
                         fillPaint, hasSelection, selFrom, selTo); break;
@@ -365,19 +367,19 @@ internal static class MarkdownBoxRenderer
         canvas.RestoreToCount(clipSave);
 
         // Outer border
-        strokePaint.Color = theme.TableBorderColor;
+        strokePaint.Color       = theme.TableBorderColor;
         strokePaint.StrokeWidth = hair;
         canvas.DrawRoundRect(tbl.Bounds, radius, radius, strokePaint);
 
         // Horizontal scroll thumb
         if (tbl.NeedsHorizontalScroll && tbl.ContentWidth > 0.5f)
         {
-            float trackW = tbl.ViewportWidth;
-            float maxRaw = MathF.Max(0f, tbl.ContentWidth - trackW);
-            float maxS = Math.Max(1f, maxRaw);
-            float thumbW = MathF.Max(32f, trackW * MathF.Min(1f, trackW / Math.Max(1f, tbl.ContentWidth)));
-            float thumbX = tbl.Bounds.Left + (trackW - thumbW) * (tbl.Scroll.ScrollX / maxS);
-            float thumbY = tbl.Bounds.Bottom - 6f;
+            float trackW  = tbl.ViewportWidth;
+            float maxRaw  = MathF.Max(0f, tbl.ContentWidth - trackW);
+            float maxS    = Math.Max(1f, maxRaw);
+            float thumbW  = MathF.Max(32f, trackW * MathF.Min(1f, trackW / Math.Max(1f, tbl.ContentWidth)));
+            float thumbX  = tbl.Bounds.Left + (trackW - thumbW) * (tbl.Scroll.ScrollX / maxS);
+            float thumbY  = tbl.Bounds.Bottom - 6f;
             fillPaint.Color = theme.ScrollIndicatorColor;
             canvas.DrawRoundRect(new SKRect(thumbX, thumbY, thumbX + thumbW, thumbY + 4f), 2f, 2f, fillPaint);
         }
@@ -387,15 +389,15 @@ internal static class MarkdownBoxRenderer
     {
         var color = box.Kind switch
         {
-            AlertKind.Note => theme.AlertNote,
-            AlertKind.Tip => theme.AlertTip,
+            AlertKind.Note      => theme.AlertNote,
+            AlertKind.Tip       => theme.AlertTip,
             AlertKind.Important => theme.AlertImportant,
-            AlertKind.Warning => theme.AlertWarning,
-            AlertKind.Caution => theme.AlertCaution,
-            _ => theme.MutedColor
+            AlertKind.Warning   => theme.AlertWarning,
+            AlertKind.Caution   => theme.AlertCaution,
+            _                   => theme.MutedColor
         };
 
-        var r = box.Bounds;
+        var r  = box.Bounds;
         float cx = r.MidX, cy = r.MidY, radius = MathF.Min(r.Width, r.Height) / 2f;
 
         if (box.Kind is AlertKind.Warning or AlertKind.Caution)

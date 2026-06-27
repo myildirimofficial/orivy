@@ -2390,25 +2390,23 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         if (HandlesMouseWheelScroll)
         {
             var wantsHorizontal = WantsHorizontalMouseWheel(e);
-            var canScrollHorizontal = _hScrollBar != null && (_hScrollBar.Visible || _hScrollBar.Maximum > 0);
-            var canScrollVertical = _vScrollBar != null && (_vScrollBar.Visible || _vScrollBar.Maximum > 0);
+            
+            // Check if we can scroll horizontally
+            bool canScrollHorizontal = _hScrollBar != null 
+                && (_hScrollBar.Visible || _hScrollBar.Maximum > 0);
+            
+            // Check if we can scroll vertically
+            bool canScrollVertical = _vScrollBar != null 
+                && (_vScrollBar.Visible || _vScrollBar.Maximum > 0);
 
             if (wantsHorizontal)
             {
-                if (canScrollHorizontal)
-                    return true;
+                return canScrollHorizontal;
             }
-            else if (canScrollVertical || canScrollHorizontal)
+            else
             {
-                return true;
+                return canScrollVertical || canScrollHorizontal;
             }
-
-            // Allow scrolling even when scrollbars are auto-hidden; the presence of a scroll range indicates scrollability.
-            if ((_vScrollBar?.Visible ?? false) || (_hScrollBar?.Visible ?? false))
-                return !wantsHorizontal || canScrollHorizontal;
-
-            if ((_vScrollBar != null && _vScrollBar.Maximum > 0) || (_hScrollBar != null && _hScrollBar.Maximum > 0))
-                return !wantsHorizontal || canScrollHorizontal;
         }
 
         return HandlesMouseWheelInput || MouseWheel != null;
@@ -3559,7 +3557,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         Controls.Add(_hScrollBar);
     }
 
-    private void PositionOverlayScrollBars(bool showVertical, bool showHorizontal)
+    protected void PositionOverlayScrollBars(bool showVertical, bool showHorizontal)
     {
         if (_vScrollBar == null || _hScrollBar == null)
             return;
@@ -3584,13 +3582,13 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
-    private void UpdateHostedScrollBarHoverState(bool hovered)
+    protected void UpdateHostedScrollBarHoverState(bool hovered)
     {
         _vScrollBar?.SetHostHover(hovered && _vScrollBar.Visible);
         _hScrollBar?.SetHostHover(hovered && _hScrollBar.Visible);
     }
 
-    private void EnsureOverlayScrollBarsAreTopmost()
+    protected void EnsureOverlayScrollBarsAreTopmost()
     {
         if (_vScrollBar?.Visible == true)
             _vScrollBar.BringToFront();
@@ -3599,7 +3597,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             _hScrollBar.BringToFront();
     }
 
-    protected void UpdateScrollBars()
+    protected virtual void UpdateScrollBars()
     {
         if (!AutoScroll || _vScrollBar == null || _hScrollBar == null)
             return;
@@ -4287,14 +4285,17 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         Invalidate();
     }
 
-    public virtual void  OnMouseWheel(MouseEventArgs e)
+    public virtual void OnMouseWheel(MouseEventArgs e)
     {
         if (!Enabled || !Visible)
             return;
 
         var wantsHorizontal = WantsHorizontalMouseWheel(e);
-        var canScrollHorizontal = HandlesMouseWheelScroll && _hScrollBar != null && (_hScrollBar.Visible || _hScrollBar.Maximum > 0);
-        var canScrollVertical = HandlesMouseWheelScroll && _vScrollBar != null && (_vScrollBar.Visible || _vScrollBar.Maximum > 0);
+        
+        bool canScrollHorizontal = _hScrollBar != null 
+            && (_hScrollBar.Visible || _hScrollBar.Maximum > 0);
+        bool canScrollVertical = _vScrollBar != null 
+            && (_vScrollBar.Visible || _vScrollBar.Maximum > 0);
 
         if (wantsHorizontal && canScrollHorizontal)
         {
@@ -4304,7 +4305,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             return;
         }
 
-        if (canScrollVertical)
+        if (!wantsHorizontal && canScrollVertical)
         {
             var deltaValue = GetMouseWheelDelta(e, _vScrollBar);
             _vScrollBar.ApplyWheelDelta(-deltaValue);
@@ -4313,7 +4314,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
 
         // If vertical scrolling isn't available, allow horizontal scrolling with the wheel.
-        if (canScrollHorizontal)
+        if (!wantsHorizontal && canScrollHorizontal)
         {
             var deltaValue = GetMouseWheelDelta(e, _hScrollBar);
             _hScrollBar.ApplyWheelDelta(-deltaValue);
