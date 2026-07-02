@@ -68,6 +68,50 @@ internal sealed class ImageBox : MdBox
     public LinkInline? Link;
 }
 
+internal sealed class MathFormulaBox : MdBox
+{
+    public string Latex = "";
+    public bool Display;
+    public List<MathTextRun> Runs = new();
+    public List<MathLineSegment> Lines = new();
+    public List<MathBrace> Braces = new();
+    public SKColor Color;
+}
+
+internal sealed class MathTextRun
+{
+    public string Text = "";
+    public SKFont Font = null!;
+    public SKPoint Baseline;
+    public SKColor Color;
+}
+
+internal readonly struct MathLineSegment
+{
+    public readonly SKPoint Start;
+    public readonly SKPoint End;
+    public readonly float StrokeWidth;
+
+    public MathLineSegment(SKPoint start, SKPoint end, float strokeWidth)
+    {
+        Start = start;
+        End = end;
+        StrokeWidth = strokeWidth;
+    }
+}
+
+internal readonly struct MathBrace
+{
+    public readonly SKRect Bounds;
+    public readonly float StrokeWidth;
+
+    public MathBrace(SKRect bounds, float strokeWidth)
+    {
+        Bounds = bounds;
+        StrokeWidth = strokeWidth;
+    }
+}
+
 internal sealed class CheckboxBox : MdBox
 {
     public bool Checked;

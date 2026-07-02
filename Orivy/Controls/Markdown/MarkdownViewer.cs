@@ -23,6 +23,9 @@ namespace Orivy.Controls.Markdown;
 ///  • Auto link-open in default browser when no LinkClicked handler is attached
 ///  • ![alt][id] reference image parsing fix
 ///  • Pixel-accurate inline-code baseline alignment regardless of surrounding font size
+///  • HTML span styling: &lt;span style="color: red"&gt;, &lt;span style="background-color: yellow"&gt;
+///  • Greek letter HTML entities: &alpha;, &beta;, &gamma;, &Delta;, &Omega;, etc.
+///  • Inline/display math: $latex$ and $$latex$$ with fractions, roots, scripts, and cases
 /// </summary>
 public class MarkdownViewer : ElementBase
 {
@@ -413,7 +416,7 @@ private void OnImageLoaded(string url, SKImage? image)
                 case CodeBlockBox code:
                     return new HitResult(null, null, null, code, code.CopyButtonRect.Contains(p), null);
                 case TableBox tbl:
-                    return new HitResult(null, null, null, null, false, null, tableBox: tbl);
+                    return HitTestTable(tbl, p);
                 case DetailsHeaderBox dh:
                     return new HitResult(null, null, null, null, false, dh.Source);
                 case CheckboxBox cb:
@@ -425,6 +428,29 @@ private void OnImageLoaded(string url, SKImage? image)
             }
         }
         return HitResult.None;
+    }
+
+    private static HitResult HitTestTable(TableBox tbl, SKPoint p)
+    {
+        var local = new SKPoint(
+            p.X - tbl.Bounds.Left + tbl.Scroll.ScrollX,
+            p.Y - tbl.Bounds.Top);
+
+        for (int i = tbl.Children.Count - 1; i >= 0; i--)
+        {
+            var child = tbl.Children[i];
+            if (!child.Bounds.Contains(local)) continue;
+
+            switch (child)
+            {
+                case ImageBox img:
+                    return new HitResult(img.Link, null, img.Source, null, false, null, tableBox: tbl);
+                case TextRunBox t:
+                    return new HitResult(t.Link, null, null, null, false, null, t, -1, tbl);
+            }
+        }
+
+        return new HitResult(null, null, null, null, false, null, tableBox: tbl);
     }
 
     /// <summary>

@@ -76,6 +76,8 @@ public static class MarkdownParser
             case StrikethroughInline st: foreach (var ch in st.Children) AppendPlainText(ch, sb); break;
             case LinkInline l: foreach (var ch in l.Children) AppendPlainText(ch, sb); break;
             case InlineHtmlInline ih: foreach (var ch in ih.Children) AppendPlainText(ch, sb); break;
+            case SpanInline s: foreach (var ch in s.Children) AppendPlainText(ch, sb); break;
+            case MathInline m: sb.Append(m.Latex); break;
         }
     }
 
@@ -331,6 +333,65 @@ public static class MarkdownParser
             int indent = LeadingSpaces(line);
             string trimmed = line.TrimStart();
 
+            if (indent < 4 && IsDisplayMathDelimiter(trimmed))
+            {
+                var mathLines = new List<string>();
+                string remainder = trimmed[2..].Trim();
+                if (remainder.Length > 0 && remainder.EndsWith("$$", StringComparison.Ordinal))
+                {
+                    mathLines.Add(remainder[..^2].Trim());
+                    i++;
+                }
+                else
+                {
+                    if (remainder.Length > 0) mathLines.Add(remainder);
+                    i++;
+                    while (i < n)
+                    {
+                        string mathLine = lines[i];
+                        string mathTrimmed = mathLine.Trim();
+                        if (mathTrimmed.EndsWith("$$", StringComparison.Ordinal))
+                        {
+                            string beforeClose = mathLine[..mathLine.LastIndexOf("$$", StringComparison.Ordinal)];
+                            if (beforeClose.Length > 0) mathLines.Add(beforeClose);
+                            i++;
+                            break;
+                        }
+                        mathLines.Add(mathLine);
+                        i++;
+                    }
+                }
+
+                blocks.Add(new MathBlock { Latex = string.Join("\n", mathLines).Trim(), SourceLine = i + 1 });
+                continue;
+            }
+
+            if (indent < 4 && TrySplitSingleLineDisplayMath(trimmed, out string beforeMath, out string latex, out string afterMath))
+            {
+                if (!string.IsNullOrWhiteSpace(beforeMath))
+                {
+                    blocks.Add(new ParagraphBlock
+                    {
+                        Inlines = MarkdownInlineParser.Parse(beforeMath.TrimEnd(), doc.LinkReferences),
+                        SourceLine = i + 1
+                    });
+                }
+
+                blocks.Add(new MathBlock { Latex = latex.Trim(), SourceLine = i + 1 });
+
+                if (!string.IsNullOrWhiteSpace(afterMath))
+                {
+                    blocks.Add(new ParagraphBlock
+                    {
+                        Inlines = MarkdownInlineParser.Parse(afterMath.TrimStart(), doc.LinkReferences),
+                        SourceLine = i + 1
+                    });
+                }
+
+                i++;
+                continue;
+            }
+
             // ── Custom container ::: name ─────────────────────────────────
             if (indent < 4 && trimmed.StartsWith(":::"))
             {
@@ -485,6 +546,8 @@ public static class MarkdownParser
                     bool interrupts = li < 4 && (
                         TryMatchAtxHeading(lt).HasValue ||
                         IsThematicBreak(lt) ||
+                        IsDisplayMathDelimiter(lt) ||
+                        ContainsSingleLineDisplayMath(lt) ||
                         TryMatchFenceStart(lt, out _, out _, out _) ||
                         lt.StartsWith(">") ||
                         lt.StartsWith("<details", StringComparison.OrdinalIgnoreCase) ||
@@ -548,6 +611,33 @@ public static class MarkdownParser
             else if (ch != ' ' && ch != '\t') return false;
         }
         return count >= 3;
+    }
+
+    private static bool IsDisplayMathDelimiter(string trimmed) =>
+        trimmed.StartsWith("$$", StringComparison.Ordinal) &&
+        (trimmed.Length == 2 || trimmed[2] != '$');
+
+    private static bool ContainsSingleLineDisplayMath(string text) =>
+        TrySplitSingleLineDisplayMath(text, out _, out _, out _);
+
+    private static bool TrySplitSingleLineDisplayMath(string text, out string before, out string latex, out string after)
+    {
+        before = "";
+        latex = "";
+        after = "";
+
+        int open = text.IndexOf("$$", StringComparison.Ordinal);
+        if (open < 0 || (open + 2 < text.Length && text[open + 2] == '$'))
+            return false;
+
+        int close = text.IndexOf("$$", open + 2, StringComparison.Ordinal);
+        if (close < 0 || close == open + 2)
+            return false;
+
+        before = text[..open];
+        latex = text[(open + 2)..close];
+        after = text[(close + 2)..];
+        return !string.IsNullOrWhiteSpace(latex);
     }
 
     private static readonly Regex AtxRegex = new(@"^(#{1,6})(?:\s+(.*?))?\s*#*\s*$", RegexOptions.Compiled);
@@ -736,15 +826,45 @@ public static class MarkdownParser
 
         var cells = new List<string>();
         var sb = new StringBuilder();
+        int mathDollarRun = 0;
+        int backtickRun = 0;
         for (int i = 0; i < row.Length; i++)
         {
             char c = row[i];
             if (c == '\\' && i + 1 < row.Length && row[i + 1] == '|') { sb.Append('|'); i++; continue; }
-            if (c == '|') { cells.Add(sb.ToString().Trim()); sb.Clear(); continue; }
+
+            if (c == '`' && mathDollarRun == 0)
+            {
+                int run = CountRun(row, i, '`');
+                if (backtickRun == 0) backtickRun = run;
+                else if (run == backtickRun) backtickRun = 0;
+                sb.Append(c, run);
+                i += run - 1;
+                continue;
+            }
+
+            if (c == '$' && backtickRun == 0)
+            {
+                int run = Math.Min(2, CountRun(row, i, '$'));
+                if (mathDollarRun == 0) mathDollarRun = run;
+                else if (run == mathDollarRun) mathDollarRun = 0;
+                sb.Append(c, run);
+                i += run - 1;
+                continue;
+            }
+
+            if (c == '|' && mathDollarRun == 0 && backtickRun == 0) { cells.Add(sb.ToString().Trim()); sb.Clear(); continue; }
             sb.Append(c);
         }
         cells.Add(sb.ToString().Trim());
         return cells;
+    }
+
+    private static int CountRun(string text, int start, char ch)
+    {
+        int i = start;
+        while (i < text.Length && text[i] == ch) i++;
+        return i - start;
     }
 
     private static int ParseTable(List<string> lines, int start, MarkdownDocument doc, out TableBlock table)
@@ -927,7 +1047,7 @@ public static class MarkdownParser
     }
 
     private static bool LooksLikeHtmlBlockStart(string trimmed) =>
-        Regex.IsMatch(trimmed, @"^</?(div|p|table|ul|ol|li|h[1-6]|blockquote|pre|hr|img|a|span|section|article)\b",
+        Regex.IsMatch(trimmed, @"^</?(div|p|table|ul|ol|li|h[1-6]|blockquote|pre|hr|img|picture|source|a|link|span|section|article)\b",
             RegexOptions.IgnoreCase);
 
     // ------------------------------------------------------------------

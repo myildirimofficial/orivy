@@ -1,3 +1,4 @@
+using SkiaSharp;
 using System.Collections.Generic;
 
 namespace Orivy.Controls.Markdown;
@@ -32,6 +33,8 @@ public sealed class CodeBlockBlock : MarkdownBlock
 {
     public string Code = ""; public string? Language; public bool Fenced;
 }
+
+public sealed class MathBlock : MarkdownBlock { public string Latex = ""; }
 
 public enum ListKind { Unordered, Ordered }
 
@@ -119,6 +122,22 @@ public sealed class SuperscriptInline : MarkdownInline { public List<MarkdownInl
 
 /// <summary>Subscript: `~text~` (single tilde; `~~` is strikethrough).</summary>
 public sealed class SubscriptInline : MarkdownInline { public List<MarkdownInline> Children = new(); }
+
+/// <summary>Styled span: `<span style="color: red; background-color: yellow">text</span>`.</summary>
+public sealed class SpanInline : MarkdownInline
+{
+    public List<MarkdownInline> Children = new();
+    public SKColor? Color { get; set; }
+    public SKColor? Background { get; set; }
+    public bool? Bold { get; set; }
+    public bool? Italic { get; set; }
+    public bool? Strike { get; set; }
+    public bool? Insert { get; set; }
+    public bool? Mark { get; set; }
+}
+
+/// <summary>Inline math: `$latex$` syntax.</summary>
+public sealed class MathInline : MarkdownInline { public string Latex = ""; }
 
 /// <summary>Safelisted HTML: kbd only (sub/sup/ins/mark handled as dedicated nodes above).</summary>
 public sealed class InlineHtmlInline : MarkdownInline

@@ -49,7 +49,7 @@ public sealed class MarkdownTheme
     public SKColor BorderColor               { get; set; } = new(0xD1,0xD9,0xE0);
     public SKColor CodeBackground            { get; set; } = new(0xF6,0xF8,0xFA);
     public SKColor CodeBlockHeaderBackground { get; set; } = new(0xEC,0xF0,0xF3);
-    public SKColor CodeInlineBackground      { get; set; } = new(0x81,0x8B,0x98,0x2D);
+    public SKColor CodeInlineBackground      { get; set; } = new(0x81,0x8B,0x98,0x73);
     public SKColor CodeForeground            { get; set; } = new(0x1F,0x23,0x28);
     public SKColor BlockquoteBarColor        { get; set; } = new(0xD1,0xD9,0xE0);
 
@@ -111,7 +111,7 @@ public sealed class MarkdownTheme
         LinkColor = new(0x4A,0x93,0xF8), LinkHoverColor = new(0x7A,0xB7,0xFF),
         BorderColor = new(0x30,0x36,0x3D),
         CodeBackground = new(0x16,0x1B,0x22), CodeBlockHeaderBackground = new(0x1C,0x21,0x28),
-        CodeInlineBackground = new(0x6E,0x76,0x81,0x4D), CodeForeground = new(0xE6,0xED,0xF3),
+        CodeInlineBackground = new(0x6E,0x76,0x81,0x80), CodeForeground = new(0xE6,0xED,0xF3),
         BlockquoteBarColor = new(0x30,0x36,0x3D),
         TableHeaderBackground = new(0x16,0x1B,0x22), TableRowAltBackground = new(0x13,0x18,0x1E),
         TableBorderColor = new(0x30,0x36,0x3D), TableHoverBackground = new(0x21,0x26,0x2E),

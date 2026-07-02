@@ -16,6 +16,8 @@ internal static class MarkdownLayoutBuilder
     {
         public bool Bold, Italic, Strike, Sub, Sup, Insert, Mark;
         public LinkInline? Link;
+        public SKColor? Color;
+        public SKColor? Background;
     }
 
     private struct Atom
@@ -26,10 +28,13 @@ internal static class MarkdownLayoutBuilder
         public bool IsCode;
         public bool Bold, Italic, Strike, Subscript, Superscript;
         public bool IsEmoji;
-        public bool Insert;   // underline decoration (<ins>/++++)
-        public bool Mark;     // highlight background (<mark>/====)
+        public bool Insert;
+        public bool Mark;
         public LinkInline? Link;
         public ImageInline? Image;
+        public string? MathLatex;
+        public SKColor? Color;
+        public SKColor? Background;
     }
 
     private readonly struct WrappedLine
@@ -89,6 +94,7 @@ internal static class MarkdownLayoutBuilder
             {
                 case HeadingBlock h: LayoutHeading(ctx, h, x, width); break;
                 case ParagraphBlock p: LayoutParagraph(ctx, p, x, width, textColor); break;
+                case MathBlock m: LayoutMathBlock(ctx, m, x, width, textColor); break;
                 case ThematicBreakBlock: LayoutThematicBreak(ctx, x, width); break;
                 case CodeBlockBlock cb: LayoutCodeBlock(ctx, cb, x, width); break;
                 case BlockQuoteBlock bq: LayoutBlockQuote(ctx, bq, x, width); break;
@@ -136,6 +142,19 @@ internal static class MarkdownLayoutBuilder
         CollectAtoms(p.Inlines, default, atoms);
         if (atoms.Count == 0) return;
         EmitInlineFlow(ctx, atoms, x, width, ctx.Theme.BodyFontSize, ctx.Theme.BodyLineHeight, textColor, forceBold: false);
+    }
+
+    private static void LayoutMathBlock(Ctx ctx, MathBlock block, float x, float width, SKColor textColor)
+    {
+        if (string.IsNullOrWhiteSpace(block.Latex)) return;
+
+        float sizePx = MathF.Max(ctx.Theme.BodyFontSize * 1.18f * ctx.Scale, 18f * ctx.Scale);
+        var measured = MarkdownMathLayout.Measure(block.Latex, ctx.Theme, ctx.Fonts, sizePx);
+        float formulaW = measured.Width + MathF.Max(20f, sizePx * 1.1f);
+        float drawX = x + MathF.Max(0f, (width - MathF.Min(width, formulaW)) * 0.5f);
+        var box = MarkdownMathLayout.Build(block.Latex, ctx.Theme, ctx.Fonts, drawX, ctx.Y, sizePx, textColor, display: true);
+        ctx.Boxes.Add(box);
+        ctx.Y += box.Bounds.Height;
     }
 
     private static void LayoutThematicBreak(Ctx ctx, float x, float width)
@@ -459,22 +478,35 @@ internal static class MarkdownLayoutBuilder
 
         float minColW = 64f * ctx.Scale;
         float contentWidth = 0f;
-        for (int c = 0; c < cols; c++) { natural[c] = MathF.Max(minColW, natural[c] + 2 * padH); contentWidth += natural[c]; }
+        float edgeGuard = MathF.Max(2f, 2f * ctx.Scale);
+        for (int c = 0; c < cols; c++) { natural[c] = MathF.Max(minColW, natural[c] + 2 * padH + edgeGuard); contentWidth += natural[c]; }
 
-        // ── Decide whether to scroll or squeeze columns ──
-        bool needsScroll  = contentWidth > width;
-        float viewportWidth = Math.Max(64f * ctx.Scale, width - 2 * padH);
+        float viewportWidth = Math.Max(64f * ctx.Scale, width);
+        float minContentWidth = cols * minColW;
+        bool needsScroll = contentWidth > viewportWidth && minContentWidth > viewportWidth;
         var scrollState   = ctx.State.GetOrCreateTableScroll(table);
         float maxScroll   = needsScroll ? MathF.Max(0f, contentWidth - viewportWidth) : 0f;
         scrollState.ScrollX = Math.Clamp(scrollState.ScrollX, 0f, maxScroll);
 
         var colWidths = new float[cols];
-        if (!needsScroll)
+        if (contentWidth <= viewportWidth)
         {
             // Distribute extra space proportionally
-            float extra = (width - contentWidth) / cols;
+            float extra = (viewportWidth - contentWidth) / cols;
             for (int c = 0; c < cols; c++) colWidths[c] = natural[c] + extra;
-            contentWidth = width;
+            contentWidth = viewportWidth;
+        }
+        else if (!needsScroll)
+        {
+            float shrink = contentWidth - viewportWidth;
+            float shrinkable = 0f;
+            for (int c = 0; c < cols; c++) shrinkable += MathF.Max(0f, natural[c] - minColW);
+            for (int c = 0; c < cols; c++)
+            {
+                float share = shrinkable > 0f ? shrink * MathF.Max(0f, natural[c] - minColW) / shrinkable : shrink / cols;
+                colWidths[c] = MathF.Max(minColW, natural[c] - share);
+            }
+            contentWidth = viewportWidth;
         }
         else
         {
@@ -592,7 +624,11 @@ internal static class MarkdownLayoutBuilder
                 {
                     float lineX = cellLeft;
                     if (align == ColumnAlignment.Center) lineX = cellLeft + (cellWidth - line.Width) / 2f;
-                    else if (align == ColumnAlignment.Right) lineX = cellLeft + (cellWidth - line.Width);
+                    else if (align == ColumnAlignment.Right)
+                    {
+                        float rightEdge = colX[c] + colWidths[c] - padH - MathF.Max(1f, ctx.Scale);
+                        lineX = Math.Max(cellLeft, rightEdge - line.Width);
+                    }
                     EmitWrappedLine(ctx, atoms, line, lineX, runningY, fontSizePx, ctx.Theme.BodyColor, bold);
                     runningY += line.Height;
                 }
@@ -640,7 +676,19 @@ internal static class MarkdownLayoutBuilder
     // ------------------------------------------------------------------
     private static void LayoutRawHtml(Ctx ctx, RawHtmlBlock raw, float x, float width)
     {
-        string text = TrimForDisplay(raw.Html);
+        string html = TrimForDisplay(raw.Html);
+        if (html.Length == 0) return;
+
+        var parsed = MarkdownInlineParser.Parse(html.Replace('\n', ' '), new Dictionary<string, LinkReferenceDefinition>());
+        var inlineAtoms = new List<Atom>();
+        CollectAtoms(parsed, default, inlineAtoms);
+        if (inlineAtoms.Count > 0)
+        {
+            EmitInlineFlow(ctx, inlineAtoms, x, width, ctx.Theme.BodyFontSize, ctx.Theme.BodyLineHeight, ctx.Theme.BodyColor, forceBold: false);
+            return;
+        }
+
+        string text = html;
         if (text.Length == 0) return;
 
         var atoms = new List<Atom>();
@@ -782,8 +830,29 @@ internal static class MarkdownLayoutBuilder
                 output.Add(lb.Hard ? new Atom { ForceBreak = true } : new Atom { IsWhitespace = true, Text = " " });
                 break;
             case InlineHtmlInline ih:
-                // <kbd> etc. — just pass through with current style
                 CollectAtoms(ih.Children, style, output);
+                break;
+            case SpanInline s:
+                {
+                    var st = style;
+                    if (s.Color.HasValue) st.Color = s.Color;
+                    if (s.Background.HasValue) st.Background = s.Background;
+                    if (s.Bold.HasValue) st.Bold = s.Bold.Value;
+                    if (s.Italic.HasValue) st.Italic = s.Italic.Value;
+                    if (s.Strike.HasValue) st.Strike = s.Strike.Value;
+                    if (s.Insert.HasValue) st.Insert = s.Insert.Value;
+                    if (s.Mark.HasValue) st.Mark = s.Mark.Value;
+                    CollectAtoms(s.Children, st, output);
+                }
+                break;
+            case MathInline m:
+                output.Add(new Atom
+                {
+                    MathLatex = m.Latex,
+                    Link = style.Link,
+                    Color = style.Color,
+                    Background = style.Background
+                });
                 break;
             case FootnoteRefInline fn:
                 // Render as superscript "¹", "[1]" style clickable ref
@@ -807,7 +876,17 @@ internal static class MarkdownLayoutBuilder
             if (char.IsWhiteSpace(text[i]))
             {
                 while (i < n && char.IsWhiteSpace(text[i])) i++;
-                output.Add(new Atom { IsWhitespace = true, Text = " " });
+                output.Add(new Atom
+                {
+                    IsWhitespace = true,
+                    Text = " ",
+                    Strike = style.Strike,
+                    Mark = style.Mark,
+                    Insert = style.Insert,
+                    Link = style.Link,
+                    Color = style.Color,
+                    Background = style.Background
+                });
                 continue;
             }
 
@@ -822,33 +901,36 @@ internal static class MarkdownLayoutBuilder
 
                 if (isEmojiChar != inEmoji && i > emojiStart)
                 {
-                    // Flush accumulated run
-                output.Add(new Atom
-                {
-                    Text = text[emojiStart..i],
-                    Bold = style.Bold, Italic = style.Italic, Strike = style.Strike,
-                    Subscript = style.Sub, Superscript = style.Sup,
-                    Mark = style.Mark, Insert = style.Insert,
-                    Link = style.Link,
-                    IsEmoji = inEmoji
-                });
+                    output.Add(new Atom
+                    {
+                        Text = text[emojiStart..i],
+                        Bold = style.Bold, Italic = style.Italic, Strike = style.Strike,
+                        Subscript = style.Sub, Superscript = style.Sup,
+                        Mark = style.Mark, Insert = style.Insert,
+                        Link = style.Link,
+                        IsEmoji = inEmoji,
+                        Color = style.Color,
+                        Background = style.Background
+                    });
                     emojiStart = i;
                 }
                 inEmoji = isEmojiChar;
                 i += cp > 0xFFFF ? 2 : 1;
             }
             if (i > emojiStart)
-            {
-                output.Add(new Atom
                 {
-                    Text = text[emojiStart..i],
-                    Bold = style.Bold, Italic = style.Italic, Strike = style.Strike,
-                    Subscript = style.Sub, Superscript = style.Sup,
-                    Mark = style.Mark, Insert = style.Insert,
-                    Link = style.Link,
-                    IsEmoji = inEmoji
-                });
-            }
+                    output.Add(new Atom
+                    {
+                        Text = text[emojiStart..i],
+                        Bold = style.Bold, Italic = style.Italic, Strike = style.Strike,
+                        Subscript = style.Sub, Superscript = style.Sup,
+                        Mark = style.Mark, Insert = style.Insert,
+                        Link = style.Link,
+                        IsEmoji = inEmoji,
+                        Color = style.Color,
+                        Background = style.Background
+                    });
+                }
         }
     }
 
@@ -860,12 +942,23 @@ internal static class MarkdownLayoutBuilder
             if (char.IsWhiteSpace(code[i]))
             {
                 while (i < n && char.IsWhiteSpace(code[i])) i++;
-                output.Add(new Atom { IsWhitespace = true, Text = " ", IsCode = true });
+                output.Add(new Atom
+                {
+                    IsWhitespace = true,
+                    Text = " ",
+                    IsCode = true,
+                    Strike = style.Strike,
+                    Mark = style.Mark,
+                    Insert = style.Insert,
+                    Link = style.Link,
+                    Color = style.Color,
+                    Background = style.Background
+                });
                 continue;
             }
             int start = i;
             while (i < n && !char.IsWhiteSpace(code[i])) i++;
-            output.Add(new Atom { Text = code[start..i], IsCode = true, Link = style.Link, Mark = style.Mark, Insert = style.Insert });
+            output.Add(new Atom { Text = code[start..i], IsCode = true, Link = style.Link, Mark = style.Mark, Insert = style.Insert, Color = style.Color, Background = style.Background });
         }
     }
 
@@ -898,7 +991,13 @@ internal static class MarkdownLayoutBuilder
                 if (atom.ForceBreak) { idx++; break; }
 
                 float atomWidth; float atomHeight = lineHeightPx;
-                if (atom.Image != null)
+                if (atom.MathLatex != null)
+                {
+                    var mathSize = MarkdownMathLayout.Measure(atom.MathLatex, ctx.Theme, ctx.Fonts, fontSizePx);
+                    atomWidth = mathSize.Width + 2f * InlineMathPadX(fontSizePx);
+                    atomHeight = Math.Max(mathSize.Height + 2f * InlineMathPadY(fontSizePx), lineHeightPx);
+                }
+                else if (atom.Image != null)
                 {
                     var (w, h) = MeasureImageAtom(ctx, atom.Image, width);
                     atomWidth = w; atomHeight = Math.Max(h, lineHeightPx);
@@ -957,6 +1056,12 @@ internal static class MarkdownLayoutBuilder
         {
             var a = atoms[k];
             if (a.IsWhitespace || a.Image != null || a.ForceBreak) continue;
+            if (a.MathLatex != null)
+            {
+                var ms = MarkdownMathLayout.Measure(a.MathLatex, ctx.Theme, ctx.Fonts, fontSizePx);
+                maxAscent = Math.Max(maxAscent, ms.Ascent + fontSizePx * 0.08f);
+                continue;
+            }
             bool isSS = a.Subscript || a.Superscript;
             float sz  = a.IsCode ? ctx.Theme.CodeFontSize * ctx.Scale
                       : isSS    ? fontSizePx * SubSupScale : fontSizePx;
@@ -971,22 +1076,55 @@ internal static class MarkdownLayoutBuilder
         var baseFont = ctx.Fonts.GetFont(ctx.Theme, false, fontSizePx, forceBold, false);
         float cx = x;
 
+        var decorationBoxes = new List<MdBox>();
+        var overlayBoxes = new List<MdBox>();
+        int lineBoxInsertIndex = ctx.Boxes.Count;
         int   codeRunStart = -1; float codeRunLeft = 0f, codeRunAsc = 0f, codeRunDesc = 0f;
         int   markRunStart = -1; float markRunLeft = 0f, markTop = y, markBottom = y + line.Height;
+        bool  strikeRunActive = false; float strikeRunLeft = 0f, strikeY = baselineY - fontSizePx * 0.30f; SKColor strikeColor = baseColor;
+        bool  underlineRunActive = false; float underlineRunLeft = 0f, underlineY = baselineY + MathF.Max(1f, fontSizePx * 0.10f);
+        bool  backgroundRunActive = false; float backgroundRunLeft = 0f, backgroundTop = y, backgroundBottom = y + line.Height; SKColor backgroundColor = default;
 
         void FlushCodeRun()
         {
             if (codeRunStart < 0) return;
-            float padH = 4f * ctx.Scale, padV = 2f * ctx.Scale;
-            ctx.Boxes.Add(new RectBox { Bounds = new SKRect(codeRunLeft - padH, baselineY - codeRunAsc - padV, cx + padH, baselineY + codeRunDesc + padV), Fill = ctx.Theme.CodeInlineBackground, CornerRadius = 4f * ctx.Scale });
+            float padH = 5f * ctx.Scale, padV = 2.5f * ctx.Scale;
+            decorationBoxes.Add(new RectBox { Bounds = new SKRect(codeRunLeft - padH, baselineY - codeRunAsc - padV, cx + padH, baselineY + codeRunDesc + padV), Fill = ctx.Theme.CodeInlineBackground, CornerRadius = 4f * ctx.Scale });
             codeRunStart = -1;
         }
 
         void FlushMarkRun()
         {
             if (markRunStart < 0) return;
-            ctx.Boxes.Add(new RectBox { Bounds = new SKRect(markRunLeft, markTop + ctx.Scale, cx, markBottom - ctx.Scale), Fill = ctx.Theme.MarkBackground, CornerRadius = 3f * ctx.Scale });
+            float padX = 3f * ctx.Scale;
+            float padY = MathF.Max(1f, ctx.Scale);
+            decorationBoxes.Add(new RectBox { Bounds = new SKRect(markRunLeft - padX, markTop - padY, cx + padX, markBottom + padY), Fill = ctx.Theme.MarkBackground, CornerRadius = 4f * ctx.Scale });
             markRunStart = -1;
+        }
+
+        void FlushBackgroundRun()
+        {
+            if (!backgroundRunActive) return;
+            float padX = 3f * ctx.Scale;
+            float padY = MathF.Max(1f, ctx.Scale);
+            decorationBoxes.Add(new RectBox { Bounds = new SKRect(backgroundRunLeft - padX, backgroundTop - padY, cx + padX, backgroundBottom + padY), Fill = backgroundColor, CornerRadius = 4f * ctx.Scale });
+            backgroundRunActive = false;
+        }
+
+        void FlushStrikeRun()
+        {
+            if (!strikeRunActive) return;
+            float h = MathF.Max(1f, fontSizePx * 0.07f);
+            overlayBoxes.Add(new RectBox { Bounds = new SKRect(strikeRunLeft, strikeY - h * 0.5f, cx, strikeY + h * 0.5f), Fill = strikeColor, CornerRadius = h * 0.5f });
+            strikeRunActive = false;
+        }
+
+        void FlushUnderlineRun()
+        {
+            if (!underlineRunActive) return;
+            float h = MathF.Max(1f, fontSizePx * 0.065f);
+            overlayBoxes.Add(new RectBox { Bounds = new SKRect(underlineRunLeft, underlineY - h * 0.5f, cx, underlineY + h * 0.5f), Fill = ctx.Theme.InsertUnderlineColor, CornerRadius = h * 0.5f });
+            underlineRunActive = false;
         }
 
         for (int i = line.Start; i < line.End; i++)
@@ -994,16 +1132,89 @@ internal static class MarkdownLayoutBuilder
             var atom = atoms[i];
             if (atom.IsWhitespace)
             {
-                float spW = baseFont.MeasureText(" ");
-                if (!atom.Mark) { FlushCodeRun(); FlushMarkRun(); } else { cx += spW; continue; }
-                cx += spW; continue;
+                var spaceFont = atom.IsCode
+                    ? ctx.Fonts.GetFont(ctx.Theme, true, ctx.Theme.CodeFontSize * ctx.Scale, false, false)
+                    : baseFont;
+                float spW = spaceFont.MeasureText(" ");
+                float spaceAsc = -spaceFont.Metrics.Ascent, spaceDesc = spaceFont.Metrics.Descent;
+                float spaceLeft = cx;
+                if (atom.IsCode)
+                {
+                    if (codeRunStart < 0)
+                    {
+                        codeRunStart = i;
+                        codeRunLeft = cx;
+                        codeRunAsc = spaceAsc;
+                        codeRunDesc = spaceDesc;
+                    }
+                    codeRunAsc = Math.Max(codeRunAsc, spaceAsc);
+                    codeRunDesc = Math.Max(codeRunDesc, spaceDesc);
+                }
+                else
+                {
+                    FlushCodeRun();
+                }
+                if (!atom.Mark) FlushMarkRun();
+                if (!atom.Background.HasValue) FlushBackgroundRun();
+                if (!atom.Strike) FlushStrikeRun();
+                if (!atom.Insert) FlushUnderlineRun();
+                if (atom.Mark && markRunStart < 0)
+                {
+                    markRunStart = i;
+                    markRunLeft = spaceLeft;
+                    markTop = baselineY + baseFont.Metrics.Ascent;
+                    markBottom = baselineY + baseFont.Metrics.Descent;
+                }
+                if (atom.Background.HasValue)
+                {
+                    if (!backgroundRunActive || backgroundColor != atom.Background.Value)
+                    {
+                        FlushBackgroundRun();
+                        backgroundRunActive = true;
+                        backgroundRunLeft = spaceLeft;
+                        backgroundTop = baselineY + baseFont.Metrics.Ascent;
+                        backgroundBottom = baselineY + baseFont.Metrics.Descent;
+                        backgroundColor = atom.Background.Value;
+                    }
+                }
+                if (atom.Strike && !strikeRunActive)
+                {
+                    strikeRunActive = true;
+                    strikeRunLeft = spaceLeft;
+                    strikeY = baselineY - fontSizePx * 0.30f;
+                    strikeColor = atom.Color.HasValue ? atom.Color.Value : baseColor;
+                }
+                if (atom.Insert && !underlineRunActive)
+                {
+                    underlineRunActive = true;
+                    underlineRunLeft = spaceLeft;
+                    underlineY = baselineY + MathF.Max(1f, fontSizePx * 0.10f);
+                }
+                cx += spW;
+                continue;
             }
             if (atom.Image != null)
             {
-                FlushCodeRun(); FlushMarkRun();
+                FlushCodeRun(); FlushMarkRun(); FlushBackgroundRun(); FlushStrikeRun(); FlushUnderlineRun();
                 var (w, h) = MeasureImageAtom(ctx, atom.Image, line.Width + 1f);
                 ctx.Boxes.Add(new ImageBox { Bounds = new SKRect(cx, y, cx + w, y + h), Source = atom.Image, Link = atom.Link });
                 cx += w; continue;
+            }
+            if (atom.MathLatex != null)
+            {
+                FlushCodeRun(); FlushMarkRun(); FlushBackgroundRun(); FlushStrikeRun(); FlushUnderlineRun();
+                var mathColor = atom.Color.HasValue ? atom.Color.Value
+                    : atom.Background.HasValue ? ContrastTextFor(atom.Background.Value)
+                    : atom.Link != null ? ctx.Theme.LinkColor : baseColor;
+                var math = MarkdownMathLayout.Build(atom.MathLatex, ctx.Theme, ctx.Fonts, cx, y, fontSizePx, mathColor, display: false);
+                float dy = baselineY - (math.Bounds.Top + MathF.Max(2f, fontSizePx * 0.08f) + MarkdownMathLayout.Measure(atom.MathLatex, ctx.Theme, ctx.Fonts, fontSizePx).Ascent);
+                if (MathF.Abs(dy) > 0.01f)
+                {
+                    OffsetMathBox(math, 0f, dy);
+                }
+                ctx.Boxes.Add(math);
+                cx += math.Bounds.Width;
+                continue;
             }
 
             bool isSS = atom.Subscript || atom.Superscript;
@@ -1019,18 +1230,108 @@ internal static class MarkdownLayoutBuilder
             if (atom.Mark) { if (markRunStart < 0) { markRunStart = i; markRunLeft = cx; markTop = baselineY - runAsc; markBottom = baselineY + runDesc; } markTop = Math.Min(markTop, baselineY - runAsc); markBottom = Math.Max(markBottom, baselineY + runDesc); }
             else FlushMarkRun();
 
+            if (atom.Background.HasValue)
+            {
+                if (!backgroundRunActive || backgroundColor != atom.Background.Value)
+                {
+                    FlushBackgroundRun();
+                    backgroundRunActive = true;
+                    backgroundRunLeft = cx;
+                    backgroundTop = baselineY - runAsc;
+                    backgroundBottom = baselineY + runDesc;
+                    backgroundColor = atom.Background.Value;
+                }
+                backgroundTop = Math.Min(backgroundTop, baselineY - runAsc);
+                backgroundBottom = Math.Max(backgroundBottom, baselineY + runDesc);
+            }
+            else
+            {
+                FlushBackgroundRun();
+            }
+
             float w2 = font.MeasureText(atom.Text);
-            SKColor color = atom.IsCode ? ctx.Theme.CodeForeground : atom.Mark ? ctx.Theme.MarkColor : atom.Link != null ? ctx.Theme.LinkColor : baseColor;
+            SKColor color = atom.Color.HasValue ? atom.Color.Value
+                : atom.Background.HasValue ? ContrastTextFor(atom.Background.Value)
+                : atom.IsCode ? ctx.Theme.CodeForeground
+                : atom.Mark ? ctx.Theme.MarkColor
+                : atom.Link != null ? ctx.Theme.LinkColor
+                : baseColor;
+
+            if (atom.Strike)
+            {
+                if (!strikeRunActive || strikeColor != color)
+                {
+                    FlushStrikeRun();
+                    strikeRunActive = true;
+                    strikeRunLeft = cx;
+                    strikeY = baselineY - fontSizePx * 0.30f;
+                    strikeColor = color;
+                }
+            }
+            else
+            {
+                FlushStrikeRun();
+            }
+
+            if (atom.Insert)
+            {
+                if (!underlineRunActive)
+                {
+                    underlineRunActive = true;
+                    underlineRunLeft = cx;
+                    underlineY = baselineY + MathF.Max(1f, fontSizePx * 0.10f);
+                }
+            }
+            else
+            {
+                FlushUnderlineRun();
+            }
 
             float bl = baselineY;
             if (atom.Superscript) bl = baselineY - fontSizePx * SubSupScale * 0.55f;
             if (atom.Subscript)   bl = baselineY + fontSizePx * SubSupScale * 0.12f;
 
-            ctx.Boxes.Add(new TextRunBox { Bounds = new SKRect(cx, y, cx + w2, y + line.Height), Text = atom.Text, Font = font, Color = color, Baseline = new SKPoint(cx, bl), Link = atom.Link, Underline = atom.Link != null || atom.Insert, Strike = atom.Strike, Mark = atom.Mark, IsEmoji = atom.IsEmoji });
+            ctx.Boxes.Add(new TextRunBox { Bounds = new SKRect(cx, y, cx + w2, y + line.Height), Text = atom.Text, Font = font, Color = color, Baseline = new SKPoint(cx, bl), Link = atom.Link, Underline = atom.Link != null && !atom.Insert, Strike = atom.Strike, Mark = atom.Mark, IsEmoji = atom.IsEmoji });
             cx += w2;
         }
-        FlushCodeRun(); FlushMarkRun();
+        FlushCodeRun(); FlushMarkRun(); FlushBackgroundRun(); FlushStrikeRun(); FlushUnderlineRun();
+        if (decorationBoxes.Count > 0)
+            ctx.Boxes.InsertRange(lineBoxInsertIndex, decorationBoxes);
+        if (overlayBoxes.Count > 0)
+            ctx.Boxes.AddRange(overlayBoxes);
     }
+
+    private static SKColor ContrastTextFor(SKColor background) =>
+        MarkdownTheme.IsLightColor(background) ? new SKColor(0x1F, 0x23, 0x28) : new SKColor(0xF6, 0xF8, 0xFA);
+
+    private static float InlineMathPadX(float sizePx) => MathF.Max(2f, sizePx * 0.12f);
+
+    private static float InlineMathPadY(float sizePx) => MathF.Max(2f, sizePx * 0.08f);
+
+    private static void OffsetMathBox(MathFormulaBox box, float dx, float dy)
+    {
+        box.Bounds.Offset(dx, dy);
+        foreach (var run in box.Runs)
+            run.Baseline = new SKPoint(run.Baseline.X + dx, run.Baseline.Y + dy);
+
+        for (int i = 0; i < box.Lines.Count; i++)
+        {
+            var line = box.Lines[i];
+            box.Lines[i] = new MathLineSegment(
+                new SKPoint(line.Start.X + dx, line.Start.Y + dy),
+                new SKPoint(line.End.X + dx, line.End.Y + dy),
+                line.StrokeWidth);
+        }
+
+        for (int i = 0; i < box.Braces.Count; i++)
+        {
+            var brace = box.Braces[i];
+            var bounds = brace.Bounds;
+            bounds.Offset(dx, dy);
+            box.Braces[i] = new MathBrace(bounds, brace.StrokeWidth);
+        }
+    }
+
     private static SKFont GetEmojiFont(Ctx ctx, float sizePx)
     {
         // Route through the font cache so emoji fonts are reused, not re-created each call.
@@ -1069,6 +1370,7 @@ internal static class MarkdownLayoutBuilder
         float barW   =  4f * ctx.Scale;
         float radius =  6f * ctx.Scale;
         float startY = ctx.Y;
+        int backgroundInsertIndex = ctx.Boxes.Count;
 
         // Name label (bold, coloured)
         if (!string.IsNullOrEmpty(container.Name))
@@ -1100,7 +1402,7 @@ internal static class MarkdownLayoutBuilder
         if (bgColor.Alpha > 0)
         {
             var bgRect = new SKRect(x, startY - 4f * ctx.Scale, x + width, endY + 4f * ctx.Scale);
-            ctx.Boxes.Insert(ctx.Boxes.Count - (int)((endY - startY) / 5 + 1),   // best-effort: insert before content
+            ctx.Boxes.Insert(backgroundInsertIndex,
                 new RectBox { Bounds = bgRect, Fill = bgColor, CornerRadius = radius });
         }
 

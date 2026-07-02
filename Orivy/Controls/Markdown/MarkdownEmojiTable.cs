@@ -126,7 +126,7 @@ internal static class MarkdownEmojiTable
         ["ng"] = "🆖", ["ok"] = "🆗",
         ["arrow_up"] = "⬆", ["arrow_down"] = "⬇", ["arrow_left"] = "⬅",
         ["arrow_right"] = "➡", ["arrow_forward"] = "▶", ["arrow_backward"] = "◀",
-        ["rewind"] = "⏪", ["fast_forward"] = "⏩",
+        ["rewind"] = "⏪", ["fast_forward"] = "⏩", ["camel"] = "🐫",
     };
 
     /// <summary>Returns the emoji string for a shortcode (without colons), or null if not found.</summary>

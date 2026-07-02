@@ -52,6 +52,9 @@ internal static class MarkdownBoxRenderer
                 case ImageBox img:
                     DrawImage(canvas, img, theme, fillPaint, imageProvider);
                     break;
+                case MathFormulaBox math:
+                    DrawMathFormula(canvas, math, textPaint, strokePaint);
+                    break;
                 case CheckboxBox cb:
                     DrawCheckbox(canvas, cb, theme, fillPaint, strokePaint);
                     break;
@@ -59,7 +62,7 @@ internal static class MarkdownBoxRenderer
                     DrawCodeBlock(canvas, code, theme, hover, fillPaint, strokePaint, textPaint);
                     break;
                 case TableBox tbl:
-                    DrawTable(canvas, tbl, theme, hover, fillPaint, strokePaint, textPaint, viewTop, viewBottom, hasSelection, selFrom, selTo);
+                    DrawTable(canvas, tbl, theme, hover, imageProvider, fillPaint, strokePaint, textPaint, viewTop, viewBottom, hasSelection, selFrom, selTo);
                     break;
                 case ContainerBox cb2:
                     // Container children are in the main boxes list — drawn by the main loop already
@@ -126,14 +129,10 @@ internal static class MarkdownBoxRenderer
         MarkdownTheme theme, MarkdownHoverState hover, SKPaint textPaint, SKPaint fillPaint,
         bool hasSelection, TextPosition selFrom, TextPosition selTo)
     {
-        bool isHoveredLink = t.Link != null && ReferenceEquals(t.Link, hover.HoveredLink);
+        if (string.IsNullOrEmpty(t.Text) || t.Font == null)
+            return;
 
-        // ── Mark highlight background (<mark> / ==text==) ──
-        if (t.Mark)
-        {
-            fillPaint.Color = theme.MarkBackground;
-            canvas.DrawRect(t.Bounds, fillPaint);
-        }
+        bool isHoveredLink = t.Link != null && ReferenceEquals(t.Link, hover.HoveredLink);
 
         // ── Selection highlight ──
         if (hasSelection && boxIdx >= selFrom.BoxIndex && boxIdx <= selTo.BoxIndex)
@@ -166,16 +165,6 @@ internal static class MarkdownBoxRenderer
             textPaint.Style = SKPaintStyle.Fill;
         }
 
-        // ── Strikethrough ──
-        if (t.Strike)
-        {
-            float w = t.Font.MeasureText(t.Text);
-            float midY = t.Baseline.Y - t.Font.Size * 0.3f;
-            textPaint.StrokeWidth = MathF.Max(1f, t.Font.Size * 0.07f);
-            textPaint.Style = SKPaintStyle.Stroke;
-            canvas.DrawLine(t.Baseline.X, midY, t.Baseline.X + w, midY, textPaint);
-            textPaint.Style = SKPaintStyle.Fill;
-        }
     }
 
     private static void DrawImage(SKCanvas canvas, ImageBox box, MarkdownTheme theme,
@@ -192,6 +181,43 @@ internal static class MarkdownBoxRenderer
             float r = Math.Min(box.Bounds.Width, box.Bounds.Height) * 0.04f;
             canvas.DrawRoundRect(box.Bounds, r, r, fillPaint);
         }
+    }
+
+    private static void DrawMathFormula(SKCanvas canvas, MathFormulaBox box, SKPaint textPaint, SKPaint strokePaint)
+    {
+        textPaint.Style = SKPaintStyle.Fill;
+        foreach (var run in box.Runs)
+        {
+            if (string.IsNullOrEmpty(run.Text) || run.Font == null)
+                continue;
+            textPaint.Color = run.Color;
+            canvas.DrawText(run.Text, run.Baseline.X, run.Baseline.Y, SKTextAlign.Left, run.Font, textPaint);
+        }
+
+        strokePaint.Color = box.Color;
+        strokePaint.StrokeCap = SKStrokeCap.Round;
+        strokePaint.StrokeJoin = SKStrokeJoin.Round;
+        foreach (var line in box.Lines)
+        {
+            strokePaint.StrokeWidth = line.StrokeWidth;
+            canvas.DrawLine(line.Start, line.End, strokePaint);
+        }
+
+        foreach (var brace in box.Braces)
+        {
+            strokePaint.StrokeWidth = brace.StrokeWidth;
+            using var path = new SKPath();
+            var r = brace.Bounds;
+            float mid = r.MidY;
+            float curl = r.Width * 0.72f;
+            path.MoveTo(r.Right, r.Top);
+            path.CubicTo(r.Left + curl, r.Top, r.Left + curl, mid - r.Height * 0.12f, r.Left, mid);
+            path.CubicTo(r.Left + curl, mid + r.Height * 0.12f, r.Left + curl, r.Bottom, r.Right, r.Bottom);
+            canvas.DrawPath(path, strokePaint);
+        }
+
+        strokePaint.StrokeCap = SKStrokeCap.Butt;
+        strokePaint.StrokeJoin = SKStrokeJoin.Miter;
     }
 
     private static void DrawCheckbox(SKCanvas canvas, CheckboxBox box, MarkdownTheme theme,
@@ -338,7 +364,7 @@ internal static class MarkdownBoxRenderer
 
     /// <summary>Modern table: rounded outer corners, alternating rows, sticky header, optional scroll.</summary>
     private static void DrawTable(SKCanvas canvas, TableBox tbl, MarkdownTheme theme,
-        MarkdownHoverState hover, SKPaint fillPaint, SKPaint strokePaint, SKPaint textPaint,
+        MarkdownHoverState hover, IMarkdownImageProvider? imageProvider, SKPaint fillPaint, SKPaint strokePaint, SKPaint textPaint,
         float viewTop, float viewBottom, bool hasSelection, TextPosition selFrom, TextPosition selTo)
     {
         float radius = theme.CornerRadius;
@@ -362,6 +388,10 @@ internal static class MarkdownBoxRenderer
                 case TextRunBox t:
                     DrawTextRun(canvas, t, -1, theme, hover, textPaint,
                         fillPaint, hasSelection, selFrom, selTo); break;
+                case ImageBox img:
+                    DrawImage(canvas, img, theme, fillPaint, imageProvider); break;
+                case MathFormulaBox math:
+                    DrawMathFormula(canvas, math, textPaint, strokePaint); break;
             }
         }
         canvas.RestoreToCount(clipSave);
