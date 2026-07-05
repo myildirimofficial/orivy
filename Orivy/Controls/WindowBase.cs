@@ -687,11 +687,10 @@ private IntPtr _hWnd;
         _closeRequested = false;
         _formClosed = false;
         Application.RegisterForm(this);
-        ShowWindow(_hWnd, 5);
-
         if (_formStartPosition == FormStartPosition.CenterScreen)
             CenterToScreen();
 
+        ShowWindow(_hWnd, 5);
         Application.SetActiveForm(this);
     }
 
@@ -713,11 +712,11 @@ private IntPtr _hWnd;
         _formClosed = false;
         DialogResult = DialogResult.None;
         Application.RegisterForm(this);
-        ShowWindow(_hWnd, 5);
-        Application.SetActiveForm(this);
-
         if (_formStartPosition == FormStartPosition.CenterScreen)
             CenterToScreen();
+
+        ShowWindow(_hWnd, 5);
+        Application.SetActiveForm(this);
 
         MSG msg;
         while (!_formClosed && GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
