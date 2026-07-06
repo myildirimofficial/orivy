@@ -1,87 +1,10 @@
+using Orivy.Collections;
 using SkiaSharp;
 using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 
 namespace Orivy.Controls;
-
-public enum GridListSortDirection
-{
-    None,
-    Ascending,
-    Descending
-}
-
-public enum GridListColumnSizeMode
-{
-    Fixed,
-    Auto,
-    Fill
-}
-
-public sealed class GridListSelectionChangedEventArgs : EventArgs
-{
-    public GridListSelectionChangedEventArgs(int previousSelectedIndex, int selectedIndex)
-    {
-        PreviousSelectedIndex = previousSelectedIndex;
-        SelectedIndex = selectedIndex;
-    }
-
-    public int PreviousSelectedIndex { get; }
-    public int SelectedIndex { get; }
-}
-
-public sealed class GridListColumnClickEventArgs : EventArgs
-{
-    public GridListColumnClickEventArgs(GridListColumn column, int columnIndex, GridListSortDirection sortDirection)
-    {
-        Column = column;
-        ColumnIndex = columnIndex;
-        SortDirection = sortDirection;
-    }
-
-    public GridListColumn Column { get; }
-    public int ColumnIndex { get; }
-    public GridListSortDirection SortDirection { get; }
-}
-
-public class GridListCellEventArgs : EventArgs
-{
-    public GridListCellEventArgs(GridListItem item, GridListColumn column, GridListCell cell, int itemIndex, int columnIndex)
-    {
-        Item = item;
-        Column = column;
-        Cell = cell;
-        ItemIndex = itemIndex;
-        ColumnIndex = columnIndex;
-    }
-
-    public GridListItem Item { get; }
-    public GridListColumn Column { get; }
-    public GridListCell Cell { get; }
-    public int ItemIndex { get; }
-    public int ColumnIndex { get; }
-}
-
-public sealed class GridListCellCheckChangedEventArgs : GridListCellEventArgs
-{
-    public GridListCellCheckChangedEventArgs(
-        GridListItem item,
-        GridListColumn column,
-        GridListCell cell,
-        int itemIndex,
-        int columnIndex,
-        CheckState previousState,
-        CheckState currentState)
-        : base(item, column, cell, itemIndex, columnIndex)
-    {
-        PreviousState = previousState;
-        CurrentState = currentState;
-    }
-
-    public CheckState PreviousState { get; }
-    public CheckState CurrentState { get; }
-}
 
 public sealed class GridListColumn
 {
@@ -370,6 +293,11 @@ public sealed class GridListItem
     {
         Cells = new GridListCellCollection(this);
     }
+    public GridListItem(string text)
+    {
+        Cells = new GridListCellCollection(this);
+        Cells.Add(new GridListCell { Text = text });
+    }
 
     internal GridList? Owner { get; private set; }
 
@@ -460,120 +388,5 @@ public sealed class GridListItem
     internal void NotifyCellChanged(bool layoutAffected)
     {
         Owner?.OnItemsChanged(layoutAffected);
-    }
-}
-
-public sealed class GridListColumnCollection : Collection<GridListColumn>
-{
-    private readonly GridList _owner;
-
-    internal GridListColumnCollection(GridList owner)
-    {
-        _owner = owner;
-    }
-
-    protected override void InsertItem(int index, GridListColumn item)
-    {
-        ArgumentNullException.ThrowIfNull(item);
-        item.AttachOwner(_owner);
-        base.InsertItem(index, item);
-        _owner.OnColumnsChanged(layoutAffected: true);
-    }
-
-    protected override void SetItem(int index, GridListColumn item)
-    {
-        ArgumentNullException.ThrowIfNull(item);
-        item.AttachOwner(_owner);
-        base.SetItem(index, item);
-        _owner.OnColumnsChanged(layoutAffected: true);
-    }
-
-    protected override void RemoveItem(int index)
-    {
-        base.RemoveItem(index);
-        _owner.OnColumnsChanged(layoutAffected: true);
-    }
-
-    protected override void ClearItems()
-    {
-        base.ClearItems();
-        _owner.OnColumnsChanged(layoutAffected: true);
-    }
-}
-
-public sealed class GridListItemCollection : Collection<GridListItem>
-{
-    private readonly GridList _owner;
-
-    internal GridListItemCollection(GridList owner)
-    {
-        _owner = owner;
-    }
-
-    protected override void InsertItem(int index, GridListItem item)
-    {
-        ArgumentNullException.ThrowIfNull(item);
-        item.AttachOwner(_owner);
-        base.InsertItem(index, item);
-        _owner.OnItemsChanged(layoutAffected: true);
-    }
-
-    protected override void SetItem(int index, GridListItem item)
-    {
-        ArgumentNullException.ThrowIfNull(item);
-        item.AttachOwner(_owner);
-        base.SetItem(index, item);
-        _owner.OnItemsChanged(layoutAffected: true);
-    }
-
-    protected override void RemoveItem(int index)
-    {
-        base.RemoveItem(index);
-        _owner.OnItemsChanged(layoutAffected: true);
-    }
-
-    protected override void ClearItems()
-    {
-        base.ClearItems();
-        _owner.ClearSelection();
-        _owner.OnItemsChanged(layoutAffected: true);
-    }
-}
-
-public sealed class GridListCellCollection : Collection<GridListCell>
-{
-    private readonly GridListItem _owner;
-
-    internal GridListCellCollection(GridListItem owner)
-    {
-        _owner = owner;
-    }
-
-    protected override void InsertItem(int index, GridListCell item)
-    {
-        ArgumentNullException.ThrowIfNull(item);
-        item.AttachParent(_owner);
-        base.InsertItem(index, item);
-        _owner.NotifyCellChanged(layoutAffected: false);
-    }
-
-    protected override void SetItem(int index, GridListCell item)
-    {
-        ArgumentNullException.ThrowIfNull(item);
-        item.AttachParent(_owner);
-        base.SetItem(index, item);
-        _owner.NotifyCellChanged(layoutAffected: false);
-    }
-
-    protected override void RemoveItem(int index)
-    {
-        base.RemoveItem(index);
-        _owner.NotifyCellChanged(layoutAffected: false);
-    }
-
-    protected override void ClearItems()
-    {
-        base.ClearItems();
-        _owner.NotifyCellChanged(layoutAffected: false);
     }
 }

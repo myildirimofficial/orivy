@@ -4547,7 +4547,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         return new SKPoint(clientPoint.X - renderedLocation.X, clientPoint.Y - renderedLocation.Y);
     }
 
-    protected virtual void  Dispose(bool disposing)
+    protected virtual void Dispose(bool disposing)
     {
         if (IsDisposed)
             return;

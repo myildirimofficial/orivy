@@ -1,9 +1,11 @@
 using Orivy.Animation;
+using Orivy.Collections;
 using Orivy.Helpers;
 using SkiaSharp;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
 
 namespace Orivy.Controls;
 
@@ -308,6 +310,9 @@ public class GridList : ElementBase
 
     [Browsable(false)]
     public IReadOnlyCollection<int> SelectedIndices => _selectedIndices;
+
+    [Browsable(false)]
+    public IReadOnlyCollection<GridListItem> SelectedItems => [.. _selectedIndices.Select(i => Items[i])];
 
     [Browsable(false)]
     public GridListSortDirection SortDirection => _sortDirection;

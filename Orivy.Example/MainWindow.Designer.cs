@@ -134,8 +134,6 @@ internal partial class MainWindow
         markdownViewerPage.Image = markdownViewerTabIcon;
         tabView.Controls.Add(markdownViewerPage);
 
-
-
         extendMenu.ShowShortcutKeys = true;
         menuStrip.ShowShortcutKeys = true;
 
