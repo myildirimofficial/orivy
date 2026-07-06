@@ -71,6 +71,13 @@ public sealed class DetailsBlock : MarkdownBlock
     public string Summary = "Details"; public List<MarkdownBlock> Blocks = new(); public bool DefaultOpen;
 }
 
+/// <summary>Div block: `<div align="center">...</div>` with optional alignment.</summary>
+public sealed class DivBlock : MarkdownBlock
+{
+    public List<MarkdownBlock> Blocks = new();
+    public ColumnAlignment Alignment = ColumnAlignment.None;
+}
+
 /// <summary>Custom container block: `::: name ... :::` (markdown-it style).</summary>
 public sealed class ContainerBlock : MarkdownBlock
 {

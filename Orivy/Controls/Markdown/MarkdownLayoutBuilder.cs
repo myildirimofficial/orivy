@@ -101,6 +101,7 @@ internal static class MarkdownLayoutBuilder
                 case ListBlock l: LayoutList(ctx, l, x, width); break;
                 case TableBlock t: LayoutTable(ctx, t, x, width); break;
                 case DetailsBlock d: LayoutDetails(ctx, d, x, width); break;
+                case DivBlock div: LayoutDiv(ctx, div, x, width); break;
                 case ContainerBlock cb2: LayoutContainer(ctx, cb2, x, width); break;
                 case DefinitionListBlock dl: LayoutDefinitionList(ctx, dl, x, width); break;
                 case RawHtmlBlock raw: LayoutRawHtml(ctx, raw, x, width); break;
@@ -148,7 +149,9 @@ internal static class MarkdownLayoutBuilder
     {
         if (string.IsNullOrWhiteSpace(block.Latex)) return;
 
-        float sizePx = MathF.Max(ctx.Theme.BodyFontSize * 1.18f * ctx.Scale, 18f * ctx.Scale);
+        // KaTeX/MathJax (as seen in browser markdown viewers) render display-style formulas noticeably
+        // larger than surrounding body text; match that visual weight instead of a near-body-size formula.
+        float sizePx = MathF.Max(ctx.Theme.BodyFontSize * 1.4f * ctx.Scale, 20f * ctx.Scale);
         var measured = MarkdownMathLayout.Measure(block.Latex, ctx.Theme, ctx.Fonts, sizePx);
         float formulaW = measured.Width + MathF.Max(20f, sizePx * 1.1f);
         float drawX = x + MathF.Max(0f, (width - MathF.Min(width, formulaW)) * 0.5f);
@@ -169,6 +172,17 @@ internal static class MarkdownLayoutBuilder
     // ------------------------------------------------------------------
     private static void LayoutCodeBlock(Ctx ctx, CodeBlockBlock cb, float x, float width)
     {
+        if (string.Equals(cb.Language, "mermaid", StringComparison.OrdinalIgnoreCase))
+        {
+            var diagram = MermaidRenderer.TryBuild(cb, ctx.Theme, ctx.Fonts, x, ctx.Y, width, ctx.Scale);
+            if (diagram is not null)
+            {
+                ctx.Boxes.Add(diagram);
+                ctx.Y += diagram.Bounds.Height;
+                return;
+            }
+        }
+
         var cacheKey = (cb.Code, cb.Language);
         if (!ctx.SyntaxCache.TryGetValue(cacheKey, out var tokensPerLine))
         {
@@ -648,20 +662,20 @@ internal static class MarkdownLayoutBuilder
         float headerH = 36f * ctx.Scale;
         var headerRect = new SKRect(x, ctx.Y, x + width, ctx.Y + headerH);
         ctx.Boxes.Add(new RectBox { Bounds = headerRect, Fill = ctx.Theme.CodeBlockHeaderBackground, CornerRadius = ctx.Theme.CornerRadius * ctx.Scale });
-        ctx.Boxes.Add(new DetailsHeaderBox { Bounds = headerRect, Source = d, Expanded = expanded });
 
-        var font = ctx.Fonts.GetFont(ctx.Theme, false, ctx.Theme.BodyFontSize * ctx.Scale, true, false);
-        float ascent = -font.Metrics.Ascent;
-        float baselineY = ctx.Y + (headerH - (ascent + font.Metrics.Descent)) / 2f + ascent;
-        ctx.Boxes.Add(new TextRunBox
-        {
-            Bounds = headerRect,
-            Text = d.Summary,
-            Font = font,
-            Color = ctx.Theme.BodyColor,
-            Baseline = new SKPoint(x + 34f * ctx.Scale, baselineY)
-        });
+            var font = ctx.Fonts.GetFont(ctx.Theme, false, ctx.Theme.BodyFontSize * ctx.Scale, true, false);
+            float ascent = -font.Metrics.Ascent;
+            float baselineY = ctx.Y + (headerH - (ascent + font.Metrics.Descent)) / 2f + ascent;
+            ctx.Boxes.Add(new TextRunBox
+            {
+                Bounds = headerRect,
+                Text = d.Summary,
+                Font = font,
+                Color = ctx.Theme.BodyColor,
+                Baseline = new SKPoint(x + 34f * ctx.Scale, baselineY)
+            });
 
+            ctx.Boxes.Add(new DetailsHeaderBox { Bounds = headerRect, Source = d, Expanded = expanded });
         ctx.Y += headerH;
 
         if (expanded)
@@ -669,6 +683,13 @@ internal static class MarkdownLayoutBuilder
             ctx.Y += ctx.Theme.BlockSpacing * ctx.Scale * 0.5f;
             LayoutBlocks(ctx, d.Blocks, x + 8f * ctx.Scale, width - 8f * ctx.Scale, tight: false, textColor: ctx.Theme.BodyColor, isFirstInParent: true);
         }
+    }
+
+    private static void LayoutDiv(Ctx ctx, DivBlock div, float x, float width)
+    {
+        // For now, simply layout blocks within a div (alignment support can be enhanced later)
+        // A full centering implementation would require measuring all content first
+        LayoutBlocks(ctx, div.Blocks, x, width, tight: false, textColor: ctx.Theme.BodyColor, isFirstInParent: true);
     }
 
     // ------------------------------------------------------------------

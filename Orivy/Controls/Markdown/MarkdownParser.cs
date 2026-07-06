@@ -465,6 +465,18 @@ public static class MarkdownParser
                 }
             }
 
+            if (indent < 4 && trimmed.StartsWith("<div", StringComparison.OrdinalIgnoreCase))
+            {
+                int endIdx = FindClosingTagLine(lines, i, "div");
+                if (endIdx >= i)
+                {
+                    var inner = lines.GetRange(i + 1, Math.Max(0, endIdx - i - 1));
+                    blocks.Add(ParseDivBlock(trimmed, inner, doc, usedSlugs));
+                    i = endIdx + 1;
+                    continue;
+                }
+            }
+
             if (indent < 4 && LooksLikeHtmlBlockStart(trimmed))
             {
                 var htmlLines = new List<string> { line };
@@ -1044,6 +1056,28 @@ public static class MarkdownParser
         details.Blocks = ParseBlockSequence(content, doc, usedSlugs);
         if (string.IsNullOrWhiteSpace(details.Summary)) details.Summary = "Details";
         return details;
+    }
+
+    private static DivBlock ParseDivBlock(string openTagLine, List<string> innerLines, MarkdownDocument doc, HashSet<string> usedSlugs)
+    {
+        var divBlock = new DivBlock();
+        
+        // Extract align attribute
+        var alignMatch = Regex.Match(openTagLine, @"align\s*=\s*[""']?(left|center|right|justify)[""']?", RegexOptions.IgnoreCase);
+        if (alignMatch.Success)
+        {
+            string alignValue = alignMatch.Groups[1].Value.ToLower();
+            divBlock.Alignment = alignValue switch
+            {
+                "center" => ColumnAlignment.Center,
+                "right" => ColumnAlignment.Right,
+                "left" => ColumnAlignment.Left,
+                _ => ColumnAlignment.None
+            };
+        }
+
+        divBlock.Blocks = ParseBlockSequence(innerLines, doc, usedSlugs);
+        return divBlock;
     }
 
     private static bool LooksLikeHtmlBlockStart(string trimmed) =>

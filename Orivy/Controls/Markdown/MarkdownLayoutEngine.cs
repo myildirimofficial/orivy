@@ -145,6 +145,40 @@ internal sealed class DetailsHeaderBox : MdBox
     public bool Expanded;
 }
 
+internal enum MermaidNodeShape { Rectangle, Rounded, Diamond, Circle }
+
+internal sealed class MermaidNodeBox
+{
+    public SKRect Bounds;
+    public string Label = "";
+    public MermaidNodeShape Shape;
+    public SKFont Font = null!;
+    public SKColor TextColor;
+    public SKColor FillColor;
+    public SKColor BorderColor;
+}
+
+internal sealed class MermaidEdgeBox
+{
+    /// <summary>Polyline points (&gt;= 2). Straight forward edges use 2 points; back/loop edges are routed
+    ///  around the side of the diagram via 4 points so they don't cut through unrelated nodes.</summary>
+    public List<SKPoint> Points = new();
+    public bool Directed;
+    public bool Dashed;
+    public string? Label;
+    public SKFont? LabelFont;
+    public SKPoint LabelPosition;
+    public SKColor Color;
+    public SKColor TextColor;
+}
+
+/// <summary>A parsed &amp; laid-out mermaid flowchart/graph diagram, ready to draw directly.</summary>
+internal sealed class MermaidDiagramBox : MdBox
+{
+    public List<MermaidNodeBox> Nodes = new();
+    public List<MermaidEdgeBox> Edges = new();
+}
+
 // ============================================================================
 // Selection state  (owned by MarkdownViewer, invalidated on reflow)
 // ============================================================================
@@ -211,8 +245,8 @@ internal sealed class MarkdownHoverState
 
 internal sealed class MarkdownFontCache : IDisposable
 {
-    private readonly Dictionary<(bool Mono, bool Bold, bool Italic), SKTypeface> _typefaces = new();
-    private readonly Dictionary<(bool Mono, bool Bold, bool Italic, int SizeTenths), SKFont> _fonts = new();
+    private readonly Dictionary<(bool Mono, bool Bold, bool Italic, bool Math), SKTypeface> _typefaces = new();
+    private readonly Dictionary<(bool Mono, bool Bold, bool Italic, bool Math, int SizeTenths), SKFont> _fonts = new();
     // MeasureText cache: (text, fontKey) → width. Capped at 4096 entries to avoid unbounded growth.
     private readonly Dictionary<(string Text, bool Mono, bool Bold, bool Italic, int SizeTenths), float> _measureCache = new(4096);
     private SKTypeface? _hostBodyTypeface;
@@ -249,13 +283,13 @@ internal sealed class MarkdownFontCache : IDisposable
         return font;
     }
 
-    public SKFont GetFont(MarkdownTheme theme, bool mono, float sizePx, bool bold, bool italic)
+    public SKFont GetFont(MarkdownTheme theme, bool mono, float sizePx, bool bold, bool italic, bool math = false)
     {
         int sizeTenths = (int)MathF.Round(Math.Max(1f, sizePx) * 10f);
-        var key = (mono, bold, italic, sizeTenths);
+        var key = (mono, bold, italic, math, sizeTenths);
         if (_fonts.TryGetValue(key, out var existing)) return existing;
 
-        var typeface = GetTypeface(theme, mono, bold, italic);
+        var typeface = GetTypeface(theme, mono, bold, italic, math);
         float size = sizeTenths / 10f;
         var font = new SKFont(typeface, size)
         {
@@ -267,9 +301,9 @@ internal sealed class MarkdownFontCache : IDisposable
         return font;
     }
 
-    private SKTypeface GetTypeface(MarkdownTheme theme, bool mono, bool bold, bool italic)
+    private SKTypeface GetTypeface(MarkdownTheme theme, bool mono, bool bold, bool italic, bool math = false)
     {
-        var key = (mono, bold, italic);
+        var key = (mono, bold, italic, math);
         if (_typefaces.TryGetValue(key, out var existing)) return existing;
 
         var weight = bold ? SKFontStyleWeight.SemiBold : SKFontStyleWeight.Normal;
@@ -277,7 +311,16 @@ internal sealed class MarkdownFontCache : IDisposable
         var style  = new SKFontStyle(weight, SKFontStyleWidth.Normal, slant);
 
         SKTypeface? typeface = null;
-        if (mono)
+        if (math)
+        {
+            // Math font family
+            foreach (var family in theme.MathFontFamilies)
+            {
+                typeface = SKFontManager.Default.MatchFamily(family, style);
+                if (typeface != null) break;
+            }
+        }
+        else if (mono)
         {
             foreach (var family in theme.MonospaceFontFamilies)
             {

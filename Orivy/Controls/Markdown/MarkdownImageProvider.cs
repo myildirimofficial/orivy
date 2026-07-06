@@ -132,7 +132,11 @@ public sealed class HttpMarkdownImageProvider : IMarkdownImageProvider
     // ----------------------------------------------------------------
 
     private static SKImage? TryDecodeSvg(byte[] bytes, string urlHint) =>
-        SvgRenderer.Render(bytes);
+        // targetScale must stay 1x here: the markdown layout treats the decoded SKImage's pixel
+        // dimensions as the SVG's "natural" size (see MarkdownLayoutBuilder.MeasureImageAtom).
+        // The previous default of 2x (meant for crisp supersampling) leaked into that natural-size
+        // calculation, making every SVG display at exactly twice its intended/declared size.
+        SvgRenderer.Render(bytes, targetScale: 1f);
 
     // ----------------------------------------------------------------
     // data: URI decoding

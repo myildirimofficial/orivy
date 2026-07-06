@@ -9,6 +9,8 @@ public sealed class MarkdownTheme
     public string[] MonospaceFontFamilies { get; set; } =
         { "Cascadia Mono","Cascadia Code","JetBrains Mono","Fira Code","Consolas",
           "SF Mono","Menlo","DejaVu Sans Mono","Liberation Mono","Courier New" };
+    public string[] MathFontFamilies { get; set; } =
+        { "Cambria Math", "STIX Two Math", "Latin Modern Math", "DejaVu Serif", "Noto Serif", "Cambria", "Serif" };
     public bool UseHostDefaultFontForBody { get; set; } = true;
 
     // ── Type scale (logical px) ──

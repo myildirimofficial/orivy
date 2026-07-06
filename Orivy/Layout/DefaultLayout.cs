@@ -749,7 +749,7 @@ internal partial class DefaultLayout : LayoutEngine
     /// </summary>
     private static void UpdateAnchorInfo(IArrangedElement element)
     {
-        Debug.Assert(!HasCachedBounds(element.Container), "Do not call this method with an active cached bounds list.");
+        Debug.Assert(!HasCachedBoundsFor(element), "Do not call this method with an active cached bounds entry for this element.");
  
         if (element.Container is null)
         {
@@ -1038,6 +1038,21 @@ internal partial class DefaultLayout : LayoutEngine
  
     private static bool HasCachedBounds(IArrangedElement? container) =>
         container is not null && container.Properties.ContainsKey(s_cachedBoundsProperty);
+
+    /// <summary>
+    ///  Whether <paramref name="element"/> itself already has a pending cached-bounds entry in its
+    ///  container. This is a narrower, per-element check than <see cref="HasCachedBounds"/>, which only
+    ///  tells us whether the container's cached-bounds dictionary exists at all. Anchor info for a given
+    ///  element can safely be (re)computed while *sibling* elements already have cached bounds pending in
+    ///  the same layout pass (e.g. the lazy initialization fallback in <see cref="LayoutAnchoredControls"/>
+    ///  for elements added outside the normal Add/Anchor-change flow, such as non-Form elements whose
+    ///  generated InitializeComponent calls SuspendLayout/ResumeLayout(false)/PerformLayout()); it is only
+    ///  unsafe to do so while a cached-bounds entry for this exact element is itself pending.
+    /// </summary>
+    private static bool HasCachedBoundsFor(IArrangedElement element) =>
+        element.Container is { } container
+        && container.Properties.TryGetValue(s_cachedBoundsProperty, out IDictionary? dictionary)
+        && dictionary.Contains(element);
  
     private static void ApplyCachedBounds(IArrangedElement container)
     {

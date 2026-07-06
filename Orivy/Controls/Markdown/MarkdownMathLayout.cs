@@ -33,32 +33,38 @@ internal static class MarkdownMathLayout
     public static MathSize Measure(string latex, MarkdownTheme theme, MarkdownFontCache fonts, float sizePx) =>
         Measure(MathParser.Parse(NormalizeLatex(latex)), theme, fonts, sizePx);
 
-    private static MathSize Measure(MathNode node, MarkdownTheme theme, MarkdownFontCache fonts, float sizePx)
+    private static MathSize Measure(MathNode node, MarkdownTheme theme, MarkdownFontCache fonts, float sizePx, MathStyle style = default)
     {
         switch (node)
         {
             case TextNode text:
-                return MeasureMathText(text.Text, theme, fonts, sizePx);
+                return MeasureMathText(text.Text, theme, fonts, sizePx, style);
 
             case OperatorNode op:
-                return MeasureOperatorText(op.Text, theme, fonts, sizePx);
+                return MeasureOperatorText(op.Text, theme, fonts, sizePx, style);
+
+            case StyledNode styled:
+                return Measure(styled.Inner, theme, fonts, sizePx, style.Combine(styled.Bold, styled.Upright));
 
             case RowNode row:
                 if (row.Children.Count == 0)
-                    return Measure(new TextNode(" "), theme, fonts, sizePx);
+                    return Measure(new TextNode(" "), theme, fonts, sizePx, style);
                 float width = 0f, asc = 0f, desc = 0f;
+                MathNode? prevMeasureChild = null;
                 foreach (var child in row.Children)
                 {
-                    var s = Measure(child, theme, fonts, sizePx);
+                    width += RowChildGap(prevMeasureChild, child, sizePx);
+                    var s = Measure(child, theme, fonts, sizePx, style);
                     width += s.Width;
                     asc = MathF.Max(asc, s.Ascent);
                     desc = MathF.Max(desc, s.Descent);
+                    prevMeasureChild = child;
                 }
                 return new MathSize(width, asc, desc);
 
             case FractionNode frac:
-                var num = Measure(frac.Numerator, theme, fonts, sizePx * 0.9f);
-                var den = Measure(frac.Denominator, theme, fonts, sizePx * 0.9f);
+                var num = Measure(frac.Numerator, theme, fonts, sizePx * 0.9f, style);
+                var den = Measure(frac.Denominator, theme, fonts, sizePx * 0.9f, style);
                 float gap = sizePx * 0.18f;
                 float line = MathF.Max(1f, sizePx * 0.055f);
                 return new MathSize(MathF.Max(num.Width, den.Width) + sizePx * 0.55f,
@@ -66,13 +72,13 @@ internal static class MarkdownMathLayout
                     den.Height + gap);
 
             case SqrtNode sqrt:
-                var inner = Measure(sqrt.Inner, theme, fonts, sizePx);
+                var inner = Measure(sqrt.Inner, theme, fonts, sizePx, style);
                 return new MathSize(inner.Width + sizePx * 0.75f, inner.Ascent + sizePx * 0.22f, inner.Descent + sizePx * 0.08f);
 
             case SupSubNode ss:
-                var b = Measure(ss.Base, theme, fonts, sizePx);
-                var sup = ss.Superscript == null ? MathSize.Empty : Measure(ss.Superscript, theme, fonts, sizePx * ScriptScale);
-                var sub = ss.Subscript == null ? MathSize.Empty : Measure(ss.Subscript, theme, fonts, sizePx * ScriptScale);
+                var b = Measure(ss.Base, theme, fonts, sizePx, style);
+                var sup = ss.Superscript == null ? MathSize.Empty : Measure(ss.Superscript, theme, fonts, sizePx * ScriptScale, style);
+                var sub = ss.Subscript == null ? MathSize.Empty : Measure(ss.Subscript, theme, fonts, sizePx * ScriptScale, style);
                 if (IsLimitsOperator(ss.Base))
                 {
                     float limitGap = sizePx * 0.10f;
@@ -81,9 +87,10 @@ internal static class MarkdownMathLayout
                         b.Descent + (ss.Subscript == null ? 0f : sub.Height + limitGap));
                 }
                 float scriptW = MathF.Max(sup.Width, sub.Width);
+                float subDrop = MathF.Max(sizePx * 0.15f, b.Descent * 0.4f);
                 return new MathSize(b.Width + scriptW + sizePx * 0.08f,
                     MathF.Max(b.Ascent, b.Ascent * 0.65f + sup.Height),
-                    MathF.Max(b.Descent, b.Descent + sub.Height * 0.8f));
+                    MathF.Max(b.Descent, subDrop + sub.Descent));
 
             case CasesNode cases:
                 float braceW = sizePx * 0.55f;
@@ -91,19 +98,22 @@ internal static class MarkdownMathLayout
                 float rowsW = 0f, rowsH = 0f;
                 foreach (var row in cases.Rows)
                 {
-                    var rs = Measure(row, theme, fonts, sizePx);
+                    var rs = Measure(row, theme, fonts, sizePx, style);
                     rowsW = MathF.Max(rowsW, rs.Width);
                     rowsH += rs.Height + rowGap;
                 }
                 if (cases.Rows.Count > 0) rowsH -= rowGap;
                 return new MathSize(braceW + rowsW + sizePx * 0.25f, rowsH * 0.55f, rowsH * 0.45f);
 
+            case AlignmentNode align:
+                return MeasureAlignment(align, theme, fonts, sizePx, style);
+
             case MatrixNode matrix:
-                return MeasureMatrix(matrix, theme, fonts, sizePx);
+                return MeasureMatrix(matrix, theme, fonts, sizePx, style);
 
             case BinomialNode binom:
-                var top = Measure(binom.Top, theme, fonts, sizePx * 0.9f);
-                var bottom = Measure(binom.Bottom, theme, fonts, sizePx * 0.9f);
+                var top = Measure(binom.Top, theme, fonts, sizePx * 0.9f, style);
+                var bottom = Measure(binom.Bottom, theme, fonts, sizePx * 0.9f, style);
                 float parenW = sizePx * 0.55f;
                 return new MathSize(MathF.Max(top.Width, bottom.Width) + parenW * 2f + sizePx * 0.20f,
                     top.Height + sizePx * 0.18f,
@@ -114,47 +124,54 @@ internal static class MarkdownMathLayout
     }
 
     private static void Render(MathNode node, MathFormulaBox box, MarkdownTheme theme, MarkdownFontCache fonts,
-        float x, float baselineY, float sizePx, SKColor color)
+        float x, float baselineY, float sizePx, SKColor color, MathStyle style = default)
     {
         switch (node)
         {
             case TextNode text:
                 if (text.Text.Length == 0) return;
-                RenderMathText(text.Text, box, theme, fonts, x, baselineY, sizePx, color);
+                RenderMathText(text.Text, box, theme, fonts, x, baselineY, sizePx, color, style);
                 break;
 
             case OperatorNode op:
-                RenderOperatorText(op.Text, box, theme, fonts, x, baselineY, sizePx, color);
+                RenderOperatorText(op.Text, box, theme, fonts, x, baselineY, sizePx, color, style);
+                break;
+
+            case StyledNode styled:
+                Render(styled.Inner, box, theme, fonts, x, baselineY, sizePx, color, style.Combine(styled.Bold, styled.Upright));
                 break;
 
             case RowNode row:
                 float cx = x;
+                MathNode? prevRenderChild = null;
                 foreach (var child in row.Children)
                 {
-                    var s = Measure(child, theme, fonts, sizePx);
-                    Render(child, box, theme, fonts, cx, baselineY, sizePx, color);
+                    cx += RowChildGap(prevRenderChild, child, sizePx);
+                    var s = Measure(child, theme, fonts, sizePx, style);
+                    Render(child, box, theme, fonts, cx, baselineY, sizePx, color, style);
                     cx += s.Width;
+                    prevRenderChild = child;
                 }
                 break;
 
             case FractionNode frac:
-                var ms = Measure(frac, theme, fonts, sizePx);
-                var num = Measure(frac.Numerator, theme, fonts, sizePx * 0.9f);
-                var den = Measure(frac.Denominator, theme, fonts, sizePx * 0.9f);
+                var ms = Measure(frac, theme, fonts, sizePx, style);
+                var num = Measure(frac.Numerator, theme, fonts, sizePx * 0.9f, style);
+                var den = Measure(frac.Denominator, theme, fonts, sizePx * 0.9f, style);
                 float lineY = baselineY;
                 float left = x + sizePx * 0.18f;
                 float right = x + ms.Width - sizePx * 0.18f;
                 Render(frac.Numerator, box, theme, fonts, x + (ms.Width - num.Width) / 2f,
-                    lineY - sizePx * 0.24f - num.Descent, sizePx * 0.9f, color);
+                    lineY - sizePx * 0.24f - num.Descent, sizePx * 0.9f, color, style);
                 Render(frac.Denominator, box, theme, fonts, x + (ms.Width - den.Width) / 2f,
-                    lineY + sizePx * 0.32f + den.Ascent, sizePx * 0.9f, color);
+                    lineY + sizePx * 0.32f + den.Ascent, sizePx * 0.9f, color, style);
                 box.Lines.Add(new MathLineSegment(new SKPoint(left, lineY), new SKPoint(right, lineY), MathF.Max(1f, sizePx * 0.055f)));
                 break;
 
             case SqrtNode sqrt:
-                var inner = Measure(sqrt.Inner, theme, fonts, sizePx);
+                var inner = Measure(sqrt.Inner, theme, fonts, sizePx, style);
                 float rx = x + sizePx * 0.55f;
-                Render(sqrt.Inner, box, theme, fonts, rx, baselineY, sizePx, color);
+                Render(sqrt.Inner, box, theme, fonts, rx, baselineY, sizePx, color, style);
                 float top = baselineY - inner.Ascent - sizePx * 0.14f;
                 float bottom = baselineY + inner.Descent * 0.45f;
                 box.Lines.Add(new MathLineSegment(new SKPoint(x + sizePx * 0.10f, baselineY - sizePx * 0.10f), new SKPoint(x + sizePx * 0.27f, bottom), MathF.Max(1f, sizePx * 0.05f)));
@@ -163,38 +180,41 @@ internal static class MarkdownMathLayout
                 break;
 
             case SupSubNode ss:
-                var b = Measure(ss.Base, theme, fonts, sizePx);
+                var b = Measure(ss.Base, theme, fonts, sizePx, style);
                 if (IsLimitsOperator(ss.Base))
                 {
-                    var full = Measure(ss, theme, fonts, sizePx);
+                    var full = Measure(ss, theme, fonts, sizePx, style);
                     float baseX = x + (full.Width - b.Width) / 2f;
-                    Render(ss.Base, box, theme, fonts, baseX, baselineY, sizePx, color);
+                    Render(ss.Base, box, theme, fonts, baseX, baselineY, sizePx, color, style);
                     if (ss.Superscript != null)
                     {
-                        var sup = Measure(ss.Superscript, theme, fonts, sizePx * ScriptScale);
+                        var sup = Measure(ss.Superscript, theme, fonts, sizePx * ScriptScale, style);
                         Render(ss.Superscript, box, theme, fonts, x + (full.Width - sup.Width) / 2f,
-                            baselineY - b.Ascent - sizePx * 0.10f - sup.Descent, sizePx * ScriptScale, color);
+                            baselineY - b.Ascent - sizePx * 0.10f - sup.Descent, sizePx * ScriptScale, color, style);
                     }
                     if (ss.Subscript != null)
                     {
-                        var sub = Measure(ss.Subscript, theme, fonts, sizePx * ScriptScale);
+                        var sub = Measure(ss.Subscript, theme, fonts, sizePx * ScriptScale, style);
                         Render(ss.Subscript, box, theme, fonts, x + (full.Width - sub.Width) / 2f,
-                            baselineY + b.Descent + sizePx * 0.10f + sub.Ascent, sizePx * ScriptScale, color);
+                            baselineY + b.Descent + sizePx * 0.10f + sub.Ascent, sizePx * ScriptScale, color, style);
                     }
                 }
                 else
                 {
-                    Render(ss.Base, box, theme, fonts, x, baselineY, sizePx, color);
+                    Render(ss.Base, box, theme, fonts, x, baselineY, sizePx, color, style);
                     float sx = x + b.Width + sizePx * 0.06f;
                     if (ss.Superscript != null)
-                        Render(ss.Superscript, box, theme, fonts, sx, baselineY - b.Ascent * 0.62f, sizePx * ScriptScale, color);
+                        Render(ss.Superscript, box, theme, fonts, sx, baselineY - b.Ascent * 0.62f, sizePx * ScriptScale, color, style);
                     if (ss.Subscript != null)
-                        Render(ss.Subscript, box, theme, fonts, sx, baselineY + b.Descent + sizePx * 0.42f, sizePx * ScriptScale, color);
+                    {
+                        float subDrop = MathF.Max(sizePx * 0.15f, b.Descent * 0.4f);
+                        Render(ss.Subscript, box, theme, fonts, sx, baselineY + subDrop, sizePx * ScriptScale, color, style);
+                    }
                 }
                 break;
 
             case CasesNode cases:
-                var cs = Measure(cases, theme, fonts, sizePx);
+                var cs = Measure(cases, theme, fonts, sizePx, style);
                 float braceW = sizePx * 0.42f;
                 float rowGap = sizePx * 0.35f;
                 float topY = baselineY - cs.Ascent;
@@ -202,27 +222,31 @@ internal static class MarkdownMathLayout
                 float rowY = topY;
                 foreach (var row in cases.Rows)
                 {
-                    var rs = Measure(row, theme, fonts, sizePx);
-                    Render(row, box, theme, fonts, x + braceW + sizePx * 0.25f, rowY + rs.Ascent, sizePx, color);
+                    var rs = Measure(row, theme, fonts, sizePx, style);
+                    Render(row, box, theme, fonts, x + braceW + sizePx * 0.25f, rowY + rs.Ascent, sizePx, color, style);
                     rowY += rs.Height + rowGap;
                 }
                 break;
 
             case MatrixNode matrix:
-                RenderMatrix(matrix, box, theme, fonts, x, baselineY, sizePx, color);
+                RenderMatrix(matrix, box, theme, fonts, x, baselineY, sizePx, color, style);
                 break;
 
             case BinomialNode binom:
-                RenderBinomial(binom, box, theme, fonts, x, baselineY, sizePx, color);
+                RenderBinomial(binom, box, theme, fonts, x, baselineY, sizePx, color, style);
+                break;
+
+            case AlignmentNode align:
+                RenderAlignment(align, box, theme, fonts, x, baselineY, sizePx, color, style);
                 break;
         }
     }
 
-    private static MathSize MeasureMatrix(MatrixNode matrix, MarkdownTheme theme, MarkdownFontCache fonts, float sizePx)
+    private static MathSize MeasureMatrix(MatrixNode matrix, MarkdownTheme theme, MarkdownFontCache fonts, float sizePx, MathStyle style = default)
     {
         int cols = MatrixColumnCount(matrix);
         if (cols == 0 || matrix.Rows.Count == 0)
-            return Measure(new TextNode(" "), theme, fonts, sizePx);
+            return Measure(new TextNode(" "), theme, fonts, sizePx, style);
 
         float colGap = sizePx * 0.90f;
         float rowGap = sizePx * 0.38f;
@@ -235,7 +259,7 @@ internal static class MarkdownMathLayout
             float rowAsc = 0f, rowDesc = 0f;
             for (int c = 0; c < row.Count; c++)
             {
-                var s = Measure(row[c], theme, fonts, sizePx);
+                var s = Measure(row[c], theme, fonts, sizePx, style);
                 colWidths[c] = MathF.Max(colWidths[c], s.Width);
                 rowAsc = MathF.Max(rowAsc, s.Ascent);
                 rowDesc = MathF.Max(rowDesc, s.Descent);
@@ -252,7 +276,7 @@ internal static class MarkdownMathLayout
     }
 
     private static void RenderMatrix(MatrixNode matrix, MathFormulaBox box, MarkdownTheme theme, MarkdownFontCache fonts,
-        float x, float baselineY, float sizePx, SKColor color)
+        float x, float baselineY, float sizePx, SKColor color, MathStyle style = default)
     {
         int cols = MatrixColumnCount(matrix);
         if (cols == 0) return;
@@ -269,14 +293,14 @@ internal static class MarkdownMathLayout
             var row = matrix.Rows[r];
             for (int c = 0; c < row.Count; c++)
             {
-                var s = Measure(row[c], theme, fonts, sizePx);
+                var s = Measure(row[c], theme, fonts, sizePx, style);
                 colWidths[c] = MathF.Max(colWidths[c], s.Width);
                 rowAscents[r] = MathF.Max(rowAscents[r], s.Ascent);
                 rowDescents[r] = MathF.Max(rowDescents[r], s.Descent);
             }
         }
 
-        var ms = Measure(matrix, theme, fonts, sizePx);
+        var ms = Measure(matrix, theme, fonts, sizePx, style);
         float top = baselineY - ms.Ascent;
         float rowTop = top;
         RenderMatrixDelimiter(matrix.Environment, box, theme, fonts, x, baselineY, ms.Height, sizePx, color, left: true);
@@ -292,8 +316,8 @@ internal static class MarkdownMathLayout
                 if (c < row.Count)
                 {
                     var cell = row[c];
-                    var cellSize = Measure(cell, theme, fonts, sizePx);
-                    Render(cell, box, theme, fonts, cx + (colWidths[c] - cellSize.Width) / 2f, rowBaseline, sizePx, color);
+                    var cellSize = Measure(cell, theme, fonts, sizePx, style);
+                    Render(cell, box, theme, fonts, cx + (colWidths[c] - cellSize.Width) / 2f, rowBaseline, sizePx, color, style);
                 }
                 cx += colWidths[c] + colGap;
             }
@@ -328,50 +352,143 @@ internal static class MarkdownMathLayout
     }
 
     private static void RenderBinomial(BinomialNode binom, MathFormulaBox box, MarkdownTheme theme, MarkdownFontCache fonts,
-        float x, float baselineY, float sizePx, SKColor color)
+        float x, float baselineY, float sizePx, SKColor color, MathStyle style = default)
     {
-        var ms = Measure(binom, theme, fonts, sizePx);
-        var top = Measure(binom.Top, theme, fonts, sizePx * 0.9f);
-        var bottom = Measure(binom.Bottom, theme, fonts, sizePx * 0.9f);
+        var ms = Measure(binom, theme, fonts, sizePx, style);
+        var top = Measure(binom.Top, theme, fonts, sizePx * 0.9f, style);
+        var bottom = Measure(binom.Bottom, theme, fonts, sizePx * 0.9f, style);
         float parenW = sizePx * 0.42f;
         float innerX = x + parenW + sizePx * 0.10f;
         Render(binom.Top, box, theme, fonts, innerX + (MathF.Max(top.Width, bottom.Width) - top.Width) / 2f,
-            baselineY - sizePx * 0.20f - top.Descent, sizePx * 0.9f, color);
+            baselineY - sizePx * 0.20f - top.Descent, sizePx * 0.9f, color, style);
         Render(binom.Bottom, box, theme, fonts, innerX + (MathF.Max(top.Width, bottom.Width) - bottom.Width) / 2f,
-            baselineY + sizePx * 0.28f + bottom.Ascent, sizePx * 0.9f, color);
-        RenderMathText("(", box, theme, fonts, x, baselineY, sizePx * 1.85f, color);
-        RenderMathText(")", box, theme, fonts, x + ms.Width - parenW, baselineY, sizePx * 1.85f, color);
+            baselineY + sizePx * 0.28f + bottom.Ascent, sizePx * 0.9f, color, style);
+        RenderMathText("(", box, theme, fonts, x, baselineY, sizePx * 1.85f, color, style);
+        RenderMathText(")", box, theme, fonts, x + ms.Width - parenW, baselineY, sizePx * 1.85f, color, style);
     }
 
-    private static MathSize MeasureOperatorText(string text, MarkdownTheme theme, MarkdownFontCache fonts, float sizePx)
+    private static MathSize MeasureAlignment(AlignmentNode align, MarkdownTheme theme, MarkdownFontCache fonts, float sizePx, MathStyle style = default)
+    {
+        int cols = AlignmentColumnCount(align);
+        if (cols == 0 || align.Rows.Count == 0)
+            return Measure(new TextNode(" "), theme, fonts, sizePx, style);
+
+        float colGap = sizePx * 0.90f;
+        float rowGap = sizePx * 0.38f;
+        var colWidths = new float[cols];
+        float totalH = 0f;
+
+        foreach (var row in align.Rows)
+        {
+            float rowAsc = 0f, rowDesc = 0f;
+            for (int c = 0; c < row.Count; c++)
+            {
+                var s = Measure(row[c], theme, fonts, sizePx, style);
+                colWidths[c] = MathF.Max(colWidths[c], s.Width);
+                rowAsc = MathF.Max(rowAsc, s.Ascent);
+                rowDesc = MathF.Max(rowDesc, s.Descent);
+            }
+            totalH += rowAsc + rowDesc + rowGap;
+        }
+
+        totalH -= rowGap;
+        float totalW = 0f;
+        for (int c = 0; c < cols; c++) totalW += colWidths[c];
+        totalW += colGap * MathF.Max(0, cols - 1);
+        return new MathSize(totalW, totalH * 0.55f, totalH * 0.45f);
+    }
+
+    private static void RenderAlignment(AlignmentNode align, MathFormulaBox box, MarkdownTheme theme, MarkdownFontCache fonts,
+        float x, float baselineY, float sizePx, SKColor color, MathStyle style = default)
+    {
+        int cols = AlignmentColumnCount(align);
+        if (cols == 0) return;
+
+        float colGap = sizePx * 0.90f;
+        float rowGap = sizePx * 0.38f;
+        var colWidths = new float[cols];
+        var rowAscents = new float[align.Rows.Count];
+        var rowDescents = new float[align.Rows.Count];
+
+        for (int r = 0; r < align.Rows.Count; r++)
+        {
+            var row = align.Rows[r];
+            for (int c = 0; c < row.Count; c++)
+            {
+                var s = Measure(row[c], theme, fonts, sizePx, style);
+                colWidths[c] = MathF.Max(colWidths[c], s.Width);
+                rowAscents[r] = MathF.Max(rowAscents[r], s.Ascent);
+                rowDescents[r] = MathF.Max(rowDescents[r], s.Descent);
+            }
+        }
+
+        var ms = Measure(align, theme, fonts, sizePx, style);
+        float top = baselineY - ms.Ascent;
+        float rowTop = top;
+
+        for (int r = 0; r < align.Rows.Count; r++)
+        {
+            var row = align.Rows[r];
+            float cx = x;
+            float rowBaseline = rowTop + rowAscents[r];
+            for (int c = 0; c < cols; c++)
+            {
+                if (c < row.Count)
+                {
+                    var cell = row[c];
+                    var cellSize = Measure(cell, theme, fonts, sizePx, style);
+                    Render(cell, box, theme, fonts, cx, rowBaseline, sizePx, color, style);
+                }
+                cx += colWidths[c] + colGap;
+            }
+            rowTop += rowAscents[r] + rowDescents[r] + rowGap;
+        }
+    }
+
+    private static int AlignmentColumnCount(AlignmentNode align)
+    {
+        int cols = 0;
+        foreach (var row in align.Rows)
+            cols = Math.Max(cols, row.Count);
+        return cols;
+    }
+
+    private static bool IsLargeOperator(string text) =>
+        text == "\u2211" || text == "\u220F" || text == "\u222B" || text == "\u2210"; // ∑ ∏ ∫ ∐
+
+    private static MathSize MeasureOperatorText(string text, MarkdownTheme theme, MarkdownFontCache fonts, float sizePx, MathStyle style = default)
     {
         if (string.IsNullOrEmpty(text)) return MathSize.Empty;
-        var font = fonts.GetFont(theme, false, sizePx, false, false);
+        float opSizePx = IsLargeOperator(text) ? sizePx * 1.35f : sizePx;
+        var font = fonts.GetFont(theme, false, opSizePx, style.Bold, false, math: true);
         return new MathSize(font.MeasureText(text), -font.Metrics.Ascent, font.Metrics.Descent);
     }
 
     private static void RenderOperatorText(string text, MathFormulaBox box, MarkdownTheme theme, MarkdownFontCache fonts,
-        float x, float baselineY, float sizePx, SKColor color)
+        float x, float baselineY, float sizePx, SKColor color, MathStyle style = default)
     {
         if (string.IsNullOrEmpty(text)) return;
-        var font = fonts.GetFont(theme, false, sizePx, false, false);
+        float opSizePx = IsLargeOperator(text) ? sizePx * 1.35f : sizePx;
+        var font = fonts.GetFont(theme, false, opSizePx, style.Bold, false, math: true);
         box.Runs.Add(new MathTextRun { Text = text, Font = font, Baseline = new SKPoint(x, baselineY), Color = color });
     }
 
     private static string NormalizeLatex(string latex) =>
         latex.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
 
-    private static MathSize MeasureMathText(string text, MarkdownTheme theme, MarkdownFontCache fonts, float sizePx)
+    private static MathSize MeasureMathText(string text, MarkdownTheme theme, MarkdownFontCache fonts, float sizePx, MathStyle style = default)
     {
         if (string.IsNullOrEmpty(text)) return MathSize.Empty;
 
         float width = 0f;
         float ascent = 0f;
         float descent = 0f;
-        foreach (var (segment, italic) in SplitMathTextRuns(text))
+        foreach (var (segment, italic, spaceBefore, spaceAfter) in SplitMathTextRuns(text, sizePx))
         {
-            var font = fonts.GetFont(theme, false, sizePx, false, italic);
+            width += spaceBefore;
+            var font = fonts.GetFont(theme, false, sizePx, style.Bold, style.Upright ? false : italic, math: true);
             width += font.MeasureText(segment);
+            width += spaceAfter;
             ascent = MathF.Max(ascent, -font.Metrics.Ascent);
             descent = MathF.Max(descent, font.Metrics.Descent);
         }
@@ -379,34 +496,89 @@ internal static class MarkdownMathLayout
     }
 
     private static void RenderMathText(string text, MathFormulaBox box, MarkdownTheme theme, MarkdownFontCache fonts,
-        float x, float baselineY, float sizePx, SKColor color)
+        float x, float baselineY, float sizePx, SKColor color, MathStyle style = default)
     {
         float cx = x;
-        foreach (var (segment, italic) in SplitMathTextRuns(text))
+        foreach (var (segment, italic, spaceBefore, spaceAfter) in SplitMathTextRuns(text, sizePx))
         {
-            var font = fonts.GetFont(theme, false, sizePx, false, italic);
+            cx += spaceBefore;
+            var font = fonts.GetFont(theme, false, sizePx, style.Bold, style.Upright ? false : italic, math: true);
             box.Runs.Add(new MathTextRun { Text = segment, Font = font, Baseline = new SKPoint(cx, baselineY), Color = color });
             cx += font.MeasureText(segment);
+            cx += spaceAfter;
         }
     }
 
-    private static IEnumerable<(string Segment, bool Italic)> SplitMathTextRuns(string text)
+    /// <summary>
+    ///  Splits a merged text run into (segment, italic, spaceBefore, spaceAfter) pieces. Unambiguous binary
+    ///  relation characters (=, &lt;, &gt;, \u2264, ...) are always surrounded with automatic spacing —
+    ///  matching how real math typesetting (KaTeX/MathJax, as seen in browser markdown viewers) spaces
+    ///  relations regardless of whether the LaTeX source itself contains literal whitespace around them.
+    ///  Extra spacing is skipped when the source already has an adjacent literal space, to avoid doubling up.
+    /// </summary>
+    private static IEnumerable<(string Segment, bool Italic, float SpaceBefore, float SpaceAfter)> SplitMathTextRuns(string text, float sizePx)
     {
-        int start = 0;
-        bool italic = IsMathItalic(text[0]);
-        for (int i = 1; i < text.Length; i++)
+        float relationSpace = sizePx * 0.22f;
+        int i = 0;
+        while (i < text.Length)
         {
-            bool nextItalic = IsMathItalic(text[i]);
-            if (nextItalic == italic) continue;
-            yield return (text[start..i], italic);
-            start = i;
-            italic = nextItalic;
+            char c = text[i];
+            if (IsRelationChar(c))
+            {
+                bool hasSpaceBefore = i > 0 && text[i - 1] == ' ';
+                bool hasSpaceAfter = i + 1 < text.Length && text[i + 1] == ' ';
+                yield return (c.ToString(), false, hasSpaceBefore ? 0f : relationSpace, hasSpaceAfter ? 0f : relationSpace);
+                i++;
+                continue;
+            }
+
+            int start = i;
+            bool italic = IsMathItalic(c);
+            i++;
+            while (i < text.Length && !IsRelationChar(text[i]) && IsMathItalic(text[i]) == italic)
+            {
+                i++;
+            }
+            yield return (text[start..i], italic, 0f, 0f);
         }
-        yield return (text[start..], italic);
     }
 
     private static bool IsMathItalic(char c) =>
         (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+
+    /// <summary>Unambiguous binary relation symbols that are never used as unary/prefix operators, so it is
+    ///  always safe to add automatic spacing around them (unlike +/- which are ambiguous with unary signs).</summary>
+    private static bool IsRelationChar(char c) => c is
+        '=' or '<' or '>' or
+        '\u2264' or '\u2265' or '\u2260' or '\u2248' or '\u2261' or
+        '\u223C' or '\u2243' or '\u2245' or '\u221D' or
+        '\u2192' or '\u2190' or '\u21D2' or '\u21D0' or
+        '\u2208' or '\u2209' or '\u2282' or '\u2286' or '\u2283' or '\u2287' or
+        '\u226A' or '\u226B';
+
+    /// <summary>Binary-operator symbols emitted as their own command-derived node (\cdot, \times, ...).</summary>
+    private static bool IsBinarySymbolChar(char c) => c is
+        '\u00B7' or '\u00D7' or '\u00F7' or '\u00B1' or '\u2213' or
+        '\u2227' or '\u2228' or '\u2229' or '\u222A' or '\u2295' or '\u2297' or '\u2216';
+
+    private static bool IsBinRelSingleCharNode(MathNode node) =>
+        node is TextNode t && t.Text.Length == 1 && (IsRelationChar(t.Text[0]) || IsBinarySymbolChar(t.Text[0]));
+
+    /// <summary>
+    ///  Extra horizontal gap to insert between two adjacent row children. Command-derived binary-operator
+    ///  or relation symbols (each their own row child with otherwise zero gap from neighbors) get a small
+    ///  padding so formulas like "\nabla\cdot\mathbf{E}" don't render flush/cramped. Skipped when either
+    ///  side already ends/starts with a literal space (avoids doubling up on user-provided spacing).
+    /// </summary>
+    private static float RowChildGap(MathNode? prev, MathNode next, float sizePx)
+    {
+        if (prev is null) return 0f;
+        bool prevEndsWithSpace = prev is TextNode pt && pt.Text.EndsWith(" ", StringComparison.Ordinal);
+        bool nextStartsWithSpace = next is TextNode nt && nt.Text.StartsWith(" ", StringComparison.Ordinal);
+        if (prevEndsWithSpace || nextStartsWithSpace) return 0f;
+
+        return IsBinRelSingleCharNode(prev) || IsBinRelSingleCharNode(next) ? sizePx * 0.16f : 0f;
+    }
 
     private static bool IsLimitsOperator(MathNode node) =>
         node is TextNode text && (text.Text == "\u2211" || text.Text == "\u220F") ||
@@ -430,6 +602,7 @@ internal static class MarkdownMathLayout
     private abstract class MathNode { }
     private sealed class RowNode : MathNode { public List<MathNode> Children = new(); }
     private sealed class TextNode : MathNode { public string Text; public TextNode(string text) => Text = text; }
+    private sealed class StyledNode : MathNode { public MathNode Inner = new RowNode(); public bool Bold; public bool Upright; }
     private sealed class OperatorNode : MathNode { public string Text; public OperatorNode(string text) => Text = text; }
     private sealed class FractionNode : MathNode { public MathNode Numerator = new RowNode(); public MathNode Denominator = new RowNode(); }
     private sealed class SqrtNode : MathNode { public MathNode Inner = new RowNode(); }
@@ -437,6 +610,17 @@ internal static class MarkdownMathLayout
     private sealed class CasesNode : MathNode { public List<MathNode> Rows = new(); }
     private sealed class MatrixNode : MathNode { public List<List<MathNode>> Rows = new(); public string Environment = "matrix"; }
     private sealed class BinomialNode : MathNode { public MathNode Top = new RowNode(); public MathNode Bottom = new RowNode(); }
+    private sealed class AlignmentNode : MathNode { public List<List<MathNode>> Rows = new(); public string Environment = "align"; }
+
+    /// <summary>Rendering style applied to math text runs: whether letters are bold and/or upright (non-italic).</summary>
+    private readonly struct MathStyle
+    {
+        public bool Bold { get; init; }
+        public bool Upright { get; init; }
+
+        public MathStyle Combine(bool bold, bool upright) =>
+            new() { Bold = Bold || bold, Upright = Upright || upright };
+    }
 
     private sealed class MathParser
     {
@@ -580,18 +764,54 @@ internal static class MarkdownMathLayout
                     string env = ReadEnvironmentName();
                     if (env == "cases") return ParseCases();
                     if (env is "matrix" or "pmatrix" or "bmatrix" or "vmatrix" or "Vmatrix") return ParseMatrix(env);
+                    if (env is "align" or "align*" or "alignat" or "alignat*" or "flalign" or "flalign*") return ParseAlignment(env);
                     return new TextNode("");
                 case "left":
                 case "right":
                     return new TextNode(ReadDelimiter());
                 case "\\": 
                     return new TextNode(" ");
+                case "mathbf":
+                case "boldsymbol":
+                case "textbf":
+                    return new StyledNode { Inner = ParseRequiredGroup(), Bold = true, Upright = name != "boldsymbol" };
+                case "mathrm":
+                case "textrm":
+                case "text":
+                case "operatorname":
+                case "mathcal":
+                case "mathfrak":
+                case "mathbb":
+                    return new StyledNode { Inner = ParseRequiredGroup(), Upright = true };
+                case "mathit":
+                case "textit":
+                    return new StyledNode { Inner = ParseRequiredGroup() };
             }
 
             if (IsOperatorCommand(name))
+            {
+                SkipTrailingSpaceAfterControlWord(name);
                 return new OperatorNode(name);
+            }
 
+            SkipTrailingSpaceAfterControlWord(name);
             return new TextNode(SymbolForCommand(name));
+        }
+
+        /// <summary>
+        ///  Whitespace right after a control WORD (a multi-letter command name like \partial, \nabla, \mu -
+        ///  as opposed to a control SYMBOL like the explicit space command "\ ", whose single non-letter
+        ///  name char is handled separately) is purely syntactic in real LaTeX: it only exists to separate
+        ///  the command name from following text and produces no visual gap. Without this, formulas like
+        ///  `\frac{\partial \mathbf{B}}{\partial t}` rendered with an oddly wide, KaTeX-mismatching gap
+        ///  after `\partial` simply because the source had a space there for readability.
+        /// </summary>
+        private void SkipTrailingSpaceAfterControlWord(string name)
+        {
+            if (name.Length > 0 && char.IsLetter(name[0]) && _pos < _source.Length && _source[_pos] == ' ')
+            {
+                _pos++;
+            }
         }
 
         private MathNode ParseRequiredGroup()
@@ -642,6 +862,29 @@ internal static class MarkdownMathLayout
             return matrix;
         }
 
+        private AlignmentNode ParseAlignment(string env)
+        {
+            var body = new StringBuilder();
+            string end = @"\end{" + env + "}";
+            int endIndex = _source.IndexOf(end, _pos, StringComparison.Ordinal);
+            if (endIndex < 0) endIndex = _source.Length;
+            body.Append(_source, _pos, endIndex - _pos);
+            _pos = Math.Min(_source.Length, endIndex + end.Length);
+
+            var align = new AlignmentNode { Environment = env };
+            foreach (var rawRow in SplitRows(body.ToString()))
+            {
+                var cells = new List<MathNode>();
+                foreach (var rawCell in SplitCells(rawRow))
+                {
+                    string cell = rawCell.Trim();
+                    cells.Add(cell.Length == 0 ? new TextNode("") : Parse(cell));
+                }
+                if (cells.Count > 0) align.Rows.Add(cells);
+            }
+            return align;
+        }
+
         private static IEnumerable<string> SplitRows(string text)
         {
             var rows = new List<string>();
@@ -670,9 +913,12 @@ internal static class MarkdownMathLayout
         {
             var cells = new List<string>();
             var sb = new StringBuilder();
+            int braceDepth = 0;
             for (int i = 0; i < text.Length; i++)
             {
-                if (text[i] == '&')
+                if (text[i] == '{') braceDepth++;
+                else if (text[i] == '}') braceDepth--;
+                else if (text[i] == '&' && braceDepth == 0)
                 {
                     cells.Add(sb.ToString());
                     sb.Clear();
@@ -729,14 +975,30 @@ internal static class MarkdownMathLayout
         private static string SymbolForCommand(string name) => name switch
         {
             "alpha" => "\u03B1", "beta" => "\u03B2", "gamma" => "\u03B3", "delta" => "\u03B4", "epsilon" => "\u03B5",
-            "theta" => "\u03B8", "lambda" => "\u03BB", "mu" => "\u03BC", "pi" => "\u03C0", "sigma" => "\u03C3",
-            "phi" => "\u03C6", "omega" => "\u03C9", "Gamma" => "\u0393", "Delta" => "\u0394", "Theta" => "\u0398",
-            "Lambda" => "\u039B", "Pi" => "\u03A0", "Sigma" => "\u03A3", "Phi" => "\u03A6", "Omega" => "\u03A9",
+            "zeta" => "\u03B6", "eta" => "\u03B7", "theta" => "\u03B8", "iota" => "\u03B9", "kappa" => "\u03BA",
+            "lambda" => "\u03BB", "mu" => "\u03BC", "nu" => "\u03BD", "xi" => "\u03BE", "omicron" => "\u03BF",
+            "pi" => "\u03C0", "rho" => "\u03C1", "sigma" => "\u03C3", "tau" => "\u03C4", "upsilon" => "\u03C5",
+            "phi" => "\u03C6", "chi" => "\u03C7", "psi" => "\u03C8", "omega" => "\u03C9",
+            "Gamma" => "\u0393", "Delta" => "\u0394", "Theta" => "\u0398", "Lambda" => "\u039B", "Xi" => "\u039E",
+            "Pi" => "\u03A0", "Sigma" => "\u03A3", "Upsilon" => "\u03A5", "Phi" => "\u03A6", "Psi" => "\u03A8", "Omega" => "\u03A9",
             "pm" => "\u00B1", "mp" => "\u2213", "times" => "\u00D7", "cdot" => "\u00B7", "div" => "\u00F7",
             "le" or "leq" => "\u2264", "ge" or "geq" => "\u2265", "neq" => "\u2260", "approx" => "\u2248",
             "infty" => "\u221E", "sum" => "\u2211", "prod" => "\u220F", "int" => "\u222B", "partial" => "\u2202",
             "nabla" => "\u2207", "rightarrow" or "to" => "\u2192", "leftarrow" => "\u2190",
-            "Rightarrow" => "\u21D2", "Leftarrow" => "\u21D0", "quad" => "    ", "," => " ", ";" => "  ",
+            "Rightarrow" => "\u21D2", "Leftarrow" => "\u21D0", "quad" => "    ", "qquad" => "        ",
+            "," => " ", ";" => "  ", "!" => "", ":" => " ",
+            "varepsilon" => "\u03B5", "vartheta" => "\u03D1", "varpi" => "\u03D6", "varrho" => "\u03F1",
+            "varsigma" => "\u03C2", "varphi" => "\u03D5", "varkappa" => "\u03F0",
+            "hbar" => "\u0127", "ell" => "\u2113", "Re" => "\u211C", "Im" => "\u2111", "wp" => "\u2118",
+            "emptyset" or "varnothing" => "\u2205", "forall" => "\u2200", "exists" => "\u2203",
+            "in" => "\u2208", "notin" => "\u2209", "subset" => "\u2282", "subseteq" => "\u2286",
+            "supset" => "\u2283", "supseteq" => "\u2287", "cup" => "\u222A", "cap" => "\u2229",
+            "setminus" => "\u2216", "wedge" => "\u2227", "vee" => "\u2228", "neg" => "\u00AC",
+            "cdots" => "\u22EF", "ldots" or "dots" => "\u2026", "vdots" => "\u22EE", "ddots" => "\u22F1",
+            "perp" => "\u22A5", "parallel" => "\u2225", "angle" => "\u2220", "equiv" => "\u2261",
+            "sim" => "\u223C", "simeq" => "\u2243", "cong" => "\u2245", "propto" => "\u221D",
+            "gg" => "\u226B", "ll" => "\u226A", "otimes" => "\u2297", "oplus" => "\u2295",
+            "dagger" => "\u2020", "ddagger" => "\u2021", "aleph" => "\u2135",
             _ => name.Length == 0 ? "" : name
         };
     }

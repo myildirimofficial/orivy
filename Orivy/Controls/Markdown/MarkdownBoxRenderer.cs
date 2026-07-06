@@ -73,6 +73,9 @@ internal static class MarkdownBoxRenderer
                 case DetailsHeaderBox details:
                     DrawDetailsToggle(canvas, details, theme, fillPaint);
                     break;
+                case MermaidDiagramBox mermaid:
+                    DrawMermaidDiagram(canvas, mermaid, fillPaint, strokePaint, textPaint);
+                    break;
             }
         }
 
@@ -218,6 +221,116 @@ internal static class MarkdownBoxRenderer
 
         strokePaint.StrokeCap = SKStrokeCap.Butt;
         strokePaint.StrokeJoin = SKStrokeJoin.Miter;
+    }
+
+    private static void DrawMermaidDiagram(SKCanvas canvas, MermaidDiagramBox box, SKPaint fillPaint, SKPaint strokePaint, SKPaint textPaint)
+    {
+        strokePaint.StrokeCap = SKStrokeCap.Round;
+        strokePaint.StrokeJoin = SKStrokeJoin.Round;
+
+        // Edges first so node boxes sit on top of connecting lines.
+        foreach (var edge in box.Edges)
+        {
+            if (edge.Points.Count < 2) continue;
+
+            strokePaint.Color = edge.Color;
+            strokePaint.StrokeWidth = 1.4f;
+            strokePaint.PathEffect = edge.Dashed ? SKPathEffect.CreateDash(new float[] { 5f, 4f }, 0f) : null;
+            for (int i = 0; i < edge.Points.Count - 1; i++)
+            {
+                canvas.DrawLine(edge.Points[i], edge.Points[i + 1], strokePaint);
+            }
+            strokePaint.PathEffect = null;
+
+            if (edge.Directed)
+            {
+                var last = edge.Points[^1];
+                var beforeLast = edge.Points[^2];
+                DrawArrowHead(canvas, beforeLast, last, edge.Color, fillPaint);
+            }
+
+            if (!string.IsNullOrEmpty(edge.Label) && edge.LabelFont != null)
+            {
+                float labelW = edge.LabelFont.MeasureText(edge.Label);
+                float ascent = -edge.LabelFont.Metrics.Ascent;
+                float descent = edge.LabelFont.Metrics.Descent;
+                var bg = new SKRect(edge.LabelPosition.X - labelW / 2f - 4f, edge.LabelPosition.Y - ascent - 2f,
+                    edge.LabelPosition.X + labelW / 2f + 4f, edge.LabelPosition.Y + descent + 2f);
+                fillPaint.Color = SKColors.White.WithAlpha(220);
+                canvas.DrawRect(bg, fillPaint);
+                textPaint.Color = edge.TextColor;
+                canvas.DrawText(edge.Label, edge.LabelPosition.X, edge.LabelPosition.Y, SKTextAlign.Center, edge.LabelFont, textPaint);
+            }
+        }
+
+        strokePaint.StrokeCap = SKStrokeCap.Butt;
+        strokePaint.StrokeJoin = SKStrokeJoin.Miter;
+
+        foreach (var node in box.Nodes)
+        {
+            fillPaint.Color = node.FillColor;
+            strokePaint.Color = node.BorderColor;
+            strokePaint.StrokeWidth = 1.4f;
+
+            switch (node.Shape)
+            {
+                case MermaidNodeShape.Rounded:
+                    float r = node.Bounds.Height / 2f;
+                    canvas.DrawRoundRect(node.Bounds, r, r, fillPaint);
+                    canvas.DrawRoundRect(node.Bounds, r, r, strokePaint);
+                    break;
+                case MermaidNodeShape.Diamond:
+                    using (var path = new SKPath())
+                    {
+                        path.MoveTo(node.Bounds.MidX, node.Bounds.Top);
+                        path.LineTo(node.Bounds.Right, node.Bounds.MidY);
+                        path.LineTo(node.Bounds.MidX, node.Bounds.Bottom);
+                        path.LineTo(node.Bounds.Left, node.Bounds.MidY);
+                        path.Close();
+                        canvas.DrawPath(path, fillPaint);
+                        canvas.DrawPath(path, strokePaint);
+                    }
+                    break;
+                case MermaidNodeShape.Circle:
+                    canvas.DrawOval(node.Bounds, fillPaint);
+                    canvas.DrawOval(node.Bounds, strokePaint);
+                    break;
+                default:
+                    canvas.DrawRoundRect(node.Bounds, 4f, 4f, fillPaint);
+                    canvas.DrawRoundRect(node.Bounds, 4f, 4f, strokePaint);
+                    break;
+            }
+
+            textPaint.Color = node.TextColor;
+            float textAscent = -node.Font.Metrics.Ascent;
+            float textDescent = node.Font.Metrics.Descent;
+            float baselineY = node.Bounds.MidY + (textAscent - textDescent) / 2f;
+            canvas.DrawText(node.Label, node.Bounds.MidX, baselineY, SKTextAlign.Center, node.Font, textPaint);
+        }
+    }
+
+    private static void DrawArrowHead(SKCanvas canvas, SKPoint from, SKPoint to, SKColor color, SKPaint fillPaint)
+    {
+        float dx = to.X - from.X;
+        float dy = to.Y - from.Y;
+        float len = MathF.Sqrt(dx * dx + dy * dy);
+        if (len < 0.001f) return;
+        dx /= len; dy /= len;
+
+        const float headLength = 9f;
+        const float headWidth = 3.5f;
+        float baseX = to.X - dx * headLength;
+        float baseY = to.Y - dy * headLength;
+        float nx = -dy, ny = dx;
+
+        using var path = new SKPath();
+        path.MoveTo(to.X, to.Y);
+        path.LineTo(baseX + nx * headWidth, baseY + ny * headWidth);
+        path.LineTo(baseX - nx * headWidth, baseY - ny * headWidth);
+        path.Close();
+
+        fillPaint.Color = color;
+        canvas.DrawPath(path, fillPaint);
     }
 
     private static void DrawCheckbox(SKCanvas canvas, CheckboxBox box, MarkdownTheme theme,
