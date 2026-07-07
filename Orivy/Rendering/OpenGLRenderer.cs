@@ -56,39 +56,34 @@ internal sealed class OpenGLRenderer : IWindowRenderer
             if (!WglNativeMethods.SetPixelFormat(_deviceContext, pixelFormat, ref pfd))
                 throw new InvalidOperationException("Failed to set OpenGL pixel format.");
 
-            nint tempRc = WglNativeMethods.wglCreateContext(_deviceContext);
-            if (tempRc == IntPtr.Zero)
-                throw new InvalidOperationException("Failed to create temporary OpenGL context.");
-
-            if (!WglNativeMethods.wglMakeCurrent(_deviceContext, tempRc))
-            {
-                WglNativeMethods.wglDeleteContext(tempRc);
-                throw new InvalidOperationException("Failed to make temporary OpenGL context current.");
-            }
-
             _glContext = WglNativeMethods.wglCreateContext(_deviceContext);
             if (_glContext == IntPtr.Zero)
-            {
-                WglNativeMethods.wglDeleteContext(tempRc);
                 throw new InvalidOperationException("Failed to create OpenGL rendering context.");
-            }
 
             if (!WglNativeMethods.wglMakeCurrent(_deviceContext, _glContext))
             {
                 WglNativeMethods.wglDeleteContext(_glContext);
-                WglNativeMethods.wglDeleteContext(tempRc);
+                _glContext = IntPtr.Zero;
                 throw new InvalidOperationException("Failed to make OpenGL context current.");
             }
 
-            WglNativeMethods.wglDeleteContext(tempRc);
-
             var glInterface = GRGlInterface.Create();
             if (glInterface == null)
+            {
+                WglNativeMethods.wglMakeCurrent(IntPtr.Zero, IntPtr.Zero);
+                WglNativeMethods.wglDeleteContext(_glContext);
+                _glContext = IntPtr.Zero;
                 throw new InvalidOperationException("Failed to assemble OpenGL interface for SkiaSharp.");
+            }
 
             _grContext = GRContext.CreateGl(glInterface);
             if (_grContext == null)
+            {
+                WglNativeMethods.wglMakeCurrent(IntPtr.Zero, IntPtr.Zero);
+                WglNativeMethods.wglDeleteContext(_glContext);
+                _glContext = IntPtr.Zero;
                 throw new InvalidOperationException("Failed to create SkiaSharp GRContext for OpenGL.");
+            }
 
             _isInitialized = true;
         }
@@ -128,7 +123,10 @@ internal sealed class OpenGLRenderer : IWindowRenderer
             return false;
 
         if (!WglNativeMethods.wglMakeCurrent(_deviceContext, _glContext))
+        {
+            System.Diagnostics.Debug.WriteLine("[OpenGLRenderer] wglMakeCurrent failed");
             return false;
+        }
 
         try
         {
@@ -139,11 +137,12 @@ internal sealed class OpenGLRenderer : IWindowRenderer
                 _surface?.Dispose();
                 _surface = null;
 
-                WglNativeMethods.glGetIntegerv(0x8CA6, out int fboId);
-                WglNativeMethods.glGetIntegerv(0x0D57, out int stencilBits);
-                WglNativeMethods.glGetIntegerv(0x80A9, out int sampleCount);
+                int stencilBits = WglNativeMethods.glGetIntegervSafe(0x1E05);
+                int sampleCount = 0;
 
-                var framebufferInfo = new GRGlFramebufferInfo((uint)fboId, 0x8058);
+                uint fboId = 0;
+
+                var framebufferInfo = new GRGlFramebufferInfo(fboId, 0x8058);
                 var backendRenderTarget = new GRBackendRenderTarget(
                     width,
                     height,
@@ -155,18 +154,27 @@ internal sealed class OpenGLRenderer : IWindowRenderer
                     _grContext,
                     backendRenderTarget,
                     GRSurfaceOrigin.BottomLeft,
-                    SKColorType.Rgba8888);
+                    SKColorType.Bgra8888);
 
                 if (_surface == null)
+                {
+                    System.Diagnostics.Debug.WriteLine("[OpenGLRenderer] SKSurface.Create returned null");
                     return false;
+                }
 
                 _width = width;
                 _height = height;
             }
 
-            var canvas = _surface.Canvas;
+            var canvas = _surface?.Canvas;
+            if (canvas == null)
+            {
+                System.Diagnostics.Debug.WriteLine("[OpenGLRenderer] Canvas is null");
+                return false;
+            }
+
             canvas.Clear(SKColors.Transparent);
-            draw(canvas, new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul));
+            draw(canvas, new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul));
             canvas.Flush();
 
             WglNativeMethods.SwapBuffers(_deviceContext);
@@ -174,8 +182,9 @@ internal sealed class OpenGLRenderer : IWindowRenderer
 
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine($"[OpenGLRenderer] Render exception: {ex.Message}");
             _surface?.Dispose();
             _surface = null;
             return false;

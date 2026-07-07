@@ -3,6 +3,8 @@ using Orivy.Helpers;
 using Orivy.Native.Windows;
 using SkiaSharp;
 using System;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using static Orivy.Native.Windows.Methods;
@@ -13,6 +15,7 @@ public partial class WindowBase : ElementBase
 {
     private const uint WM_APP_THEMECHANGED = 0x8000 + 0x250;
     private const uint WM_APP_IDLEMAINTENANCE = 0x8000 + 0x251;
+    private const uint WM_APP_INVOKE = 0x8000 + 0x252;
 
 private IntPtr _hWnd;
     private IntPtr _hInstance;
@@ -30,8 +33,16 @@ private IntPtr _hWnd;
     private bool _mouseInClient;
     private bool _closeRequested;
     private bool _formClosed;
+    // True while this window is being displayed modally via ShowDialog(). A modal dialog runs its
+    // own nested message loop and must NOT post WM_QUIT when it closes — otherwise the queued
+    // WM_QUIT terminates the caller's subsequent Application.Run(...) loop (e.g. a splash shown with
+    // ShowDialog() before Application.Run(mainForm) would silently kill the whole app on close).
+    private bool _isModal;
     private bool _updatingFromNative;
     protected bool enableFullDraggable;
+
+    // Cross-thread invoke queue. Actions are marshaled to the UI thread via WM_APP_INVOKE.
+    private readonly ConcurrentQueue<Action> _invokeQueue = new();
 
     // element which currently has native mouse capture; used by derived classes
     protected ElementBase _mouseCapturedElement;
@@ -435,6 +446,81 @@ private IntPtr _hWnd;
         Application.EnableDpiAwareness();
     }
 
+    /// <summary>
+    /// Executes the specified action synchronously on the UI thread that owns this window.
+    /// If the call is made from the UI thread, the action runs immediately.
+    /// </summary>
+    public void Invoke(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        var uiThreadId = IsHandleCreated ? GetWindowThreadProcessId(Handle, out _) : 0;
+        if (uiThreadId != 0 && Environment.CurrentManagedThreadId == uiThreadId)
+        {
+            action();
+            return;
+        }
+
+        var resetEvent = new System.Threading.ManualResetEventSlim(false);
+        Exception? caughtException = null;
+
+        BeginInvoke(() =>
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                caughtException = ex;
+            }
+            finally
+            {
+                resetEvent.Set();
+            }
+        });
+
+        resetEvent.Wait();
+
+        if (caughtException != null)
+            throw new InvalidOperationException("Invoke failed.", caughtException);
+    }
+
+    /// <summary>
+    /// Posts the specified action to the UI thread that owns this window.
+    /// The action is executed asynchronously when the window processes the WM_APP_INVOKE message.
+    /// </summary>
+    public void BeginInvoke(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        _invokeQueue.Enqueue(action);
+
+        if (!IsHandleCreated)
+            return;
+
+        IntPtr lParam = IntPtr.Zero;
+        PostMessage(Handle, (int)WM_APP_INVOKE, 0, ref lParam);
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int GetWindowThreadProcessId(IntPtr hWnd, out int lpdwProcessId);
+
+    private void ProcessInvokeQueue()
+    {
+        while (_invokeQueue.TryDequeue(out var action))
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[WindowBase] Invoke action failed: {ex}");
+            }
+        }
+    }
+
     public WindowBase()
     {
         Size = new SKSize(800, 600);
@@ -546,6 +632,29 @@ private IntPtr _hWnd;
 
         int x = workArea.Left + (workArea.Width - rect.Width) / 2;
         int y = workArea.Top + (workArea.Height - rect.Height) / 2;
+
+        if (_hWnd != IntPtr.Zero)
+        {
+            SetWindowPos(_hWnd, IntPtr.Zero, x, y, 0, 0,
+                SWP_NOSIZE | SWP_NOZORDER);
+        }
+    }
+
+    public void CenterToParent()
+    {
+        // Find the parent/owner window dynamically
+        var owner = Application.ActiveForm;
+        if (owner == null || owner == this || owner.Handle == IntPtr.Zero)
+        {
+            CenterToScreen();
+            return;
+        }
+
+        var parentRect = owner.GetWindowRect();
+        var childRect = GetWindowRect();
+
+        int x = parentRect.Left + (parentRect.Width - childRect.Width) / 2;
+        int y = parentRect.Top + (parentRect.Height - childRect.Height) / 2;
 
         if (_hWnd != IntPtr.Zero)
         {
@@ -689,6 +798,8 @@ private IntPtr _hWnd;
         Application.RegisterForm(this);
         if (_formStartPosition == FormStartPosition.CenterScreen)
             CenterToScreen();
+        else if (_formStartPosition == FormStartPosition.CenterParent)
+            CenterToParent();
 
         ShowWindow(_hWnd, 5);
         Application.SetActiveForm(this);
@@ -710,10 +821,13 @@ private IntPtr _hWnd;
 
         _closeRequested = false;
         _formClosed = false;
+        _isModal = true;
         DialogResult = DialogResult.None;
         Application.RegisterForm(this);
         if (_formStartPosition == FormStartPosition.CenterScreen)
             CenterToScreen();
+        else if (_formStartPosition == FormStartPosition.CenterParent)
+            CenterToParent();
 
         ShowWindow(_hWnd, 5);
         Application.SetActiveForm(this);
@@ -725,6 +839,7 @@ private IntPtr _hWnd;
             DispatchMessage(ref msg);
         }
 
+        _isModal = false;
         return DialogResult;
     }
 
@@ -824,6 +939,12 @@ private IntPtr _hWnd;
         if (msg == WM_APP_IDLEMAINTENANCE)
         {
             RunIdleMaintenance();
+            return IntPtr.Zero;
+        }
+
+        if (msg == WM_APP_INVOKE)
+        {
+            ProcessInvokeQueue();
             return IntPtr.Zero;
         }
 
@@ -1290,7 +1411,11 @@ private IntPtr _hWnd;
                 }
 
                 _closeRequested = false;
-                if (Application.OpenForms.Count == 0)
+                // Only the top-level (non-modal) application window may end the thread's message
+                // loop. A modal ShowDialog() dialog exits its own nested loop via _formClosed; if it
+                // also posted WM_QUIT here, that quit would be dequeued by the caller's next
+                // Application.Run(...) and terminate the program right after the dialog closed.
+                if (!_isModal && Application.OpenForms.Count == 0)
                     PostQuitMessage(0);
                 return IntPtr.Zero;
             case WindowMessage.WM_ERASEBKGND:

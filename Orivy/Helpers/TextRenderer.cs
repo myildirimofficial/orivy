@@ -164,7 +164,12 @@ public static class TextRenderer
         if (string.IsNullOrEmpty(processedText))
             return;
 
-        using var disposableFont = font is null ? CreateFontFromPaint(paint) : null;
+        using var disposableFont = font is null ? new SKFont(SKTypeface.Default, 12)
+        {
+            Edging = SKFontEdging.SubpixelAntialias,
+            Subpixel = true,
+            Hinting = SKFontHinting.Full
+        } : null;
         var effectiveFont = font ?? disposableFont!;
         using var configuredFont = CreateConfiguredFontCopy(effectiveFont, options);
         effectiveFont = configuredFont ?? effectiveFont;
@@ -851,17 +856,6 @@ public static class TextRenderer
     public static void ClearCaches()
     {
         _measurementCache.Clear();
-    }
-
-    private static SKFont CreateFontFromPaint(SKPaint paint)
-    {
-#pragma warning disable CS0618
-        var font = new SKFont(paint.Typeface ?? SKTypeface.Default, paint.TextSize);
-#pragma warning restore CS0618
-        font.Edging = SKFontEdging.SubpixelAntialias;
-        font.Subpixel = true;
-        font.Hinting = SKFontHinting.Full;
-        return font;
     }
 
     private static bool ShouldRender(SKCanvas canvas, SKPaint paint, string? text)

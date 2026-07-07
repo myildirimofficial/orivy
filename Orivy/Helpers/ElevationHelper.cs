@@ -57,8 +57,8 @@ public static class ElevationHelper
         float frequencyY = 0.1f;
 
         using var backdropFilterPaint = new SKPaint
-        {
-            FilterQuality = SKFilterQuality.High,
+        { 
+            IsAntialias = true,
             ImageFilter = SKImageFilter.CreateBlur(15, 15, SKShaderTileMode.Clamp)
         };
 

@@ -1,6 +1,7 @@
 ﻿using Orivy.Controls;
 using Orivy.Extensions;
 using Orivy.Native.Windows;
+using Orivy.Rendering;
 using SkiaSharp;
 using System;
 using System.Collections.Generic;
@@ -124,8 +125,19 @@ public class Application
         _activeForm = form;
     }
 
-    public static void Run(WindowBase window)
+    /// <summary>
+    /// Gets or sets the default rendering backend for all windows.
+    /// Set this before creating any windows to affect the initial renderer selection.
+    /// </summary>
+    public static RenderBackend RenderBackend { get; set; } = ResolveDefaultRenderBackend();
+
+    private static RenderBackend ResolveDefaultRenderBackend()
     {
+        return OperatingSystem.IsWindows() ? RenderBackend.OpenGL : RenderBackend.Software;
+    }
+
+    public static void Run(WindowBase window)
+	{
 		try
 		{
             EnableDpiAwareness();
@@ -137,7 +149,7 @@ public class Application
 
             MSG msg;
             while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
-            {
+			{
 				try
 				{
                     TranslateMessage(ref msg);

@@ -522,9 +522,15 @@ public static class SvgRenderer
             var dest = w > 0 && h > 0
                 ? new SKRect(x, y, x + w, y + h)
                 : new SKRect(x, y, x + img.Width, y + img.Height);
-            
-            using var paint = new SKPaint { IsAntialias = true, FilterQuality = SKFilterQuality.High };
-            canvas.DrawImage(img, dest, paint);
+
+            using var paint = new SKPaint
+            {
+                IsAntialias = true
+            };
+
+            var sampling = new SKSamplingOptions(SKFilterMode.Linear);
+
+            canvas.DrawImage(img, dest, sampling, paint);
         }
     }
 
@@ -937,8 +943,7 @@ internal sealed class SvgState
         float alpha = Opacity * FillOpacity;
         var p = new SKPaint { 
             IsAntialias = true, 
-            Style = SKPaintStyle.Fill,
-            FilterQuality = SKFilterQuality.High
+            Style = SKPaintStyle.Fill
         };
 
         if (FillShader != null)
@@ -971,8 +976,7 @@ internal sealed class SvgState
             Style       = SKPaintStyle.Stroke,
             StrokeWidth = StrokeWidth,
             StrokeCap   = StrokeCap,
-            StrokeJoin  = StrokeJoin,
-            FilterQuality = SKFilterQuality.High
+            StrokeJoin  = StrokeJoin
         };
 
         if (DashArray != null && DashArray.Length > 0)

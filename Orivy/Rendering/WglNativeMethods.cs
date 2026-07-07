@@ -67,7 +67,14 @@ internal static class WglNativeMethods
     public static extern void glViewport(int x, int y, int width, int height);
 
     [DllImport(Opengl32, EntryPoint = "glGetIntegerv", SetLastError = false)]
-    public static extern void glGetIntegerv(uint pname, out int data);
+    public static extern unsafe void glGetIntegerv(uint pname, int* data);
+
+    public static unsafe int glGetIntegervSafe(uint pname)
+    {
+        int value;
+        glGetIntegerv(pname, &value);
+        return value;
+    }
 
     [DllImport(Gdi32, SetLastError = true)]
     public static extern bool SwapBuffers(nint hdc);

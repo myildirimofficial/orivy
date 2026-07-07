@@ -1,3 +1,4 @@
+using Orivy.Helpers;
 using Orivy.Native.Windows;
 using Orivy.Rendering;
 using SkiaSharp;
@@ -31,35 +32,13 @@ public partial class WindowBase
     private int _grContextValidationFrame;
     private bool _paintInvalidatedPending;
 
-    private static RenderBackend ResolveDefaultRenderBackend()
-    {
-        return OperatingSystem.IsWindows() ? RenderBackend.OpenGL : RenderBackend.Software;
-    }
-
-    public static RenderBackend DefaultRenderBackend { get; set; } = ResolveDefaultRenderBackend();
-
-    /// <summary>
-    ///     Maximum retained bytes for the software backbuffer (SKBitmap + SKSurface + GDI Bitmap wrapper).
-    ///     This prevents 4K/8K windows from permanently retaining very large pixel buffers.
-    ///     Set to 0 (or less) to disable the limit (unlimited).
-    /// </summary>
     public static long MaxSoftwareBackBufferBytes { get; set; } = 24L * 1024 * 1024;
 
     public static bool EnableIdleMaintenance { get; set; } = true;
 
-    /// <summary>
-    ///     Delay (ms) after the last repaint request before trimming retained backbuffers and
-    ///     asking Skia to purge resource caches.
-    /// </summary>
     public static int IdleMaintenanceDelayMs { get; set; } = 1500;
 
-    /// <summary>
-    ///     Maximum interval (ms) between maintenance passes while the window is continuously repainting.
-    ///     Keep this on at a moderate cadence so long-running hover, transition, and toast sessions do not retain
-    ///     progressively larger renderer and Skia caches until the UI finally goes idle.
-    /// </summary>
     public static int ActiveRenderMaintenanceIntervalMs { get; set; } = 8000;
-
 
     public static bool PurgeSkiaResourceCacheOnIdle { get; set; } = true;
 
@@ -79,7 +58,7 @@ public partial class WindowBase
         }
     }
 
-    private RenderBackend _renderBackend = DefaultRenderBackend;
+    private RenderBackend _renderBackend = Application.RenderBackend;
     private IWindowRenderer _renderer;
 
     [System.ComponentModel.Description("Selects how WindowBase presents frames: Software (GDI), OpenGL, or DirectX11 (DXGI/GDI-compatible swapchain).")]
@@ -111,7 +90,7 @@ public partial class WindowBase
         }
     }
 
-    public override void  OnSizeChanged(EventArgs e)
+    public override void OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
 
@@ -141,7 +120,7 @@ public partial class WindowBase
                 return;
 
             if (_renderBackend == RenderBackend.Software)
-                InvalidateWindow(); // ✅ Use native invalidate to avoid recursion
+                InvalidateWindow();
         }
         catch
         {
@@ -301,7 +280,7 @@ public partial class WindowBase
             oldRenderer = _renderer;
             _renderer = null;
             _cachedGrContext = null;
-            _cachedGrContextIsValid = false;  // Invalidate GRContext cache on renderer change
+            _cachedGrContextIsValid = false;
         }
         DisposeRendererSafely(oldRenderer);
         ReleaseRetainedRenderResources();
@@ -314,12 +293,10 @@ public partial class WindowBase
             {
                 _renderer = newRenderer;
                 _cachedGrContext = null;
-                _cachedGrContextIsValid = false;  // Invalidate GRContext cache on renderer initialization
+                _cachedGrContextIsValid = false;
                 _renderBackend = activeBackend;
             }
 
-            // Immediately size the renderer so the first presented frame has a valid viewport
-            // and surface rather than an empty/blank first frame.
             if (IsHandleCreated && ClientSize.Width > 0 && ClientSize.Height > 0)
                 newRenderer.Resize((int)ClientSize.Width, (int)ClientSize.Height);
 
@@ -402,11 +379,6 @@ public partial class WindowBase
         var noRedirect = (nint)(uint)SetWindowLongFlags.WS_EX_NOREDIRECTIONBITMAP;
         var composited = (nint)(uint)SetWindowLongFlags.WS_EX_COMPOSITED;
 
-        // WGL (OpenGL) uses SwapBuffers and relies on DWM's own redirection surface to
-        // compose the window. Setting WS_EX_NOREDIRECTIONBITMAP removes that surface and
-        // causes a blank window even when SwapBuffers succeeds.
-        // Only DXGI-based backends (DirectX11/12) should set WS_EX_NOREDIRECTIONBITMAP
-        // to redirect composition to the DXGI swapchain instead.
         bool requiresNoRedirect = isGpuActive && _renderBackend != RenderBackend.OpenGL;
         if (requiresNoRedirect)
         {
@@ -429,8 +401,6 @@ public partial class WindowBase
             SetWindowLong32(hwnd, (int)WindowLongIndexFlags.GWL_EXSTYLE, (int)exStyle);
         }
 
-        // Runtime backend switches may happen while input handlers are active.
-        // Avoid SWP_FRAMECHANGED here to prevent expensive non-client recalculation/reentrancy.
         SetWindowPos(
             hwnd, IntPtr.Zero, 0, 0, 0, 0,
             SetWindowPosFlags.SWP_NOMOVE | SetWindowPosFlags.SWP_NOSIZE |
@@ -439,9 +409,6 @@ public partial class WindowBase
     }
 
 
-    /// <summary>
-    /// Handles WM_PAINT message - uses the appropriate renderer (Software or GPU).
-    /// </summary>
     private IntPtr HandlePaint(IntPtr hWnd)
     {
         if (_backendSwitchPaintTraceFrames > 0)
@@ -469,7 +436,6 @@ public partial class WindowBase
                 return IntPtr.Zero;
             }
 
-            // Try to render with active renderer (GPU or Software)
             if (_renderer.Render(width, height, RenderScene))
             {
                 ArmIdleMaintenance();
@@ -573,20 +539,16 @@ public partial class WindowBase
         _perfOverlayPaint ??= new SKPaint { IsAntialias = true };
         var paint = _perfOverlayPaint;
         paint.Color = ColorScheme.ForeColor;
-        paint.TextSize = 12;
-
 
         var backendLabel = RenderBackend + ((_renderer?.IsSkiaGpuActive == true) ? "GPU" : "CPU");
 
         var text = $"{backendLabel}  {fps:0} FPS  {_perfSmoothedFrameMs:0.0} ms";
-        canvas.DrawText(text, 8, 16, paint);
+
+        TextRenderer.DrawText(canvas, text, 8, 16, Font, paint);
     }
 
     #region Native Structures and Methods for GDI Drawing
 
-    /// <summary>
-    /// Invalidates the window and requests a repaint on the next message loop iteration.
-    /// </summary>
     public virtual void InvalidateWindow()
     {
         if (!IsHandleCreated || IsDisposed || Disposing)
@@ -622,27 +584,18 @@ public partial class WindowBase
         }
     }
 
-    /// <summary>
-    /// Converts a window-relative rectangle to screen coordinates.
-    /// </summary>
     public SKRect RectangleToScreen(SKRect clientRect)
     {
         var topLeft = PointToScreen(clientRect.Location);
         return SKRect.Create(topLeft, clientRect.Size);
     }
 
-    /// <summary>
-    /// Converts a screen-space rectangle to window client coordinates.
-    /// </summary>
     public SKRect RectangleToClient(SKRect screenRect)
     {
         var topLeft = PointToClient(screenRect.Location);
         return SKRect.Create(topLeft, screenRect.Size);
     }
 
-    /// <summary>
-    /// Gets the window rectangle in screen coordinates (including frame/borders).
-    /// </summary>
     public SKRectI GetWindowRect()
     {
         if (!IsHandleCreated)
@@ -658,9 +611,6 @@ public partial class WindowBase
             rect.Bottom - rect.Top);
     }
 
-    /// <summary>
-    /// Gets the client rectangle in screen coordinates.
-    /// </summary>
     public SKRect GetClientRectScreen()
     {
         if (!IsHandleCreated)
@@ -669,10 +619,6 @@ public partial class WindowBase
         return RectangleToScreen(ClientRectangle);
     }
 
-    /// <summary>
-    /// Forces an immediate synchronous paint of the window.
-    /// Only use when absolutely necessary - prefer Invalidate() for normal updates.
-    /// </summary>
     public virtual void Update()
     {
         if (!IsHandleCreated || IsDisposed || Disposing)
