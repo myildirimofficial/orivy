@@ -855,6 +855,38 @@ private IntPtr _hWnd;
             ShowWindow(_hWnd, 0);
     }
 
+    public void Show(WindowBase owner)
+    {
+        var previousActive = Application.ActiveForm;
+        if (owner != null)
+            Application.SetActiveForm(owner);
+        try
+        {
+            Show();
+        }
+        finally
+        {
+            if (previousActive != null)
+                Application.SetActiveForm(previousActive);
+        }
+    }
+
+    public DialogResult ShowDialog(WindowBase owner)
+    {
+        var previousActive = Application.ActiveForm;
+        if (owner != null)
+            Application.SetActiveForm(owner);
+        try
+        {
+            return ShowDialog();
+        }
+        finally
+        {
+            if (previousActive != null)
+                Application.SetActiveForm(previousActive);
+        }
+    }
+
     public void Close()
     {
         Close(DialogResult.None);

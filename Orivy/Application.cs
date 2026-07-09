@@ -6,7 +6,9 @@ using SkiaSharp;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using static Orivy.Native.Windows.Methods;
 
@@ -136,6 +138,11 @@ public class Application
         return OperatingSystem.IsWindows() ? RenderBackend.OpenGL : RenderBackend.Software;
     }
 
+    /// <summary>
+    /// Gets a value indicating whether a message loop exists on this thread.
+    /// </summary>
+    public static bool MessageLoop { get; private set; }
+
     public static void Run(WindowBase window)
 	{
 		try
@@ -145,11 +152,19 @@ public class Application
             if (!window.IsHandleCreated)
                 window.CreateHandle();
 
+            // Set before Show() so Application.MessageLoop is already true during Load/Shown handlers.
+            MessageLoop = true;
             window.Show();
 
-            MSG msg;
-            while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
+            while (true)
 			{
+                // Raise Idle right before the loop would block on an empty queue (WinForms semantics).
+                if (Idle != null && !PeekMessage(out _, IntPtr.Zero, 0, 0, 0 /* PM_NOREMOVE */))
+                    RaiseIdle();
+
+                if (GetMessage(out MSG msg, IntPtr.Zero, 0, 0) <= 0) // 0 = WM_QUIT, -1 = error
+                    break;
+
 				try
 				{
                     TranslateMessage(ref msg);
@@ -166,6 +181,11 @@ public class Application
             DefWindowProc(IntPtr.Zero, 0, IntPtr.Zero, IntPtr.Zero);
             Debug.WriteLine("Exception in Application.Run: " + ex.ToString());
 		}
+        finally
+        {
+            MessageLoop = false;
+            RaiseApplicationExit();
+        }
     }
 
     public static void DoEvents()
@@ -227,4 +247,161 @@ public class Application
         });
         Environment.Exit(0);
     }
+
+    #region WinForms-compatible application info & lifecycle
+
+    /// <summary>
+    /// Occurs when the application is about to shut down (after the message loop exits, or when
+    /// <see cref="Exit()"/> is called).
+    /// </summary>
+    public static event EventHandler? ApplicationExit;
+
+    /// <summary>
+    /// Occurs when the application finishes processing and is about to enter the idle state
+    /// (raised from <see cref="Idle"/>-aware pumps such as <see cref="DoEvents"/>).
+    /// </summary>
+    public static event EventHandler? Idle;
+
+    private static bool _applicationExitRaised;
+
+    /// <summary>
+    /// Gets the full path of the executable that started the application, including the file name.
+    /// </summary>
+    public static string ExecutablePath =>
+        Environment.ProcessPath
+        ?? (TryGetProcessMainModulePath() is { Length: > 0 } p ? p : null)
+        ?? Assembly.GetEntryAssembly()?.Location
+        ?? string.Empty;
+
+    /// <summary>
+    /// Gets the path for the executable file that started the application, not including the file name.
+    /// </summary>
+    public static string StartupPath => Path.GetDirectoryName(ExecutablePath) ?? string.Empty;
+
+    /// <summary>
+    /// Gets the product name associated with the application (from AssemblyProductAttribute).
+    /// </summary>
+    public static string ProductName =>
+        GetEntryAttribute<AssemblyProductAttribute>()?.Product
+        ?? EntryAssemblyName;
+
+    /// <summary>
+    /// Gets the product version associated with the application (from AssemblyInformationalVersion,
+    /// falling back to the assembly version).
+    /// </summary>
+    public static string ProductVersion =>
+        GetEntryAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        ?? Assembly.GetEntryAssembly()?.GetName().Version?.ToString()
+        ?? "1.0.0.0";
+
+    /// <summary>
+    /// Gets the company name associated with the application (from AssemblyCompanyAttribute).
+    /// </summary>
+    public static string CompanyName =>
+        GetEntryAttribute<AssemblyCompanyAttribute>()?.Company
+        ?? EntryAssemblyName;
+
+    /// <summary>
+    /// Gets the path for the application data shared among all users
+    /// (CommonApplicationData\CompanyName\ProductName\ProductVersion).
+    /// </summary>
+    public static string CommonAppDataPath => BuildAppDataPath(Environment.SpecialFolder.CommonApplicationData);
+
+    /// <summary>
+    /// Gets the path for the application data of the current, roaming user
+    /// (ApplicationData\CompanyName\ProductName\ProductVersion).
+    /// </summary>
+    public static string UserAppDataPath => BuildAppDataPath(Environment.SpecialFolder.ApplicationData);
+
+    /// <summary>
+    /// Gets the path for the application data of the current, non-roaming user
+    /// (LocalApplicationData\CompanyName\ProductName\ProductVersion).
+    /// </summary>
+    public static string LocalUserAppDataPath => BuildAppDataPath(Environment.SpecialFolder.LocalApplicationData);
+
+    /// <summary>
+    /// Informs all message pumps that they must terminate, then closes all open forms after the
+    /// messages have been processed. Ends the <see cref="Run(WindowBase)"/> message loop.
+    /// </summary>
+    public static void Exit()
+    {
+        // Close every open form first (fires FormClosing/FormClosed). Iterate a snapshot because
+        // closing mutates _openForms.
+        foreach (var form in _openForms.ToArray())
+        {
+            try { form.Close(); }
+            catch (Exception ex) { Debug.WriteLine("Application.Exit: error closing form: " + ex); }
+        }
+
+        RaiseApplicationExit();
+
+        // Post WM_QUIT so the Run() / ShowDialog() GetMessage loop returns 0 and unwinds.
+        PostQuitMessage(0);
+    }
+
+    /// <summary>
+    /// Exits the message loop on the current thread and closes all windows on the thread.
+    /// Equivalent to <see cref="Exit()"/> in Orivy's single-UI-thread model.
+    /// </summary>
+    public static void ExitThread() => Exit();
+
+    /// <summary>
+    /// WinForms compatibility no-op. Orivy renders its own controls, so there is no Win32 common
+    /// control visual-styles context to enable. Provided so migrated Program.cs code compiles.
+    /// </summary>
+    public static void EnableVisualStyles() { }
+
+    /// <summary>
+    /// WinForms compatibility no-op. Orivy always renders text via SkiaSharp, so there is no
+    /// GDI/GDI+ text-rendering default to configure. Provided so migrated Program.cs code compiles.
+    /// </summary>
+    public static void SetCompatibleTextRenderingDefault(bool defaultValue) { }
+
+    internal static void RaiseIdle()
+    {
+        Idle?.Invoke(null, EventArgs.Empty);
+    }
+
+    private static void RaiseApplicationExit()
+    {
+        if (_applicationExitRaised)
+            return;
+
+        _applicationExitRaised = true;
+        ApplicationExit?.Invoke(null, EventArgs.Empty);
+    }
+
+    private static string EntryAssemblyName =>
+        Assembly.GetEntryAssembly()?.GetName().Name ?? "Application";
+
+    private static T? GetEntryAttribute<T>() where T : Attribute =>
+        Assembly.GetEntryAssembly()?.GetCustomAttribute<T>();
+
+    private static string? TryGetProcessMainModulePath()
+    {
+        try { return Process.GetCurrentProcess().MainModule?.FileName; }
+        catch { return null; }
+    }
+
+    private static string BuildAppDataPath(Environment.SpecialFolder root)
+    {
+        var basePath = Environment.GetFolderPath(root);
+        var company = SanitizePathSegment(CompanyName);
+        var product = SanitizePathSegment(ProductName);
+        var version = SanitizePathSegment(ProductVersion);
+        return Path.Combine(basePath, company, product, version);
+    }
+
+    private static string SanitizePathSegment(string segment)
+    {
+        if (string.IsNullOrWhiteSpace(segment))
+            return "_";
+
+        foreach (var c in Path.GetInvalidFileNameChars())
+            segment = segment.Replace(c, '_');
+
+        return segment.Trim();
+    }
+
+    #endregion
 }

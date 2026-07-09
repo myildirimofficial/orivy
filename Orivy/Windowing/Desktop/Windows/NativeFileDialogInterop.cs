@@ -34,6 +34,7 @@ internal static class NativeFileDialogInterop
             dialog.Title,
             dialog.InitialDirectory,
             dialog.DefaultExtension,
+            dialog.FileName,
             dialog.BuildFilterSpecs(),
             options,
             dialog.AllowMultipleSelection);
@@ -55,6 +56,7 @@ internal static class NativeFileDialogInterop
             ownerHandle,
             dialog.Title,
             dialog.InitialDirectory,
+            string.Empty,
             string.Empty,
             Array.Empty<COMDLG_FILTERSPEC>(),
             options,
@@ -92,6 +94,7 @@ internal static class NativeFileDialogInterop
         string title,
         string initialDirectory,
         string defaultExtension,
+        string fileName,
         COMDLG_FILTERSPEC[] filterSpecs,
         FILEOPENDIALOGOPTIONS options,
         bool allowMultipleSelection)
@@ -120,6 +123,10 @@ internal static class NativeFileDialogInterop
 
             if (!string.IsNullOrWhiteSpace(defaultExtension))
                 dialog.SetDefaultExtension(defaultExtension.Trim().TrimStart('.'));
+
+            // Pre-fill the "File name" edit box so callers can supply a default/typed name.
+            if (!string.IsNullOrWhiteSpace(fileName))
+                dialog.SetFileName(fileName);
 
             if (TryCreateInitialFolder(initialDirectory, out initialFolder) && initialFolder != null)
             {
