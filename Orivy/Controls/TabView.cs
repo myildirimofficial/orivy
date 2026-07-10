@@ -1092,7 +1092,9 @@ public partial class TabView : ElementBase
             {
                 if (_maxScrollOffset > 0f)
                 {
-                    ScrollTabs(-e.Delta);
+                    // Match the base wheel convention: a horizontal (tilt/trackpad) wheel uses +delta,
+                    // Shift+vertical wheel uses -delta. Using -delta for both inverted the tilt case.
+                    ScrollTabs(e.IsHorizontalWheel ? e.Delta : -e.Delta);
                     return;
                 }
             }
@@ -3263,7 +3265,7 @@ public partial class TabView : ElementBase
 
         if (_maxScrollOffset > 0f)
         {
-            ScrollTabs(-e.Delta);
+            ScrollTabs(e.IsHorizontalWheel ? e.Delta : -e.Delta);
             return true;
         }
 

@@ -1,4 +1,6 @@
+using Orivy;
 using Orivy.Controls;
+using Orivy.Helpers;
 using SkiaSharp;
 using System;
 using System.Collections.Generic;
@@ -11,7 +13,75 @@ internal sealed partial class GridListDemoPage : Container
     {
         InitializeComponent();
         InitializeGridListDemo();
+        InitializeListBoxDemo();
     }
+
+    private sealed record StatusItem(string Name, string Detail, SKColor Color);
+
+    private void InitializeListBoxDemo()
+    {
+        // 1) Plain single-select list.
+        listBoxSingle.Items.AddRange(
+            "Renderer", "Layout Engine", "Input Hub", "Theme Engine", "Telemetry",
+            "Scroll Lab", "Frame Trace", "Crash Watch", "Session Guard", "Audit Trail", "Vault Mirror");
+        listBoxSingle.SelectedIndex = 0;
+        listBoxSingle.SelectedIndexChanged += (_, _) =>
+            UpdateListBoxStatus($"Selected \"{listBoxSingle.SelectedItem}\" (index {listBoxSingle.SelectedIndex}).");
+
+        // 2) Owner-drawn rows: a colored status dot + title + detail line.
+        listBoxOwnerDraw.Items.AddRange(
+            new StatusItem("Core Systems", "All services healthy", new SKColor(34, 197, 94)),
+            new StatusItem("Telemetry", "Queue backpressured", new SKColor(245, 158, 11)),
+            new StatusItem("Security", "Session guard locked", new SKColor(239, 68, 68)),
+            new StatusItem("Release Channel", "Preview ring live", new SKColor(59, 130, 246)),
+            new StatusItem("Diagnostics", "Frame trace warming", new SKColor(168, 85, 247)),
+            new StatusItem("Storage", "Vault mirror synced", new SKColor(20, 184, 166)));
+        listBoxOwnerDraw.DrawItem += ListBoxOwnerDraw_DrawItem;
+        listBoxOwnerDraw.SelectedIndexChanged += (_, _) =>
+        {
+            if (listBoxOwnerDraw.SelectedItem is StatusItem s)
+                UpdateListBoxStatus($"Owner-draw row \"{s.Name}\": {s.Detail}.");
+        };
+
+        // 3) Checked list with pre-checked options.
+        checkedListBoxDemo.Items.AddRange(
+            "Enable telemetry", "Automatic updates", "Beta channel", "Hardware acceleration",
+            "Verbose logging", "Send crash reports", "Usage analytics", "Experimental features");
+        checkedListBoxDemo.SetItemChecked(0, true);
+        checkedListBoxDemo.SetItemChecked(3, true);
+        checkedListBoxDemo.ItemCheck += (_, e) =>
+            UpdateListBoxStatus($"\"{checkedListBoxDemo.Items[e.Index]}\" -> {e.NewValue}. Checked: {checkedListBoxDemo.CheckedIndices.Count}.");
+    }
+
+    private void ListBoxOwnerDraw_DrawItem(object? sender, DrawItemEventArgs e)
+    {
+        if (listBoxOwnerDraw.Items[e.Index] is not StatusItem item)
+            return;
+
+        // Selection / hover background (rounded) supplied by the control via e.BackColor.
+        e.DrawBackground(8f);
+
+        var b = e.Bounds;
+        var scale = listBoxOwnerDraw.ScaleFactor;
+
+        using (var dot = new SKPaint { Color = item.Color, IsAntialias = true })
+            e.Canvas.DrawCircle(b.Left + 18f * scale, b.MidY, 6f * scale, dot);
+
+        var textLeft = b.Left + 34f * scale;
+        using (var title = new SKPaint { Color = e.ForeColor, IsAntialias = true })
+        {
+            var titleRect = new SKRect(textLeft, b.Top + 5f * scale, b.Right - 10f * scale, b.MidY + 2f * scale);
+            TextRenderer.DrawText(e.Canvas, item.Name, titleRect, title, e.Font, ContentAlignment.BottomLeft, autoEllipsis: true);
+        }
+
+        using (var detail = new SKPaint { Color = e.ForeColor.WithAlpha(e.Selected ? (byte)210 : (byte)150), IsAntialias = true })
+        {
+            var detailRect = new SKRect(textLeft, b.MidY, b.Right - 10f * scale, b.Bottom - 5f * scale);
+            TextRenderer.DrawText(e.Canvas, item.Detail, detailRect, detail, e.Font, ContentAlignment.TopLeft, autoEllipsis: true);
+        }
+    }
+
+    private void UpdateListBoxStatus(string text) => listBoxStatus.Text = text;
 
 
     private readonly List<SKImage> _gridListImages = new();

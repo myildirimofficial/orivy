@@ -286,6 +286,13 @@ public class Application
         ?? EntryAssemblyName;
 
     /// <summary>
+    /// Gets the product description associated with the application (from AssemblyDescriptionAttribute).
+    /// </summary>
+    public static string ProductDescription =>
+        GetEntryAttribute<AssemblyDescriptionAttribute>()?.Description
+        ?? string.Empty;
+
+    /// <summary>
     /// Gets the product version associated with the application (from AssemblyInformationalVersion,
     /// falling back to the assembly version).
     /// </summary>

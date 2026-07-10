@@ -15,6 +15,44 @@ internal sealed partial class GridListDemoPage
     private Button gridListToggleGridLinesButton = null!;
     private Button gridListToggleRowResizeButton = null!;
 
+    private ListBox listBoxSingle = null!;
+    private ListBox listBoxOwnerDraw = null!;
+    private ListBox checkedListBoxDemo = null!;
+    private Element listBoxStatus = null!;
+
+    private static Element BuildListColumn(string caption, ElementBase control, bool last)
+    {
+        var column = new Element
+        {
+            Dock = Orivy.DockStyle.Left,
+            Width = 320,
+            Margin = new(0, 0, last ? 0 : 16, 0),
+            BackColor = SKColors.Transparent,
+            Border = new(0),
+            Radius = new(0),
+            Padding = new(0)
+        };
+
+        var label = new Element
+        {
+            Text = caption,
+            Dock = Orivy.DockStyle.Top,
+            Height = 26,
+            Margin = new(2, 0, 0, 8),
+            BackColor = SKColors.Transparent,
+            ForeColor = ColorScheme.ForeColor,
+            Border = new(0),
+            Radius = new(0),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font = new SKFont(SKTypeface.FromFamilyName("Segoe UI Semibold") ?? SKTypeface.Default, 11f)
+        };
+
+        control.Dock = Orivy.DockStyle.Fill;
+        column.Controls.Add(control);
+        column.Controls.Add(label);
+        return column;
+    }
+
     private void InitializeComponent()
     {
         Text = "Grid List";
@@ -278,6 +316,77 @@ internal sealed partial class GridListDemoPage
         gridListWorkspace.Controls.Add(gridListPrimaryShell);
         gridListWorkspace.Controls.Add(gridListInspectorRail);
 
+        // ── List Box showcase (single-select, owner-drawn, checked) ──
+        var listBoxShell = new Element
+        {
+            Name = "listBoxShell",
+            Dock = Orivy.DockStyle.Top,
+            Height = 404,
+            Padding = new(18),
+            Margin = new(0, 0, 0, 16),
+            BackColor = ColorScheme.Surface,
+            ForeColor = ColorScheme.ForeColor,
+            Radius = new(24),
+            Border = new(1),
+            BorderColor = ColorScheme.Outline.WithAlpha(88)
+        };
+
+        var listBoxHeader = new Element
+        {
+            Name = "listBoxHeader",
+            Text = "List Box\nSingle-select, owner-drawn rows, and a checked list. Click, Ctrl/Shift-click, scroll and use arrow keys.",
+            Dock = Orivy.DockStyle.Top,
+            Height = 72,
+            Padding = new(16),
+            Margin = new(0, 0, 0, 14),
+            BackColor = ColorScheme.SurfaceContainer,
+            ForeColor = ColorScheme.ForeColor,
+            Radius = new(18),
+            Border = new(1),
+            BorderColor = ColorScheme.Primary.WithAlpha(78),
+            TextAlign = ContentAlignment.MiddleLeft,
+        };
+
+        listBoxStatus = new Element
+        {
+            Name = "listBoxStatus",
+            Text = "Ready",
+            Dock = Orivy.DockStyle.Bottom,
+            Height = 42,
+            Padding = new(14, 0, 14, 0),
+            Margin = new(0, 12, 0, 0),
+            BackColor = ColorScheme.SurfaceContainerLow,
+            ForeColor = ColorScheme.ForeColor,
+            Radius = new(14),
+            Border = new(1),
+            BorderColor = ColorScheme.Outline.WithAlpha(80),
+            TextAlign = ContentAlignment.MiddleLeft,
+        };
+
+        var listBoxRow = new Element
+        {
+            Name = "listBoxRow",
+            Dock = Orivy.DockStyle.Fill,
+            BackColor = SKColors.Transparent,
+            Border = new(0),
+            Radius = new(0),
+            Padding = new(0)
+        };
+
+        listBoxSingle = new ListBox { Name = "listBoxSingle", SelectionMode = SelectionMode.One };
+        listBoxOwnerDraw = new ListBox { Name = "listBoxOwnerDraw", DrawMode = DrawMode.OwnerDrawFixed, ItemHeight = 46 };
+        // Checked list is now just a ListBox mode (CheckBoxes) rather than a separate class.
+        checkedListBoxDemo = new ListBox { Name = "checkedListBoxDemo", CheckBoxes = true, CheckOnClick = true };
+
+        listBoxRow.Controls.Add(BuildListColumn("Checked list", checkedListBoxDemo, last: true));
+        listBoxRow.Controls.Add(BuildListColumn("Owner-drawn", listBoxOwnerDraw, last: false));
+        listBoxRow.Controls.Add(BuildListColumn("Single select", listBoxSingle, last: false));
+
+        listBoxShell.Controls.Add(listBoxRow);
+        listBoxShell.Controls.Add(listBoxStatus);
+        listBoxShell.Controls.Add(listBoxHeader);
+
+        Controls.Add(listBoxShell);
         Controls.Add(gridListWorkspace);
         Controls.Add(gridListToolbar);
         Controls.Add(gridListHeader);
