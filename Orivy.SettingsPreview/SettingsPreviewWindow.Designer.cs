@@ -482,9 +482,9 @@ internal sealed partial class SettingsPreviewWindow
             CheckBoxes = true,
             Radius = new Radius(10)
         };
-        list.Columns.Add(new GridListColumn { HeaderText = "Setting", Name = "setting", Width = 220, SizeMode = GridListColumnSizeMode.Auto });
-        list.Columns.Add(new GridListColumn { HeaderText = "State", Name = "state", Width = 110, CellTextAlign = ContentAlignment.MiddleCenter, SizeMode = GridListColumnSizeMode.Auto });
-        list.Columns.Add(new GridListColumn { HeaderText = "Description", Name = "description", Width = 460, SizeMode = GridListColumnSizeMode.Fill, Sortable = false });
+        list.Columns.Add(new GridListColumn { Text = "Setting", Name = "setting", Width = 220, SizeMode = GridListColumnSizeMode.Auto });
+        list.Columns.Add(new GridListColumn { Text = "State", Name = "state", Width = 110, CellTextAlign = ContentAlignment.MiddleCenter, SizeMode = GridListColumnSizeMode.Auto });
+        list.Columns.Add(new GridListColumn { Text = "Description", Name = "description", Width = 460, SizeMode = GridListColumnSizeMode.Fill, Sortable = false });
 
         AddGridListRow(list, "Security", "Core isolation", "On", "Memory integrity is enabled.", true);
         AddGridListRow(list, "Security", "Firewall", "On", "Domain, private and public profiles are protected.", true);

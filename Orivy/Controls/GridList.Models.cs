@@ -6,12 +6,94 @@ using System.ComponentModel;
 
 namespace Orivy.Controls;
 
+/// <summary>
+/// Identifies the part of a <see cref="GridList"/> returned by <see cref="GridList.HitTest(SKPoint)"/>.
+/// Mirrors the intent of System.Windows.Forms.ListViewHitTestLocations.
+/// </summary>
+public enum GridListHitTestRegion
+{
+    /// <summary>The point is not over any interactive element.</summary>
+    None,
+
+    /// <summary>The point is over a cell (sub-item) of a row.</summary>
+    Cell,
+
+    /// <summary>The point is over a cell's check box.</summary>
+    CheckBox,
+
+    /// <summary>The point is over a column header.</summary>
+    ColumnHeader,
+
+    /// <summary>The point is over the resize grip between two column headers.</summary>
+    ColumnHeaderResize,
+
+    /// <summary>The point is over a group header row.</summary>
+    GroupHeader,
+
+    /// <summary>The point is over the resize grip at the bottom edge of a row.</summary>
+    RowResize
+}
+
+/// <summary>
+/// Describes what is located at a point in a <see cref="GridList"/>. Returned by
+/// <see cref="GridList.HitTest(SKPoint)"/>. Analogous to System.Windows.Forms.ListViewHitTestInfo.
+/// </summary>
+public sealed class GridListHitTestInfo
+{
+    internal GridListHitTestInfo(
+        GridListHitTestRegion region,
+        int itemIndex,
+        int columnIndex,
+        GridListItem? item,
+        GridListCell? subItem,
+        GridListColumn? column,
+        string? groupKey,
+        string? groupText)
+    {
+        Region = region;
+        ItemIndex = itemIndex;
+        ColumnIndex = columnIndex;
+        Item = item;
+        SubItem = subItem;
+        Column = column;
+        GroupKey = groupKey;
+        GroupText = groupText;
+    }
+
+    /// <summary>The kind of element under the point.</summary>
+    public GridListHitTestRegion Region { get; }
+
+    /// <summary>The row item under the point, or null when the point is not over an item row.</summary>
+    public GridListItem? Item { get; }
+
+    /// <summary>The cell (sub-item) under the point, or null when not over a cell.</summary>
+    public GridListCell? SubItem { get; }
+
+    /// <summary>The column under the point (for cells and headers), or null.</summary>
+    public GridListColumn? Column { get; }
+
+    /// <summary>The zero-based row index, or -1 when not over an item row.</summary>
+    public int ItemIndex { get; }
+
+    /// <summary>The zero-based column index, or -1 when not over a column/cell.</summary>
+    public int ColumnIndex { get; }
+
+    /// <summary>The group key when the point is over a group header; otherwise null.</summary>
+    public string? GroupKey { get; }
+
+    /// <summary>The group display text when the point is over a group header; otherwise null.</summary>
+    public string? GroupText { get; }
+
+    /// <summary>True when the point is over an item row or one of its cells.</summary>
+    public bool IsOverItem => Item != null;
+}
+
 public sealed class GridListColumn
 {
     private ContentAlignment _headerTextAlign = ContentAlignment.MiddleLeft;
     private ContentAlignment _cellTextAlign = ContentAlignment.MiddleLeft;
     private float _fillWeight = 1f;
-    private string _headerText = string.Empty;
+    private string _text = string.Empty;
     private float _maxWidth = 1200f;
     private float _minWidth = 56f;
     private string _name = string.Empty;
@@ -38,15 +120,15 @@ public sealed class GridListColumn
     }
 
     [DefaultValue("")]
-    public string HeaderText
+    public string Text
     {
-        get => _headerText;
+        get => _text;
         set
         {
-            if (_headerText == value)
+            if (_text == value)
                 return;
 
-            _headerText = value ?? string.Empty;
+            _text = value ?? string.Empty;
             Owner?.OnColumnsChanged(layoutAffected: false);
         }
     }
@@ -180,7 +262,7 @@ public sealed class GridListColumn
     public bool ShowIcons { get; set; } = true;
 
     [DefaultValue(ContentAlignment.MiddleLeft)]
-    public ContentAlignment HeaderTextAlign
+    public ContentAlignment TextAlign
     {
         get => _headerTextAlign;
         set
@@ -222,6 +304,16 @@ public sealed class GridListCell
     private object? _value;
 
     internal GridListItem? ParentItem { get; private set; }
+
+    public GridListCell()
+    {
+        
+    }
+    
+    public GridListCell(string text)
+    {
+        Text = text;
+    }
 
     public object? Value
     {
@@ -283,6 +375,7 @@ public sealed class GridListCell
 
 public sealed class GridListItem
 {
+    private string _name = string.Empty;
     private bool _enabled = true;
     private string _groupKey = string.Empty;
     private string _groupText = string.Empty;
@@ -293,10 +386,13 @@ public sealed class GridListItem
     {
         Cells = new GridListCellCollection(this);
     }
+
     public GridListItem(string text)
     {
-        Cells = new GridListCellCollection(this);
-        Cells.Add(new GridListCell { Text = text });
+        Cells = new GridListCellCollection(this)
+        {
+            new GridListCell { Text = text }
+        };
     }
 
     internal GridList? Owner { get; private set; }
@@ -304,6 +400,18 @@ public sealed class GridListItem
     public GridListCellCollection Cells { get; }
 
     public object? Tag { get; set; }
+
+    public string Name
+    {
+        get => _name;
+        set
+        {
+            if (_name == value)
+                return;
+            _name = value ?? string.Empty;
+            Owner?.OnItemsChanged(layoutAffected: false);
+        }
+    }
 
     [DefaultValue(true)]
     public bool Visible
@@ -389,4 +497,6 @@ public sealed class GridListItem
     {
         Owner?.OnItemsChanged(layoutAffected);
     }
+
+    public GridListItem Clone() => (GridListItem)this.MemberwiseClone();
 }

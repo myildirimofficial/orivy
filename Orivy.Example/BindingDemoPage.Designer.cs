@@ -174,10 +174,10 @@ internal sealed partial class BindingDemoPage
             MultiSelect = true,
             AutoScroll = false
         };
-        taskGrid.Columns.Add(new GridListColumn { Name = "name", HeaderText = "Task", Width = 180f, MinWidth = 120f, SizeMode = GridListColumnSizeMode.Auto });
-        taskGrid.Columns.Add(new GridListColumn { Name = "state", HeaderText = "State", Width = 92f, MinWidth = 72f, CellTextAlign = ContentAlignment.MiddleCenter, SizeMode = GridListColumnSizeMode.Auto });
-        taskGrid.Columns.Add(new GridListColumn { Name = "lane", HeaderText = "Lane", Width = 110f, MinWidth = 84f, SizeMode = GridListColumnSizeMode.Auto });
-        taskGrid.Columns.Add(new GridListColumn { Name = "summary", HeaderText = "Summary", Width = 260f, MinWidth = 180f, SizeMode = GridListColumnSizeMode.Fill, FillWeight = 1.5f, Sortable = false });
+        taskGrid.Columns.Add(new GridListColumn { Name = "name", Text = "Task", Width = 180f, MinWidth = 120f, SizeMode = GridListColumnSizeMode.Auto });
+        taskGrid.Columns.Add(new GridListColumn { Name = "state", Text = "State", Width = 92f, MinWidth = 72f, CellTextAlign = ContentAlignment.MiddleCenter, SizeMode = GridListColumnSizeMode.Auto });
+        taskGrid.Columns.Add(new GridListColumn { Name = "lane", Text = "Lane", Width = 110f, MinWidth = 84f, SizeMode = GridListColumnSizeMode.Auto });
+        taskGrid.Columns.Add(new GridListColumn { Name = "summary", Text = "Summary", Width = 260f, MinWidth = 180f, SizeMode = GridListColumnSizeMode.Fill, FillWeight = 1.5f, Sortable = false });
         taskGrid.Link(view => view.Items).FromData((BindingDemoViewModel vm) => vm.Tasks).OneWay();
         taskGrid.Link(view => view.SelectedIndex).FromData((BindingDemoViewModel vm) => vm.SelectedTaskIndex).TwoWay();
 

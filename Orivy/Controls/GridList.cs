@@ -484,7 +484,7 @@ public class GridList : ElementBase
             return;
         }
 
-        var hoverInfo = HitTest(e.Location);
+        var hoverInfo = HitTestCore(e.Location);
         _hoveredHeader = hoverInfo.Kind == HitKind.Header || hoverInfo.Kind == HitKind.HeaderResize;
         _hoveredColumnIndex = hoverInfo.ColumnIndex;
         _hoveredHeaderResizeColumnIndex = hoverInfo.Kind == HitKind.HeaderResize ? hoverInfo.ColumnIndex : -1;
@@ -515,7 +515,7 @@ public class GridList : ElementBase
 
         EnsureLayoutState();
 
-        var hit = HitTest(e.Location);
+        var hit = HitTestCore(e.Location);
         if (hit.Kind == HitKind.HeaderResize && AllowColumnResize && hit.ColumnIndex >= 0)
         {
             var column = GetColumn(hit.ColumnIndex);
@@ -603,7 +603,7 @@ public class GridList : ElementBase
             return;
         }
 
-        var hit = HitTest(e.Location);
+        var hit = HitTestCore(e.Location);
         if (hit.Kind == HitKind.ItemCell && hit.ItemIndex == _pressedItemIndex && hit.ColumnIndex == _pressedColumnIndex)
         {
             RaiseCellClick(hit.ItemIndex, hit.ColumnIndex);
@@ -633,7 +633,7 @@ public class GridList : ElementBase
             return;
         }
 
-        var hit = HitTest(e.Location);
+        var hit = HitTestCore(e.Location);
         if (hit.Kind == HitKind.HeaderResize && hit.ColumnIndex >= 0)
         {
             AutoSizeColumn(hit.ColumnIndex);
@@ -1263,7 +1263,7 @@ public class GridList : ElementBase
         if (column.HeaderIcon != null)
             maxWidth += IconSize + CellPadding * 0.75f;
 
-        maxWidth += headerFont.MeasureText(column.HeaderText ?? string.Empty);
+        maxWidth += headerFont.MeasureText(column.Text ?? string.Empty);
         maxWidth += 18f;
         if (AllowColumnResize && column.Resizable)
             maxWidth += ResizeGripWidth + 6f;
@@ -1398,7 +1398,7 @@ public class GridList : ElementBase
             }
 
             _textPaint.Color = HeaderForeColor;
-            TextRenderer.DrawText(canvas, column.HeaderText, contentRect, _textPaint, font, column.HeaderTextAlign, false, true);
+            TextRenderer.DrawText(canvas, column.Text, contentRect, _textPaint, font, column.TextAlign, false, true);
 
             if (_sortColumnIndex == layout.ColumnIndex && _sortDirection != GridListSortDirection.None)
                 DrawSortGlyph(canvas, cellRect, _sortDirection);
@@ -1656,7 +1656,124 @@ public class GridList : ElementBase
         return columnIndex < item.Cells.Count ? item.Cells[columnIndex] : null;
     }
 
-    private HitInfo HitTest(SKPoint location)
+    /// <summary>
+    /// Determines what is located at the given client point — the row item, its cell/sub-item, a
+    /// column header, a group header, a resize grip, or a cell check box. Mirrors
+    /// System.Windows.Forms.ListView.HitTest. Never returns null; check
+    /// <see cref="GridListHitTestInfo.Region"/> / <see cref="GridListHitTestInfo.Item"/>.
+    /// </summary>
+    public GridListHitTestInfo HitTest(SKPoint point)
+    {
+        var hit = HitTestCore(point);
+
+        var item = hit.ItemIndex >= 0 && hit.ItemIndex < Items.Count ? Items[hit.ItemIndex] : null;
+        var column = hit.ColumnIndex >= 0 && hit.ColumnIndex < Columns.Count ? Columns[hit.ColumnIndex] : null;
+        var cell = item != null && hit.ColumnIndex >= 0 && hit.ColumnIndex < item.Cells.Count
+            ? item.Cells[hit.ColumnIndex]
+            : null;
+
+        var region = hit.Kind switch
+        {
+            HitKind.Header => GridListHitTestRegion.ColumnHeader,
+            HitKind.HeaderResize => GridListHitTestRegion.ColumnHeaderResize,
+            HitKind.RowResize => GridListHitTestRegion.RowResize,
+            HitKind.GroupHeader => GridListHitTestRegion.GroupHeader,
+            HitKind.ItemCell => !hit.CheckBoxRect.IsEmpty && hit.CheckBoxRect.Contains(point)
+                ? GridListHitTestRegion.CheckBox
+                : GridListHitTestRegion.Cell,
+            _ => GridListHitTestRegion.None
+        };
+
+        return new GridListHitTestInfo(region, hit.ItemIndex, hit.ColumnIndex, item, cell, column, hit.GroupKey, hit.GroupText);
+    }
+
+    /// <summary>Determines what is located at the given client coordinates. See <see cref="HitTest(SKPoint)"/>.</summary>
+    public GridListHitTestInfo HitTest(float x, float y) => HitTest(new SKPoint(x, y));
+
+    /// <summary>
+    /// Returns the client-area bounds (in this control's local coordinates) of the row at
+    /// <paramref name="itemIndex"/>, or <see cref="SKRect.Empty"/> if it is not currently laid out.
+    /// Combine with <see cref="ElementBase.PointToScreen(SKPoint)"/> to place popups next to a row.
+    /// </summary>
+    public SKRect GetItemBounds(int itemIndex)
+    {
+        if (itemIndex < 0 || itemIndex >= Items.Count)
+            return SKRect.Empty;
+
+        EnsureLayoutState();
+        if (!TryGetItemEntry(itemIndex, out var entry))
+            return SKRect.Empty;
+
+        var bodyViewport = GetBodyViewportRect(GetOuterViewport());
+        var r = entry.Bounds;
+        r.Offset(bodyViewport.Left - _horizontalOffset, bodyViewport.Top - _verticalOffset);
+        return r;
+    }
+
+    /// <summary>
+    /// Returns the client-area bounds of the cell at (<paramref name="itemIndex"/>,
+    /// <paramref name="columnIndex"/>), or <see cref="SKRect.Empty"/> if unavailable.
+    /// </summary>
+    public SKRect GetCellBounds(int itemIndex, int columnIndex)
+    {
+        if (columnIndex < 0 || columnIndex >= Columns.Count)
+            return SKRect.Empty;
+
+        var row = GetItemBounds(itemIndex);
+        if (row.IsEmpty)
+            return SKRect.Empty;
+
+        for (var i = 0; i < _columnLayouts.Count; i++)
+        {
+            var layout = _columnLayouts[i];
+            if (layout.ColumnIndex == columnIndex)
+                return new SKRect(row.Left + layout.X, row.Top, row.Left + layout.X + layout.Width, row.Bottom);
+        }
+
+        return SKRect.Empty;
+    }
+
+    private bool TryGetItemEntry(int itemIndex, out LayoutEntry entry)
+    {
+        for (var i = 0; i < _layoutEntries.Count; i++)
+        {
+            if (_layoutEntries[i].Kind == EntryKind.Item && _layoutEntries[i].ItemIndex == itemIndex)
+            {
+                entry = _layoutEntries[i];
+                return true;
+            }
+        }
+
+        entry = default;
+        return false;
+    }
+
+    // ── Coordinate conversion ──
+    // The SKPoint PointToScreen/PointToClient are inherited from ElementBase; these overloads add
+    // float and WinForms System.Drawing.Point variants so migrated code such as
+    // `grid.PointToScreen(new Point(x, y))` compiles and the conversion is discoverable on GridList.
+
+    /// <summary>Converts a client point (in this control's coordinates) to screen coordinates.</summary>
+    public SKPoint PointToScreen(float x, float y) => PointToScreen(new SKPoint(x, y));
+
+    /// <summary>Converts a client point to screen coordinates (WinForms <see cref="System.Drawing.Point"/> overload).</summary>
+    public System.Drawing.Point PointToScreen(System.Drawing.Point clientPoint)
+    {
+        var screen = PointToScreen(new SKPoint(clientPoint.X, clientPoint.Y));
+        return new System.Drawing.Point((int)MathF.Round(screen.X), (int)MathF.Round(screen.Y));
+    }
+
+    /// <summary>Converts a screen point to a client point (in this control's coordinates).</summary>
+    public SKPoint PointToClient(float x, float y) => PointToClient(new SKPoint(x, y));
+
+    /// <summary>Converts a screen point to a client point (WinForms <see cref="System.Drawing.Point"/> overload).</summary>
+    public System.Drawing.Point PointToClient(System.Drawing.Point screenPoint)
+    {
+        var client = PointToClient(new SKPoint(screenPoint.X, screenPoint.Y));
+        return new System.Drawing.Point((int)MathF.Round(client.X), (int)MathF.Round(client.Y));
+    }
+
+    private HitInfo HitTestCore(SKPoint location)
     {
         EnsureLayoutState();
 

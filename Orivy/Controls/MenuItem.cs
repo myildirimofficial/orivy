@@ -35,6 +35,13 @@ public class MenuItem
         UpdateSize();
     }
 
+    public MenuItem(string text, EventHandler onClick, SKBitmap icon = null) 
+        : this(text, icon)
+    {
+        if (onClick != null)
+            Click += onClick;
+    }
+
     public object Tag { get; set; }
 
     /// <summary>

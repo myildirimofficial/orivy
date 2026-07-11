@@ -14,9 +14,151 @@ internal sealed partial class GridListDemoPage : Container
         InitializeComponent();
         InitializeGridListDemo();
         InitializeListBoxDemo();
+        InitializePropertyGridDemo();
+        InitializeListManagementDemo();
+    }
+
+    private void InitializeListManagementDemo()
+    {
+        listMgmtBox.Items.AddRange("First task", "Second task", "Third task");
+        listMgmtBox.SelectedIndex = 0;
+
+        void UpdateStatus()
+        {
+            var sel = listMgmtBox.SelectedIndex;
+            listMgmtStatus.Text = $"{listMgmtBox.Items.Count} items." +
+                (sel >= 0 ? $"  Selected [{sel}]: \"{listMgmtBox.SelectedItem}\"." : "  Nothing selected.");
+        }
+
+        void Add()
+        {
+            var text = (listMgmtInput.Text ?? string.Empty).Trim();
+            if (text.Length == 0)
+                return;
+
+            var index = listMgmtBox.Items.Add(text);
+            listMgmtBox.SelectedIndex = index;
+            listMgmtInput.Text = string.Empty;
+            listMgmtInput.Focus();
+            UpdateStatus();
+        }
+
+        void Remove()
+        {
+            var i = listMgmtBox.SelectedIndex;
+            if (i < 0)
+                return;
+
+            listMgmtBox.Items.RemoveAt(i);
+            listMgmtBox.SelectedIndex = System.Math.Min(i, listMgmtBox.Items.Count - 1);
+            UpdateStatus();
+        }
+
+        void Move(int delta)
+        {
+            var i = listMgmtBox.SelectedIndex;
+            var j = i + delta;
+            if (i < 0 || j < 0 || j >= listMgmtBox.Items.Count)
+                return;
+
+            var item = listMgmtBox.Items[i];
+            listMgmtBox.Items.RemoveAt(i);
+            listMgmtBox.Items.Insert(j, item);
+            listMgmtBox.SelectedIndex = j;
+            UpdateStatus();
+        }
+
+        listMgmtAdd.Click += (_, _) => Add();
+        listMgmtRemove.Click += (_, _) => Remove();
+        listMgmtUp.Click += (_, _) => Move(-1);
+        listMgmtDown.Click += (_, _) => Move(1);
+        listMgmtClear.Click += (_, _) => { listMgmtBox.Items.Clear(); UpdateStatus(); };
+        listMgmtInput.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { e.Handled = true; Add(); } };
+        listMgmtBox.SelectedIndexChanged += (_, _) => UpdateStatus();
+
+        UpdateStatus();
     }
 
     private sealed record StatusItem(string Name, string Detail, SKColor Color);
+
+    // Sample object edited live by the PropertyGrid demo.
+    private sealed class AppSettings
+    {
+        [System.ComponentModel.Category("Appearance")]
+        [System.ComponentModel.Description("The window title shown in the caption bar.")]
+        public string Title { get; set; } = "Orivy Demo";
+
+        [System.ComponentModel.Category("Appearance")]
+        [System.ComponentModel.Description("Use the dark color scheme.")]
+        public bool DarkMode { get; set; } = true;
+
+        [System.ComponentModel.Category("Appearance")]
+        [System.ComponentModel.Description("Corner rounding applied to panels, in pixels.")]
+        public int CornerRadius { get; set; } = 12;
+
+        [System.ComponentModel.Category("Appearance")]
+        [System.ComponentModel.Description("Accent color (opens a color picker).")]
+        public SkiaSharp.SKColor Accent { get; set; } = new(0, 150, 243);
+
+        [System.ComponentModel.Category("Appearance")]
+        [System.ComponentModel.Description("Release date (opens a date picker).")]
+        public System.DateTime ReleaseDate { get; set; } = new(2026, 3, 14);
+
+        [System.ComponentModel.Category("Behavior")]
+        [System.ComponentModel.Description("Automatically save changes as they are made.")]
+        public bool AutoSave { get; set; }
+
+        [System.ComponentModel.Category("Behavior")]
+        [System.ComponentModel.Description("Update channel to receive builds from.")]
+        public UpdateChannel Channel { get; set; } = UpdateChannel.Stable;
+
+        [System.ComponentModel.Category("Behavior")]
+        [System.ComponentModel.Description("Polling interval in seconds.")]
+        public double RefreshInterval { get; set; } = 2.5;
+
+        [System.ComponentModel.Category("Data")]
+        [System.ComponentModel.Description("Database connection string.")]
+        public string ConnectionString { get; set; } = "server=localhost;db=orivy";
+
+        [System.ComponentModel.Category("Data")]
+        [System.ComponentModel.Description("Primary endpoint (expandable nested object).")]
+        public Endpoint Primary { get; set; } = new();
+
+        [System.ComponentModel.Category("Data")]
+        [System.ComponentModel.Description("Known server names (expandable collection).")]
+        public System.Collections.Generic.List<string> Servers { get; set; } = new() { "alpha", "beta", "gamma" };
+
+        [System.ComponentModel.Category("Data")]
+        [System.ComponentModel.ReadOnly(true)]
+        [System.ComponentModel.Description("The current build version (read-only).")]
+        public string Version { get; set; } = "3.0.1";
+    }
+
+    private sealed class Endpoint
+    {
+        public string Host { get; set; } = "localhost";
+        public int Port { get; set; } = 8080;
+        public bool Secure { get; set; } = true;
+        public override string ToString() => $"{Host}:{Port}";
+    }
+
+    private enum UpdateChannel { Stable, Beta, Nightly }
+
+    private void InitializePropertyGridDemo()
+    {
+        propertyGridDemo.SelectedObject = new AppSettings();
+
+        propertyGridDemo.SelectedPropertyChanged += (_, _) =>
+        {
+            var pd = propertyGridDemo.SelectedProperty;
+            propertyGridDescription.Text = pd == null
+                ? "Select a property to see its description."
+                : $"{pd.DisplayName}\n{(string.IsNullOrEmpty(pd.Description) ? "No description." : pd.Description)}";
+        };
+
+        propertyGridDemo.PropertyValueChanged += (_, e) =>
+            propertyGridDescription.Text = $"Changed '{e.ChangedItem?.Name}' (was: {e.OldValue}).";
+    }
 
     private void InitializeListBoxDemo()
     {
@@ -107,11 +249,11 @@ internal sealed partial class GridListDemoPage : Container
         gridListPrimary.Columns.Clear();
         gridListPrimary.Items.Clear();
 
-        gridListPrimary.Columns.Add(new GridListColumn { Name = "workload", HeaderText = "Workload", Width = 220f, MinWidth = 150f, SizeMode = GridListColumnSizeMode.Auto });
-        gridListPrimary.Columns.Add(new GridListColumn { Name = "live", HeaderText = "Live", Width = 92f, MinWidth = 72f, MaxWidth = 108f, ShowCheckBox = true, CellTextAlign = ContentAlignment.MiddleCenter, SizeMode = GridListColumnSizeMode.Auto });
-        gridListPrimary.Columns.Add(new GridListColumn { Name = "owner", HeaderText = "Owner", Width = 138f, MinWidth = 110f, SizeMode = GridListColumnSizeMode.Auto });
-        gridListPrimary.Columns.Add(new GridListColumn { Name = "latency", HeaderText = "Latency", Width = 110f, MinWidth = 88f, CellTextAlign = ContentAlignment.MiddleRight, SizeMode = GridListColumnSizeMode.Auto });
-        gridListPrimary.Columns.Add(new GridListColumn { Name = "summary", HeaderText = "Summary", Width = 320f, MinWidth = 220f, Sortable = false, SizeMode = GridListColumnSizeMode.Fill, FillWeight = 1.65f });
+        gridListPrimary.Columns.Add(new GridListColumn { Name = "workload", Text = "Workload", Width = 220f, MinWidth = 150f, SizeMode = GridListColumnSizeMode.Auto });
+        gridListPrimary.Columns.Add(new GridListColumn { Name = "live", Text = "Live", Width = 92f, MinWidth = 72f, MaxWidth = 108f, ShowCheckBox = true, CellTextAlign = ContentAlignment.MiddleCenter, SizeMode = GridListColumnSizeMode.Auto });
+        gridListPrimary.Columns.Add(new GridListColumn { Name = "owner", Text = "Owner", Width = 138f, MinWidth = 110f, SizeMode = GridListColumnSizeMode.Auto });
+        gridListPrimary.Columns.Add(new GridListColumn { Name = "latency", Text = "Latency", Width = 110f, MinWidth = 88f, CellTextAlign = ContentAlignment.MiddleRight, SizeMode = GridListColumnSizeMode.Auto });
+        gridListPrimary.Columns.Add(new GridListColumn { Name = "summary", Text = "Summary", Width = 320f, MinWidth = 220f, Sortable = false, SizeMode = GridListColumnSizeMode.Fill, FillWeight = 1.65f });
 
         AddPrimaryRow("core", "Core Systems", healthyIcon, "Renderer", true, "Graphics", "14 ms", "DirectX11 path is stable; cache hit ratio above target.");
         AddPrimaryRow("core", "Core Systems", pulseIcon, "Layout", true, "UI", "18 ms", "Measure/arrange pass includes nested cards and sticky regions.");
@@ -141,9 +283,9 @@ internal sealed partial class GridListDemoPage : Container
         gridListCompact.Columns.Clear();
         gridListCompact.Items.Clear();
 
-        gridListCompact.Columns.Add(new GridListColumn { Name = "stream", HeaderText = "Stream", Width = 220f, MinWidth = 150f, SizeMode = GridListColumnSizeMode.Auto });
-        gridListCompact.Columns.Add(new GridListColumn { Name = "state", HeaderText = "State", Width = 100f, MinWidth = 80f, CellTextAlign = ContentAlignment.MiddleCenter, SizeMode = GridListColumnSizeMode.Auto });
-        gridListCompact.Columns.Add(new GridListColumn { Name = "note", HeaderText = "Note", Width = 420f, MinWidth = 220f, Sortable = false, SizeMode = GridListColumnSizeMode.Fill, FillWeight = 1.4f });
+        gridListCompact.Columns.Add(new GridListColumn { Name = "stream", Text = "Stream", Width = 220f, MinWidth = 150f, SizeMode = GridListColumnSizeMode.Auto });
+        gridListCompact.Columns.Add(new GridListColumn { Name = "state", Text = "State", Width = 100f, MinWidth = 80f, CellTextAlign = ContentAlignment.MiddleCenter, SizeMode = GridListColumnSizeMode.Auto });
+        gridListCompact.Columns.Add(new GridListColumn { Name = "note", Text = "Note", Width = 420f, MinWidth = 220f, Sortable = false, SizeMode = GridListColumnSizeMode.Fill, FillWeight = 1.4f });
 
         AddCompactRow(healthyIcon, "Commit Watcher", "Live", "High-frequency feed without a header bar.");
         AddCompactRow(pulseIcon, "Animation Bus", "Sync", "Transition snapshots update while list selection remains stable.");
@@ -192,12 +334,12 @@ internal sealed partial class GridListDemoPage : Container
 
     private void GridListPrimary_ColumnClick(object? sender, GridListColumnClickEventArgs e)
     {
-        UpdateGridListStatus("Sort", $"Column '{e.Column.HeaderText}' clicked. Direction: {e.SortDirection}.");
+        UpdateGridListStatus("Sort", $"Column '{e.Column.Text}' clicked. Direction: {e.SortDirection}.");
     }
 
     private void GridListPrimary_CellClick(object? sender, GridListCellEventArgs e)
     {
-        UpdateGridListStatus("Cell Click", $"Row '{e.Item.Cells[0].Text}', column '{e.Column.HeaderText}' was activated.");
+        UpdateGridListStatus("Cell Click", $"Row '{e.Item.Cells[0].Text}', column '{e.Column.Text}' was activated.");
     }
 
     private void GridListToggleHeaderButton_Click(object? sender, EventArgs e)

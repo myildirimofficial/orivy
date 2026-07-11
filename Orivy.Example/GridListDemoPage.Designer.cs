@@ -20,6 +20,18 @@ internal sealed partial class GridListDemoPage
     private ListBox checkedListBoxDemo = null!;
     private Element listBoxStatus = null!;
 
+    private PropertyGrid propertyGridDemo = null!;
+    private Element propertyGridDescription = null!;
+
+    private ListBox listMgmtBox = null!;
+    private TextBox listMgmtInput = null!;
+    private Button listMgmtAdd = null!;
+    private Button listMgmtRemove = null!;
+    private Button listMgmtUp = null!;
+    private Button listMgmtDown = null!;
+    private Button listMgmtClear = null!;
+    private Element listMgmtStatus = null!;
+
     private static Element BuildListColumn(string caption, ElementBase control, bool last)
     {
         var column = new Element
@@ -386,6 +398,178 @@ internal sealed partial class GridListDemoPage
         listBoxShell.Controls.Add(listBoxStatus);
         listBoxShell.Controls.Add(listBoxHeader);
 
+        // ── Property Grid showcase ──
+        var propertyGridShell = new Element
+        {
+            Name = "propertyGridShell",
+            Dock = Orivy.DockStyle.Top,
+            Height = 404,
+            Padding = new(18),
+            Margin = new(0, 0, 0, 16),
+            BackColor = ColorScheme.Surface,
+            ForeColor = ColorScheme.ForeColor,
+            Radius = new(24),
+            Border = new(1),
+            BorderColor = ColorScheme.Outline.WithAlpha(88)
+        };
+
+        var propertyGridHeader = new Element
+        {
+            Name = "propertyGridHeader",
+            Text = "Property Grid\nReflects a live object's properties, grouped by category. Click a value (or press Enter/F2) to edit — text, numbers, booleans and enums all get inline editors.",
+            Dock = Orivy.DockStyle.Top,
+            Height = 82,
+            Padding = new(16),
+            Margin = new(0, 0, 0, 14),
+            BackColor = ColorScheme.SurfaceContainer,
+            ForeColor = ColorScheme.ForeColor,
+            Radius = new(18),
+            Border = new(1),
+            BorderColor = ColorScheme.Primary.WithAlpha(78),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font = new SKFont(SKTypeface.FromFamilyName("Segoe UI") ?? SKTypeface.Default, 10.5f)
+        };
+
+        propertyGridDescription = new Element
+        {
+            Name = "propertyGridDescription",
+            Text = "Select a property to see its description.",
+            Dock = Orivy.DockStyle.Bottom,
+            Height = 52,
+            Padding = new(14, 0, 14, 0),
+            Margin = new(0, 12, 0, 0),
+            BackColor = ColorScheme.SurfaceContainerLow,
+            ForeColor = ColorScheme.ForeColor,
+            Radius = new(14),
+            Border = new(1),
+            BorderColor = ColorScheme.Outline.WithAlpha(80),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font = new SKFont(SKTypeface.FromFamilyName("Segoe UI") ?? SKTypeface.Default, 10.5f)
+        };
+
+        propertyGridDemo = new PropertyGrid
+        {
+            Name = "propertyGridDemo",
+            Dock = Orivy.DockStyle.Fill,
+            Radius = new(14),
+            Border = new(1),
+            PropertySort = PropertySort.Categorized
+        };
+
+        propertyGridShell.Controls.Add(propertyGridDemo);
+        propertyGridShell.Controls.Add(propertyGridDescription);
+        propertyGridShell.Controls.Add(propertyGridHeader);
+
+        // ── List management showcase (add / remove / reorder / clear) ──
+        var listMgmtShell = new Element
+        {
+            Name = "listMgmtShell",
+            Dock = Orivy.DockStyle.Top,
+            Height = 340,
+            Padding = new(18),
+            Margin = new(0, 0, 0, 16),
+            BackColor = ColorScheme.Surface,
+            ForeColor = ColorScheme.ForeColor,
+            Radius = new(24),
+            Border = new(1),
+            BorderColor = ColorScheme.Outline.WithAlpha(88)
+        };
+
+        var listMgmtHeader = new Element
+        {
+            Name = "listMgmtHeader",
+            Text = "List Management\nType a value and add it, then reorder or remove entries. Enter also adds.",
+            Dock = Orivy.DockStyle.Top,
+            Height = 64,
+            Padding = new(16),
+            Margin = new(0, 0, 0, 14),
+            BackColor = ColorScheme.SurfaceContainer,
+            ForeColor = ColorScheme.ForeColor,
+            Radius = new(18),
+            Border = new(1),
+            BorderColor = ColorScheme.Primary.WithAlpha(78),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font = new SKFont(SKTypeface.FromFamilyName("Segoe UI") ?? SKTypeface.Default, 10.5f)
+        };
+
+        listMgmtStatus = new Element
+        {
+            Name = "listMgmtStatus",
+            Text = "0 items.",
+            Dock = Orivy.DockStyle.Bottom,
+            Height = 40,
+            Padding = new(14, 0, 14, 0),
+            Margin = new(0, 12, 0, 0),
+            BackColor = ColorScheme.SurfaceContainerLow,
+            ForeColor = ColorScheme.ForeColor,
+            Radius = new(14),
+            Border = new(1),
+            BorderColor = ColorScheme.Outline.WithAlpha(80),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font = new SKFont(SKTypeface.FromFamilyName("Segoe UI") ?? SKTypeface.Default, 10.5f)
+        };
+
+        var listMgmtBody = new Element
+        {
+            Name = "listMgmtBody",
+            Dock = Orivy.DockStyle.Fill,
+            BackColor = SKColors.Transparent,
+            Border = new(0),
+            Radius = new(0),
+            Padding = new(0)
+        };
+
+        listMgmtBox = new ListBox
+        {
+            Name = "listMgmtBox",
+            Dock = Orivy.DockStyle.Left,
+            Width = 300,
+            Margin = new(0, 0, 16, 0),
+            SelectionMode = SelectionMode.One
+        };
+
+        var listMgmtActions = new Element
+        {
+            Name = "listMgmtActions",
+            Dock = Orivy.DockStyle.Fill,
+            BackColor = SKColors.Transparent,
+            Border = new(0),
+            Radius = new(0),
+            Padding = new(0)
+        };
+
+        listMgmtInput = new TextBox
+        {
+            Name = "listMgmtInput",
+            Dock = Orivy.DockStyle.Top,
+            Height = 40,
+            Margin = new(0, 0, 0, 12),
+            PlaceholderText = "New item…"
+        };
+
+        listMgmtAdd = new Button { Name = "listMgmtAdd", Text = "Add", Dock = Orivy.DockStyle.Top, Height = 36, Margin = new(0, 0, 0, 8) };
+        listMgmtRemove = new Button { Name = "listMgmtRemove", Text = "Remove", Dock = Orivy.DockStyle.Top, Height = 36, Margin = new(0, 0, 0, 8) };
+        listMgmtUp = new Button { Name = "listMgmtUp", Text = "Move Up", Dock = Orivy.DockStyle.Top, Height = 36, Margin = new(0, 0, 0, 8) };
+        listMgmtDown = new Button { Name = "listMgmtDown", Text = "Move Down", Dock = Orivy.DockStyle.Top, Height = 36, Margin = new(0, 0, 0, 8) };
+        listMgmtClear = new Button { Name = "listMgmtClear", Text = "Clear", Dock = Orivy.DockStyle.Top, Height = 36, Margin = new(0, 0, 0, 0) };
+
+        // Dock=Top stacks in reverse add order, so add bottom-most first.
+        listMgmtActions.Controls.Add(listMgmtClear);
+        listMgmtActions.Controls.Add(listMgmtDown);
+        listMgmtActions.Controls.Add(listMgmtUp);
+        listMgmtActions.Controls.Add(listMgmtRemove);
+        listMgmtActions.Controls.Add(listMgmtAdd);
+        listMgmtActions.Controls.Add(listMgmtInput);
+
+        listMgmtBody.Controls.Add(listMgmtActions);
+        listMgmtBody.Controls.Add(listMgmtBox);
+
+        listMgmtShell.Controls.Add(listMgmtBody);
+        listMgmtShell.Controls.Add(listMgmtStatus);
+        listMgmtShell.Controls.Add(listMgmtHeader);
+
+        Controls.Add(listMgmtShell);
+        Controls.Add(propertyGridShell);
         Controls.Add(listBoxShell);
         Controls.Add(gridListWorkspace);
         Controls.Add(gridListToolbar);
