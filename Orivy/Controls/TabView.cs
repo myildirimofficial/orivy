@@ -45,8 +45,10 @@ public partial class TabView : ElementBase
     private const float TitleBarTabSelectionAnimationSpeed = 0.10f;
     private const float TitleBarHoverAnimationSpeed = 0.10f;
     private const float TabFontSize = 9.5f;
-    private const float TitleBarTabFontSize = 8.5f;
-    private const float TitleBarTabFontSizeWithIcon = 9.25f;
+    // Match Application.DefaultFont (9.75) so title-bar tab captions don't look smaller than the
+    // rest of the UI.
+    private const float TitleBarTabFontSize = 9.75f;
+    private const float TitleBarTabFontSizeWithIcon = 9.75f;
 
     // NEW: overflow mode fields
     private TabOverflowMode _tabOverflowMode = TabOverflowMode.Collapse;

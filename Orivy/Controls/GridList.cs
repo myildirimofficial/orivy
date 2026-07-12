@@ -309,10 +309,10 @@ public class GridList : ElementBase
     }
 
     [Browsable(false)]
-    public IReadOnlyCollection<int> SelectedIndices => _selectedIndices;
+    public int[] SelectedIndices => [.. _selectedIndices];
 
     [Browsable(false)]
-    public IReadOnlyCollection<GridListItem> SelectedItems => [.. _selectedIndices.Select(i => Items[i])];
+    public GridListItem[] SelectedItems => [.. _selectedIndices.Select(i => Items[i])];
 
     [Browsable(false)]
     public GridListSortDirection SortDirection => _sortDirection;
@@ -324,6 +324,23 @@ public class GridList : ElementBase
     public event EventHandler<GridListSelectionChangedEventArgs>? SelectionChanged;
     public event EventHandler<GridListColumnClickEventArgs>? ColumnClick;
     public event EventHandler<GridListCellEventArgs>? CellClick;
+
+    /// <summary>
+    /// When true, rows/cells/headers are drawn by the owner via <see cref="DrawItem"/>,
+    /// <see cref="DrawSubItem"/> and <see cref="DrawColumnHeader"/> (WinForms ListView semantics:
+    /// each handler may set <c>e.DrawDefault = true</c> to fall back to the built-in painting).
+    /// </summary>
+    [DefaultValue(false)]
+    public bool OwnerDraw { get; set; }
+
+    /// <summary>Occurs for each visible row when <see cref="OwnerDraw"/> is enabled.</summary>
+    public event EventHandler<GridListDrawItemEventArgs>? DrawItem;
+
+    /// <summary>Occurs for each visible cell when <see cref="OwnerDraw"/> is enabled.</summary>
+    public event EventHandler<GridListDrawSubItemEventArgs>? DrawSubItem;
+
+    /// <summary>Occurs for each column header when <see cref="OwnerDraw"/> is enabled.</summary>
+    public event EventHandler<GridListDrawColumnHeaderEventArgs>? DrawColumnHeader;
     public event EventHandler<GridListCellCheckChangedEventArgs>? CellCheckChanged;
 
     internal void OnColumnsChanged(bool layoutAffected)
@@ -507,11 +524,12 @@ public class GridList : ElementBase
         if (e.Button != MouseButtons.Left)
             return;
 
-        if (TryGetInputTarget(e, out var target, out var childEventArgs) && target != null && childEventArgs != null)
-        {
-            target.OnMouseDown(childEventArgs);
+        // base.OnMouseDown already routed the event to the hit child (ElementBase does its own
+        // TryGetInputTarget dispatch). Dispatching again here would deliver a SECOND OnMouseDown to
+        // toggle-style children (ComboBox, DatePicker), instantly closing the drop-down they just
+        // opened. Only detect the child hit and skip the grid's own row/header handling.
+        if (TryGetInputTarget(e, out var downTarget, out _) && downTarget != null)
             return;
-        }
 
         EnsureLayoutState();
 
@@ -597,11 +615,9 @@ public class GridList : ElementBase
             return;
         }
 
-        if (TryGetInputTarget(e, out var target, out var childEventArgs) && target != null && childEventArgs != null)
-        {
-            target.OnMouseUp(childEventArgs);
+        // See OnMouseDown: base already dispatched to the hit child — don't dispatch twice.
+        if (TryGetInputTarget(e, out var upTarget, out _) && upTarget != null)
             return;
-        }
 
         var hit = HitTestCore(e.Location);
         if (hit.Kind == HitKind.ItemCell && hit.ItemIndex == _pressedItemIndex && hit.ColumnIndex == _pressedColumnIndex)
@@ -627,11 +643,9 @@ public class GridList : ElementBase
         if (e.Button != MouseButtons.Left)
             return;
 
-        if (TryGetInputTarget(e, out var target, out var childEventArgs) && target != null && childEventArgs != null)
-        {
-            target.OnMouseDoubleClick(childEventArgs);
+        // See OnMouseDown: base already dispatched to the hit child — don't dispatch twice.
+        if (TryGetInputTarget(e, out var dblTarget, out _) && dblTarget != null)
             return;
-        }
 
         var hit = HitTestCore(e.Location);
         if (hit.Kind == HitKind.HeaderResize && hit.ColumnIndex >= 0)
@@ -1223,8 +1237,11 @@ public class GridList : ElementBase
         if (itemIndex < 0 || itemIndex >= Items.Count)
             return RowHeight;
 
+        // Allow very small programmatic heights (expand/collapse reveal animations set Height as
+        // low as ~2px). The interactive row-resize path applies its own 22px minimum at the drag
+        // site, so user resizing is unaffected.
         var customHeight = Items[itemIndex].Height;
-        return customHeight > 0.001f ? Math.Max(22f, customHeight) : RowHeight;
+        return customHeight > 0.001f ? Math.Max(2f, customHeight) : RowHeight;
     }
 
     private void ResetRowSize(int itemIndex)
@@ -1386,6 +1403,15 @@ public class GridList : ElementBase
             }
 
             var column = Columns[layout.ColumnIndex];
+
+            if (OwnerDraw && DrawColumnHeader != null)
+            {
+                var headerArgs = new GridListDrawColumnHeaderEventArgs(this, canvas, column, layout.ColumnIndex, cellRect, font, isHovered);
+                DrawColumnHeader.Invoke(this, headerArgs);
+                if (!headerArgs.DrawDefault)
+                    continue;
+            }
+
             var contentRect = cellRect;
             contentRect.Inflate(-CellPadding, 0);
             contentRect.Right -= AllowColumnResize && column.Resizable ? ResizeGripWidth + 4f : 0f;
@@ -1491,6 +1517,82 @@ public class GridList : ElementBase
         }
     }
 
+    // ── Owner-draw helper painting (used by the Draw*EventArgs helper methods) ──
+
+    internal void PaintDefaultRowBackground(SKCanvas canvas, SKRect bounds, int itemIndex, bool selected, bool hovered)
+    {
+        if (selected) { _fillPaint.Color = SelectionBackColor; canvas.DrawRect(bounds, _fillPaint); }
+        else if (hovered) { _fillPaint.Color = HoverRowBackColor; canvas.DrawRect(bounds, _fillPaint); }
+        else if ((itemIndex & 1) == 1) { _fillPaint.Color = AlternatingRowBackColor; canvas.DrawRect(bounds, _fillPaint); }
+    }
+
+    internal void PaintSolidBackground(SKCanvas canvas, SKRect bounds, SKColor color)
+    {
+        _fillPaint.Color = color;
+        canvas.DrawRect(bounds, _fillPaint);
+    }
+
+    internal void PaintDefaultCellText(SKCanvas canvas, SKRect cellBounds, GridListItem item, GridListCell? cell,
+        GridListColumn column, SKFont font, ContentAlignment? alignment = null)
+    {
+        var text = cell?.Text;
+        if (string.IsNullOrEmpty(text) && cell?.Value != null)
+            text = cell.Value.ToString();
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        var contentRect = new SKRect(cellBounds.Left + CellPadding, cellBounds.Top, cellBounds.Right - CellPadding, cellBounds.Bottom);
+        var foreColor = cell != null && cell.ForeColor != SKColor.Empty
+            ? cell.ForeColor
+            : (item.Enabled ? ForeColor : ForeColor.WithAlpha(140));
+        _textPaint.Color = foreColor;
+        TextRenderer.DrawText(canvas, text, contentRect, _textPaint, font, alignment ?? column.CellTextAlign, true, false);
+    }
+
+    internal void PaintDefaultRowText(SKCanvas canvas, SKRect rowBounds, int itemIndex, SKFont font)
+    {
+        var item = Items[itemIndex];
+        for (var i = 0; i < _columnLayouts.Count; i++)
+        {
+            var layout = _columnLayouts[i];
+            var cellRect = new SKRect(
+                rowBounds.Left + layout.X - _horizontalOffset, rowBounds.Top,
+                rowBounds.Left + layout.X + layout.Width - _horizontalOffset, rowBounds.Bottom);
+            if (cellRect.Right < rowBounds.Left || cellRect.Left > rowBounds.Right)
+                continue;
+
+            PaintDefaultCellText(canvas, cellRect, item, GetCell(itemIndex, layout.ColumnIndex, createMissing: false), Columns[layout.ColumnIndex], font);
+        }
+    }
+
+    internal void PaintFocusRectangle(SKCanvas canvas, SKRect bounds)
+    {
+        using var paint = new SKPaint
+        {
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 1f,
+            Color = ColorScheme.Primary.WithAlpha(180)
+        };
+        using var dash = SKPathEffect.CreateDash(new[] { 3f, 2f }, 0f);
+        paint.PathEffect = dash;
+        var r = new SKRect(bounds.Left + 1.5f, bounds.Top + 1.5f, bounds.Right - 1.5f, bounds.Bottom - 1.5f);
+        canvas.DrawRect(r, paint);
+    }
+
+    internal void PaintDefaultHeaderBackground(SKCanvas canvas, SKRect bounds, bool hovered)
+    {
+        _fillPaint.Color = hovered ? HeaderBackColor.Brightness(0.05f) : HeaderBackColor;
+        canvas.DrawRect(bounds, _fillPaint);
+    }
+
+    internal void PaintDefaultHeaderText(SKCanvas canvas, SKRect bounds, GridListColumn column, SKFont font)
+    {
+        var contentRect = new SKRect(bounds.Left + CellPadding, bounds.Top, bounds.Right - CellPadding, bounds.Bottom);
+        _textPaint.Color = ForeColor.WithAlpha(210);
+        TextRenderer.DrawText(canvas, column.Text ?? string.Empty, contentRect, _textPaint, font, column.TextAlign, true, false);
+    }
+
     private void DrawItemRow(SKCanvas canvas, SKRect bounds, int itemIndex, SKFont font)
     {
         if (bounds.Height <= 0.5f)
@@ -1503,6 +1605,17 @@ public class GridList : ElementBase
         var revealProgress = baseRowHeight <= 0.001f ? 1f : Math.Clamp(bounds.Height / baseRowHeight, 0f, 1f);
         var saveCount = canvas.Save();
         canvas.ClipRect(bounds);
+
+        if (OwnerDraw && DrawItem != null)
+        {
+            var ownerArgs = new GridListDrawItemEventArgs(this, canvas, item, itemIndex, bounds, font, isSelected, isHovered);
+            DrawItem.Invoke(this, ownerArgs);
+            if (!ownerArgs.DrawDefault)
+            {
+                canvas.RestoreToCount(saveCount);
+                return;
+            }
+        }
 
         if (isSelected)
         {
@@ -1530,6 +1643,19 @@ public class GridList : ElementBase
 
             var contentRect = new SKRect(cellRect.Left + CellPadding, cellRect.Top, cellRect.Right - CellPadding, cellRect.Bottom);
             var cell = GetCell(itemIndex, layout.ColumnIndex, createMissing: false);
+
+            if (OwnerDraw && DrawSubItem != null)
+            {
+                var subArgs = new GridListDrawSubItemEventArgs(this, canvas, item, itemIndex, cell, column,
+                    layout.ColumnIndex, cellRect, font, isSelected, isHovered);
+                DrawSubItem.Invoke(this, subArgs);
+                if (!subArgs.DrawDefault)
+                {
+                    if (ShowGridLines)
+                        canvas.DrawLine(cellRect.Right, cellRect.Top, cellRect.Right, cellRect.Bottom, _gridLinePaint);
+                    continue;
+                }
+            }
 
             if (ShouldShowCheckBox(column, layout.ColumnIndex))
             {
@@ -1731,6 +1857,53 @@ public class GridList : ElementBase
         }
 
         return SKRect.Empty;
+    }
+
+    /// <summary>
+    /// Moves the row at <paramref name="fromIndex"/> to <paramref name="toIndex"/>, keeping the
+    /// selection on the same logical rows. Returns false when either index is out of range.
+    /// </summary>
+    public bool MoveItem(int fromIndex, int toIndex)
+    {
+        if (fromIndex < 0 || fromIndex >= Items.Count ||
+            toIndex < 0 || toIndex >= Items.Count || fromIndex == toIndex)
+            return false;
+
+        var item = Items[fromIndex];
+        Items.RemoveAt(fromIndex);
+        Items.Insert(toIndex, item);
+
+        // Remap the selection so the same rows stay selected after the shift.
+        if (_selectedIndices.Count > 0)
+        {
+            var remapped = new HashSet<int>();
+            foreach (var index in _selectedIndices)
+                remapped.Add(RemapIndexAfterMove(index, fromIndex, toIndex));
+
+            _selectedIndices.Clear();
+            foreach (var index in remapped)
+                _selectedIndices.Add(index);
+        }
+
+        Invalidate();
+        return true;
+    }
+
+    /// <summary>Moves the row one position up. Returns false when it is already first.</summary>
+    public bool MoveItemUp(int index) => MoveItem(index, index - 1);
+
+    /// <summary>Moves the row one position down. Returns false when it is already last.</summary>
+    public bool MoveItemDown(int index) => MoveItem(index, index + 1);
+
+    private static int RemapIndexAfterMove(int index, int fromIndex, int toIndex)
+    {
+        if (index == fromIndex)
+            return toIndex;
+        if (fromIndex < toIndex && index > fromIndex && index <= toIndex)
+            return index - 1;
+        if (toIndex < fromIndex && index >= toIndex && index < fromIndex)
+            return index + 1;
+        return index;
     }
 
     private bool TryGetItemEntry(int itemIndex, out LayoutEntry entry)

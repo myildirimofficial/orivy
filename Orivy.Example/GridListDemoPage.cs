@@ -18,16 +18,38 @@ internal sealed partial class GridListDemoPage : Container
         InitializeListManagementDemo();
     }
 
+    // Model behind the PropertyGrid list-management demo.
+    private sealed class ServerProfile
+    {
+        [System.ComponentModel.Category("Profile")]
+        [System.ComponentModel.Description("Display name of this profile.")]
+        public string Name { get; set; } = "Production";
+
+        [System.ComponentModel.Category("Profile")]
+        [System.ComponentModel.Description("Server list — managed via the buttons or by right-clicking rows in the grid.")]
+        public System.Collections.Generic.List<string> Servers { get; } = new() { "alpha", "beta", "gamma" };
+    }
+
+    private ServerProfile _listMgmtModel = null!;
+
     private void InitializeListManagementDemo()
     {
-        listMgmtBox.Items.AddRange("First task", "Second task", "Third task");
-        listMgmtBox.SelectedIndex = 0;
+        _listMgmtModel = new ServerProfile();
+        listMgmtGrid.SelectedObject = _listMgmtModel;
+        listMgmtGrid.ExpandAllGridItems();
 
         void UpdateStatus()
         {
-            var sel = listMgmtBox.SelectedIndex;
-            listMgmtStatus.Text = $"{listMgmtBox.Items.Count} items." +
-                (sel >= 0 ? $"  Selected [{sel}]: \"{listMgmtBox.SelectedItem}\"." : "  Nothing selected.");
+            var suffix = listMgmtGrid.TryGetSelectedCollectionElement(out _, out var selIndex)
+                ? $"  Selected element [{selIndex}]: \"{_listMgmtModel.Servers[selIndex]}\"."
+                : "  Select a [i] row to remove or move it.";
+            listMgmtStatus.Text = $"Servers: {_listMgmtModel.Servers.Count} items.{suffix}";
+        }
+
+        void RefreshGrid()
+        {
+            listMgmtGrid.Refresh();
+            UpdateStatus();
         }
 
         void Add()
@@ -36,45 +58,41 @@ internal sealed partial class GridListDemoPage : Container
             if (text.Length == 0)
                 return;
 
-            var index = listMgmtBox.Items.Add(text);
-            listMgmtBox.SelectedIndex = index;
+            _listMgmtModel.Servers.Add(text);
             listMgmtInput.Text = string.Empty;
             listMgmtInput.Focus();
-            UpdateStatus();
+            RefreshGrid();
         }
 
         void Remove()
         {
-            var i = listMgmtBox.SelectedIndex;
-            if (i < 0)
-                return;
-
-            listMgmtBox.Items.RemoveAt(i);
-            listMgmtBox.SelectedIndex = System.Math.Min(i, listMgmtBox.Items.Count - 1);
-            UpdateStatus();
+            if (listMgmtGrid.TryGetSelectedCollectionElement(out var list, out var i) && list is { IsFixedSize: false })
+            {
+                list.RemoveAt(i);
+                RefreshGrid();
+            }
         }
 
         void Move(int delta)
         {
-            var i = listMgmtBox.SelectedIndex;
-            var j = i + delta;
-            if (i < 0 || j < 0 || j >= listMgmtBox.Items.Count)
+            if (!listMgmtGrid.TryGetSelectedCollectionElement(out var list, out var i) || list == null)
                 return;
 
-            var item = listMgmtBox.Items[i];
-            listMgmtBox.Items.RemoveAt(i);
-            listMgmtBox.Items.Insert(j, item);
-            listMgmtBox.SelectedIndex = j;
-            UpdateStatus();
+            var j = i + delta;
+            if (j < 0 || j >= list.Count)
+                return;
+
+            (list[j], list[i]) = (list[i], list[j]);
+            RefreshGrid();
         }
 
         listMgmtAdd.Click += (_, _) => Add();
         listMgmtRemove.Click += (_, _) => Remove();
         listMgmtUp.Click += (_, _) => Move(-1);
         listMgmtDown.Click += (_, _) => Move(1);
-        listMgmtClear.Click += (_, _) => { listMgmtBox.Items.Clear(); UpdateStatus(); };
+        listMgmtClear.Click += (_, _) => { _listMgmtModel.Servers.Clear(); RefreshGrid(); };
         listMgmtInput.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { e.Handled = true; Add(); } };
-        listMgmtBox.SelectedIndexChanged += (_, _) => UpdateStatus();
+        listMgmtGrid.SelectionChanged += (_, _) => UpdateStatus();
 
         UpdateStatus();
     }
@@ -324,7 +342,7 @@ internal sealed partial class GridListDemoPage : Container
     {
         var selected = gridListPrimary.SelectedItem;
         var workload = selected?.Cells.Count > 0 ? selected.Cells[0].Text : "None";
-        UpdateGridListStatus("Selection", $"Active row: {workload}. Selected index: {e.SelectedIndex}. Multi-select count: {gridListPrimary.SelectedIndices.Count}.");
+        UpdateGridListStatus("Selection", $"Active row: {workload}. Selected index: {e.SelectedIndex}. Multi-select count: {gridListPrimary.SelectedIndices.Length}.");
     }
 
     private void GridListPrimary_CellCheckChanged(object? sender, GridListCellCheckChangedEventArgs e)

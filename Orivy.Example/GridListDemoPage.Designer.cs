@@ -23,7 +23,7 @@ internal sealed partial class GridListDemoPage
     private PropertyGrid propertyGridDemo = null!;
     private Element propertyGridDescription = null!;
 
-    private ListBox listMgmtBox = null!;
+    private PropertyGrid listMgmtGrid = null!;
     private TextBox listMgmtInput = null!;
     private Button listMgmtAdd = null!;
     private Button listMgmtRemove = null!;
@@ -465,7 +465,7 @@ internal sealed partial class GridListDemoPage
         {
             Name = "listMgmtShell",
             Dock = Orivy.DockStyle.Top,
-            Height = 340,
+            Height = 400,
             Padding = new(18),
             Margin = new(0, 0, 0, 16),
             BackColor = ColorScheme.Surface,
@@ -478,7 +478,7 @@ internal sealed partial class GridListDemoPage
         var listMgmtHeader = new Element
         {
             Name = "listMgmtHeader",
-            Text = "List Management\nType a value and add it, then reorder or remove entries. Enter also adds.",
+            Text = "PropertyGrid List Management\nManage the Servers collection inside the PropertyGrid: select an element row ([0], [1]…) then use the buttons — or right-click a row for Add / Remove / Move.",
             Dock = Orivy.DockStyle.Top,
             Height = 64,
             Padding = new(16),
@@ -519,13 +519,15 @@ internal sealed partial class GridListDemoPage
             Padding = new(0)
         };
 
-        listMgmtBox = new ListBox
+        listMgmtGrid = new PropertyGrid
         {
-            Name = "listMgmtBox",
+            Name = "listMgmtGrid",
             Dock = Orivy.DockStyle.Left,
-            Width = 300,
+            Width = 340,
             Margin = new(0, 0, 16, 0),
-            SelectionMode = SelectionMode.One
+            Radius = new(14),
+            Border = new(1),
+            PropertySort = PropertySort.Categorized
         };
 
         var listMgmtActions = new Element
@@ -562,7 +564,7 @@ internal sealed partial class GridListDemoPage
         listMgmtActions.Controls.Add(listMgmtInput);
 
         listMgmtBody.Controls.Add(listMgmtActions);
-        listMgmtBody.Controls.Add(listMgmtBox);
+        listMgmtBody.Controls.Add(listMgmtGrid);
 
         listMgmtShell.Controls.Add(listMgmtBody);
         listMgmtShell.Controls.Add(listMgmtStatus);

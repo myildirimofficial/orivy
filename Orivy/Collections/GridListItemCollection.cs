@@ -89,6 +89,21 @@ public sealed class GridListItemCollection : Collection<GridListItem>
             RemoveAt(index);
     }
 
+    /// <summary>
+    /// Moves the item at <paramref name="fromIndex"/> to <paramref name="toIndex"/>. Note: this does
+    /// not adjust the owning grid's selection — prefer <see cref="GridList.MoveItem(int, int)"/>
+    /// when the move is user-driven.
+    /// </summary>
+    public void Move(int fromIndex, int toIndex)
+    {
+        if (fromIndex < 0 || fromIndex >= Count || toIndex < 0 || toIndex >= Count || fromIndex == toIndex)
+            return;
+
+        var item = this[fromIndex];
+        RemoveAt(fromIndex);
+        Insert(toIndex, item);
+    }
+
     /// <summary>Adds an item with the given key (Name) and a single text cell, and returns it.</summary>
     public GridListItem Add(string key, string text)
     {

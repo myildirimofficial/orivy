@@ -1,3 +1,4 @@
+using Orivy.Animation;
 using SkiaSharp;
 using System;
 using System.Collections;
@@ -32,6 +33,17 @@ public class PropertyGrid : GridList
     private ColorPicker? _colorEditor;
     private WindowBase? _colorHost;
     private ContextMenuStrip? _dropDown;
+
+    // Expand/collapse chevron icons + reveal animation (styled after the group headers).
+    private SKImage? _chevronRight;
+    private SKImage? _chevronDown;
+    private int _chevronDpi;
+    private SKColor _chevronColor;
+    private readonly AnimationManager _revealAnim;
+    private readonly List<GridListItem> _revealItems = new();
+    private PropNode? _revealNode;
+    private bool _revealExpanding;
+
     private PropNode? _editingNode;
     private GridListItem? _editingItem;
     private SKRect _editorBounds;
@@ -76,9 +88,190 @@ public class PropertyGrid : GridList
         AllowColumnResize = true;
         AllowRowResize = false;
 
+        _revealAnim = new AnimationManager(true)
+        {
+            Increment = 0.10,
+            AnimationType = AnimationType.CubicEaseOut,
+            InterruptAnimation = true
+        };
+        _revealAnim.OnAnimationProgress += _ => ApplyRevealProgress();
+        _revealAnim.OnAnimationFinished += _ => FinishReveal();
+
         CellClick += OnCellClicked;
         SelectionChanged += (_, _) => SelectedPropertyChanged?.Invoke(this, EventArgs.Empty);
     }
+
+    #region Expand chevron + reveal animation
+
+    private SKImage GetChevron(bool expanded)
+    {
+        var color = ColorScheme.ForeColor.WithAlpha(160);
+        var dpi = DeviceDpi;
+        if (_chevronRight == null || _chevronDown == null || _chevronDpi != dpi || _chevronColor != color)
+        {
+            _chevronRight?.Dispose();
+            _chevronDown?.Dispose();
+            _chevronRight = CreateChevronImage(expanded: false, color);
+            _chevronDown = CreateChevronImage(expanded: true, color);
+            _chevronDpi = dpi;
+            _chevronColor = color;
+        }
+
+        return expanded ? _chevronDown! : _chevronRight!;
+    }
+
+    private static SKImage CreateChevronImage(bool expanded, SKColor color)
+    {
+        const int size = 16;
+        using var surface = SKSurface.Create(new SKImageInfo(size, size, SKColorType.Bgra8888, SKAlphaType.Premul));
+        var canvas = surface.Canvas;
+        canvas.Clear(SKColors.Transparent);
+
+        using var paint = new SKPaint
+        {
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 1.7f,
+            StrokeCap = SKStrokeCap.Round,
+            StrokeJoin = SKStrokeJoin.Round,
+            Color = color
+        };
+
+        using var path = new SKPath();
+        if (expanded)
+        {
+            path.MoveTo(size * 0.28f, size * 0.40f);
+            path.LineTo(size * 0.50f, size * 0.64f);
+            path.LineTo(size * 0.72f, size * 0.40f);
+        }
+        else
+        {
+            path.MoveTo(size * 0.40f, size * 0.28f);
+            path.LineTo(size * 0.64f, size * 0.50f);
+            path.LineTo(size * 0.40f, size * 0.72f);
+        }
+
+        canvas.DrawPath(path, paint);
+        return surface.Snapshot();
+    }
+
+    private void ToggleNodeAnimated(PropNode node)
+    {
+        // Settle any in-flight animation before starting a new one.
+        FinishReveal();
+
+        if (!node.Expanded)
+        {
+            node.Expanded = true;
+            EnsureChildren(node);
+            RebuildRows();
+
+            CollectSubtreeRows(node);
+            if (_revealItems.Count == 0)
+                return;
+
+            _revealExpanding = true;
+            _revealNode = node;
+            foreach (var row in _revealItems)
+                row.Height = 2f;
+            _revealAnim.StartNewAnimation(AnimationDirection.In);
+        }
+        else
+        {
+            CollectSubtreeRows(node);
+            if (_revealItems.Count == 0)
+            {
+                node.Expanded = false;
+                RebuildRows();
+                return;
+            }
+
+            // Flip the chevron immediately so it doesn't lag the closing animation.
+            SetNodeChevron(node, expanded: false);
+            _revealExpanding = false;
+            _revealNode = node;
+            _revealAnim.StartNewAnimation(AnimationDirection.In);
+        }
+    }
+
+    private void SetNodeChevron(PropNode node, bool expanded)
+    {
+        for (var i = 0; i < Items.Count; i++)
+        {
+            if (ReferenceEquals(Items[i].Tag, node) && Items[i].Cells.Count > NameColumn)
+            {
+                Items[i].Cells[NameColumn].Icon = GetChevron(expanded);
+                Invalidate();
+                return;
+            }
+        }
+    }
+
+    private void CollectSubtreeRows(PropNode node)
+    {
+        _revealItems.Clear();
+
+        var nodeRow = -1;
+        for (var i = 0; i < Items.Count; i++)
+        {
+            if (ReferenceEquals(Items[i].Tag, node))
+            {
+                nodeRow = i;
+                break;
+            }
+        }
+
+        if (nodeRow < 0)
+            return;
+
+        for (var i = nodeRow + 1; i < Items.Count; i++)
+        {
+            if (Items[i].Tag is not PropNode child || child.Depth <= node.Depth)
+                break;
+            _revealItems.Add(Items[i]);
+        }
+    }
+
+    private void ApplyRevealProgress()
+    {
+        if (_revealNode == null)
+            return;
+
+        var progress = (float)_revealAnim.GetProgress();
+        var target = RowHeight;
+        var height = _revealExpanding
+            ? 2f + (target - 2f) * progress
+            : Math.Max(2f, target * (1f - progress));
+
+        for (var i = 0; i < _revealItems.Count; i++)
+            _revealItems[i].Height = height;
+    }
+
+    private void FinishReveal()
+    {
+        if (_revealNode == null)
+            return;
+
+        var node = _revealNode;
+        _revealNode = null;
+
+        if (_revealExpanding)
+        {
+            // Back to the default row height (0 = "use RowHeight").
+            for (var i = 0; i < _revealItems.Count; i++)
+                _revealItems[i].Height = 0f;
+        }
+        else
+        {
+            node.Expanded = false;
+            RebuildRows();
+        }
+
+        _revealItems.Clear();
+        Invalidate();
+    }
+
+    #endregion
 
     #region Public API
 
@@ -126,12 +319,46 @@ public class PropertyGrid : GridList
     public string SelectedPropertyDescription =>
         (SelectedItem?.Tag as PropNode)?.Descriptor?.Description ?? string.Empty;
 
-    /// <summary>Re-reads all property values from the selected object and repaints.</summary>
+    /// <summary>
+    /// Re-reads all property values from the selected object and repaints. Collection rows are
+    /// re-synchronized (added/removed elements appear/disappear) while expansion state is kept.
+    /// </summary>
     public new void Refresh()
     {
         CommitEditor();
-        RefreshValues();
-        Invalidate();
+        InvalidateCollectionChildren(_rootNodes);
+        RebuildRows();
+    }
+
+    private static void InvalidateCollectionChildren(List<PropNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            InvalidateCollectionChildren(node.Children);
+
+            // Force expanded collections to re-enumerate on the next row build.
+            if (node.ChildrenBuilt && node.GetValue() is IEnumerable and not string)
+                node.ChildrenBuilt = false;
+        }
+    }
+
+    /// <summary>
+    /// When the highlighted row is a collection element (<c>[i]</c>), returns its owning list and
+    /// index so external UI (add/remove/move buttons) can operate on it. Combine with
+    /// <see cref="Refresh"/> after mutating the list.
+    /// </summary>
+    public bool TryGetSelectedCollectionElement(out IList? list, out int index)
+    {
+        if (SelectedItem?.Tag is PropNode { ParentList: { } parent, ElementIndex: >= 0 } node)
+        {
+            list = parent;
+            index = node.ElementIndex;
+            return true;
+        }
+
+        list = null;
+        index = -1;
+        return false;
     }
 
     /// <summary>Expands every expandable row (nested objects and collections). Mirrors WinForms ExpandAllGridItems.</summary>
@@ -368,7 +595,11 @@ public class PropertyGrid : GridList
             item.GroupText = rootCategory;
         }
 
-        item.Cells.Add(new GridListCell { Text = FormatLabel(node) });
+        item.Cells.Add(new GridListCell
+        {
+            Text = FormatLabel(node),
+            Icon = node.Expandable ? GetChevron(node.Expanded) : null
+        });
         item.Cells.Add(new GridListCell { Text = FormatValue(node) });
         Items.Add(item);
 
@@ -382,9 +613,9 @@ public class PropertyGrid : GridList
 
     private static string FormatLabel(PropNode node)
     {
-        var indent = new string(' ', node.Depth * 3);
-        var glyph = node.Expandable ? (node.Expanded ? "▾ " : "▸ ") : (node.Depth > 0 ? "  " : string.Empty);
-        return indent + glyph + node.Label;
+        // Depth is conveyed by indentation; the expand indicator is a drawn chevron icon on the
+        // name cell (see GetChevron), matching the group-header styling.
+        return new string(' ', node.Depth * 3) + node.Label;
     }
 
     private string FormatValue(PropNode node)
@@ -403,6 +634,9 @@ public class PropertyGrid : GridList
         {
             EnsureChildren(node);
             var typeName = value.GetType().Name;
+            var arity = typeName.IndexOf('`');
+            if (arity > 0)
+                typeName = typeName[..arity];
             return $"{typeName} ({node.Children.Count})";
         }
 
@@ -444,8 +678,7 @@ public class PropertyGrid : GridList
         if (node.Expandable)
         {
             CommitEditor();
-            node.Expanded = !node.Expanded;
-            RebuildRows();
+            ToggleNodeAnimated(node);
             return;
         }
 
@@ -513,6 +746,10 @@ public class PropertyGrid : GridList
 
         PlaceEditor(editor, bounds);
         editor.Focus();
+
+        // Open the calendar immediately — the user clicked the value to edit it, so don't require
+        // a second click on the picker field.
+        editor.ShowDropDown();
     }
 
     private void ShowColorEditor(PropNode node, SKRect bounds)
@@ -826,11 +1063,27 @@ public class PropertyGrid : GridList
             added = true;
         }
 
-        // "Remove" on an element row of a mutable collection.
-        if (node.ParentList is { IsReadOnly: false, IsFixedSize: false } parent && node.ElementIndex >= 0)
+        // Element rows: remove (resizable lists) and reorder (any writable list — a swap also
+        // works for fixed-size arrays).
+        if (node.ParentList is { IsReadOnly: false } parent && node.ElementIndex >= 0)
         {
-            menu.AddItem(new MenuItem("Remove item", (_, _) => RemoveCollectionItem(node, parent)));
-            added = true;
+            if (!parent.IsFixedSize)
+            {
+                menu.AddItem(new MenuItem("Remove item", (_, _) => RemoveCollectionItem(node, parent)));
+                added = true;
+            }
+
+            if (node.ElementIndex > 0)
+            {
+                menu.AddItem(new MenuItem("Move up", (_, _) => MoveCollectionItem(node, parent, -1)));
+                added = true;
+            }
+
+            if (node.ElementIndex < parent.Count - 1)
+            {
+                menu.AddItem(new MenuItem("Move down", (_, _) => MoveCollectionItem(node, parent, +1)));
+                added = true;
+            }
         }
 
         if (!added)
@@ -853,6 +1106,21 @@ public class PropertyGrid : GridList
             RebuildAfterCollectionChange(collectionNode);
         }
         catch { /* fixed / typed collections may reject the default element */ }
+    }
+
+    private void MoveCollectionItem(PropNode elementNode, IList list, int delta)
+    {
+        try
+        {
+            var i = elementNode.ElementIndex;
+            var j = i + delta;
+            if (i < 0 || j < 0 || i >= list.Count || j >= list.Count)
+                return;
+
+            (list[j], list[i]) = (list[i], list[j]);
+            RebuildAfterCollectionChange(FindCollectionNode(list) ?? elementNode);
+        }
+        catch { /* ignore */ }
     }
 
     private void RemoveCollectionItem(PropNode elementNode, IList list)
@@ -928,8 +1196,7 @@ public class PropertyGrid : GridList
             {
                 if (node.Expandable)
                 {
-                    node.Expanded = !node.Expanded;
-                    RebuildRows();
+                    ToggleNodeAnimated(node);
                     e.Handled = true;
                 }
                 else if (node.Setter != null && CanEdit(node.ValueType))
@@ -950,6 +1217,9 @@ public class PropertyGrid : GridList
             _dateEditor?.Dispose();
             _colorEditor?.Dispose();
             _dropDown?.Dispose();
+            _revealAnim.Dispose();
+            _chevronRight?.Dispose();
+            _chevronDown?.Dispose();
         }
 
         base.Dispose(disposing);

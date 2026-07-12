@@ -379,6 +379,69 @@ public class ListBox : ElementBase
 
     public void ClearSelected() => ClearSelectedCore(raise: true);
 
+    /// <summary>
+    /// Moves the item at <paramref name="fromIndex"/> to <paramref name="toIndex"/>, keeping its
+    /// check state and the selection with it. Returns false when either index is out of range.
+    /// </summary>
+    public bool MoveItem(int fromIndex, int toIndex)
+    {
+        if (fromIndex < 0 || fromIndex >= _items.Count ||
+            toIndex < 0 || toIndex >= _items.Count || fromIndex == toIndex)
+            return false;
+
+        // Snapshot + permute the parallel check-state list; the automatic length resync in
+        // HandleItemsCollectionChanged trims/appends at the END, which would detach states
+        // from their rows during a Remove+Insert.
+        var states = new List<CheckState>(_checkStates);
+        if (fromIndex < states.Count)
+        {
+            var moved = states[fromIndex];
+            states.RemoveAt(fromIndex);
+            states.Insert(Math.Min(toIndex, states.Count), moved);
+        }
+
+        BeginUpdate();
+        try
+        {
+            var item = _items[fromIndex];
+            _items.RemoveAt(fromIndex);
+            _items.Insert(toIndex, item);
+        }
+        finally
+        {
+            EndUpdate();
+        }
+
+        for (var i = 0; i < _checkStates.Count && i < states.Count; i++)
+            _checkStates[i] = states[i];
+
+        // Shift selection indices so the same logical items stay selected.
+        for (var i = 0; i < _selectedIndices.Count; i++)
+            _selectedIndices[i] = RemapAfterMove(_selectedIndices[i], fromIndex, toIndex);
+        _anchorIndex = _anchorIndex < 0 ? _anchorIndex : RemapAfterMove(_anchorIndex, fromIndex, toIndex);
+
+        EnsureVisible(toIndex);
+        Invalidate();
+        return true;
+    }
+
+    /// <summary>Moves the item one row up. Returns false when it is already first.</summary>
+    public bool MoveItemUp(int index) => MoveItem(index, index - 1);
+
+    /// <summary>Moves the item one row down. Returns false when it is already last.</summary>
+    public bool MoveItemDown(int index) => MoveItem(index, index + 1);
+
+    private static int RemapAfterMove(int index, int fromIndex, int toIndex)
+    {
+        if (index == fromIndex)
+            return toIndex;
+        if (fromIndex < toIndex && index > fromIndex && index <= toIndex)
+            return index - 1;
+        if (toIndex < fromIndex && index >= toIndex && index < fromIndex)
+            return index + 1;
+        return index;
+    }
+
     /// <summary>Returns the index of the item at the given client point, or -1 if none.</summary>
     public int IndexFromPoint(float x, float y)
     {
