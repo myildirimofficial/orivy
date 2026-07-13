@@ -14,7 +14,7 @@ Clone and build
 
 ```powershell
 git clone https://github.com/myildirimofficial/orivy.git
-cd sdui
+cd orivy
 dotnet build Orivy.sln -c Debug
 ```
 
@@ -29,11 +29,11 @@ If you prefer Visual Studio, open `Orivy.sln`, set `Orivy.Example` as the startu
 Development workflow and tips
 - Hot code iteration: modify code in `Orivy` project and re-run the example app. The solution is small enough for quick builds; use Release builds for performance testing.
 - Logs and diagnostics: message loop exceptions are written to Debug output (`System.Diagnostics.Debug`). Use Visual Studio Output window or attach a debugger.
-- Fonts: Application.SharedDefaultFont sets a default SKFont. If you see typography differences, ensure the target system has the expected font family (default tries "Inter", falls back to SKTypeface.Default).
+- Fonts: `Application.DefaultFont` provides the shared SKFont. The default typeface chain is "Inter" → "Segoe UI" (Windows) → `SKTypeface.Default`; if you see typography differences, ensure the expected family is installed or assign `Application.DefaultFont` yourself.
 
 Troubleshooting
 - Skia native dependencies: the NuGet packages include native runtimes for common platforms. If Skia fails to initialize, examine the application output for SkiaSharp errors and ensure the right runtime package is referenced for your target platform.
-- GPU (DirectX) rendering: the project attempts to use a DirectX11 path when available. Ensure GPU drivers are up-to-date. If the GPU path fails, the library falls back to CPU rendering.
+- GPU rendering: on Windows the default backend is OpenGL (`Application.RenderBackend` / `WindowBase.RenderBackend`). Ensure GPU drivers are up-to-date. If the GPU path fails to initialize, the library automatically falls back to the software (CPU) renderer; you can also force it with `RenderBackend.Software`.
 - Build errors: run `dotnet restore` then `dotnet build` to ensure package restore completed. If you see missing types, confirm the project is built for net8.0.
 
 Next steps

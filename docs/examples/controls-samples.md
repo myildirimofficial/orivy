@@ -16,18 +16,62 @@ window.Controls.Add(btn);
 
 ```csharp
 var cp = new ColorPicker { Location = new SKPoint(16, 60) };
-cp.ValueChanged += (_,_) => { var selected = cp.Value; /* handle color change */ };
+cp.SelectedColorChanged += (_, _) => { var selected = cp.SelectedColor; /* handle color change */ };
 window.Controls.Add(cp);
 ```
 
-3) GridList — populating rows
+3) GridList — columns, rows, colors, hit testing
 
 ```csharp
-var grid = new GridList { Dock = DockStyle.Fill };
-var items = new List<GridListItem>();
-items.Add(new GridListItem { Cells = { new GridListCell { Text = "Row 1" } } });
-grid.Items = items;
+var grid = new GridList { Dock = DockStyle.Fill, MultiSelect = true };
+grid.Columns.Add(new GridListColumn { Name = "name", Text = "Name", Width = 180f });
+grid.Columns.Add(new GridListColumn { Name = "state", Text = "State", SizeMode = GridListColumnSizeMode.Fill });
+
+// WinForms-style ergonomics: one cell per string, keyed items, item colors and tooltips.
+var row = grid.Items.Add(new[] { "Renderer", "Healthy" });
+row.Name = "renderer";
+row.ToolTipText = "Skia render pipeline";
+row.ForeColor = new SKColor(34, 197, 94);
+
+grid.Items.Add("Layout Engine");            // single text cell
+if (grid.Items.ContainsKey("renderer"))
+    grid.Items["renderer"]!.Selected = true;
+
+grid.CellClick += (_, e) => Console.WriteLine($"{e.Item.Text} / {e.Column.Text}");
+grid.MouseDown += (_, e) =>
+{
+    var hit = grid.HitTest(e.Location);      // row / cell / header / check box / resize region
+    if (hit.Region == GridListHitTestRegion.Cell)
+        contextMenu.Show(grid.PointToScreen(e.Location));
+};
 window.Controls.Add(grid);
+```
+
+3b) ListBox and checked mode
+
+```csharp
+var list = new ListBox { Size = new SKSize(220, 260), SelectionMode = SelectionMode.MultiExtended };
+list.Items.AddRange("Alpha", "Beta", "Gamma");
+list.SelectedIndexChanged += (_, _) => Console.WriteLine(list.SelectedItem);
+
+var options = new ListBox { CheckBoxes = true, CheckOnClick = true };
+options.Items.AddRange("Auto save", "Telemetry", "Beta channel");
+options.SetItemChecked(0, true);
+options.ItemCheck += (_, e) => Console.WriteLine($"{options.Items[e.Index]} -> {e.NewValue}");
+```
+
+3c) PropertyGrid — edit any object
+
+```csharp
+var propertyGrid = new PropertyGrid
+{
+    Dock = DockStyle.Fill,
+    PropertySort = PropertySort.Categorized,
+    SelectedObject = appSettings          // [Category]/[Description]/[ReadOnly] honored
+};
+propertyGrid.PropertyValueChanged += (_, e) =>
+    Console.WriteLine($"{e.ChangedItem?.Name} changed (was {e.OldValue})");
+propertyGrid.ExpandAllGridItems();        // expand nested objects / collections
 ```
 
 4) DatePicker and TimePicker

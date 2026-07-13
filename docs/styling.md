@@ -286,7 +286,7 @@ Example:
 ```csharp
 var window = new Window
 {
-    Text = "Orivy Studio",
+    Text = "Orivy Settings",
     WindowThemeType = WindowThemeType.Mica
 };
 

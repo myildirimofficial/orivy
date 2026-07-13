@@ -115,10 +115,33 @@ See `Orivy/Controls/ElementBase.cs` for exact dispatch code (`OnMouseDown`, `OnM
   - `Badge` provides small status labels. To place a badge on a button, add it to `button.Controls`, use `Anchor` for the reference edge, and use `Location` for the offset. Negative or overflowing child bounds are included in visual overflow calculations so auto-sized parents do not cut overlays.
   - `Accordion` coordinates multiple `Collapse` items; `Collapse` provides a single animated disclosure region.
 
-- `GridList` (`Orivy/Controls/GridList.cs` + `GridList.Models.cs`)
-  - Data-driven list with virtualization-friendly patterns. Consult `GridList` source for model binding and cell measurement points.
+- `GridList` (`Orivy/Controls/GridList.cs` + `GridList.Models.cs`) — the ListView/DataGrid equivalent
+  - Columns (`GridListColumn`: `Text`, `Width`/`Min`/`Max`, `SizeMode` Fixed/Auto/Fill, `Sortable`, `Resizable`, `ShowCheckBox`, per-column `BackColor`/`ForeColor`) and rows (`GridListItem` with `Cells`).
+  - WinForms `ListViewItem` ergonomics on items: `Text`, `Index`, `Selected`, `Remove()`, `ToolTipText` (shown while the row is hovered), `Tag`, `BackColor`/`ForeColor`, `ResetStyle()`. Cells add `Value`, `CheckState`, `Icon`, and their own colors. Color precedence: cell > item > column > control; selection/hover always win for backgrounds.
+  - Collection ergonomics: `Items.Add(string | object | string[] | GridListItem)`, keyed access (`Items[key]`, `ContainsKey`, `IndexOfKey`, `RemoveByKey`), `Items.Move(from, to)`, and `item.Cells.AddRange(string[])`.
+  - Interaction: sorting, grouping with animated collapse, sticky header, column/row resize, multi-select, `MoveItem/MoveItemUp/MoveItemDown` (selection-preserving reorder), `HitTest(point)` returning `GridListHitTestInfo` (row/cell/header/check-box/resize region), `GetItemBounds`/`GetCellBounds`, and `PointToScreen`/`PointToClient` overloads (including `System.Drawing.Point`).
+  - Owner drawing: set `OwnerDraw = true` and handle `DrawItem`/`DrawSubItem`/`DrawColumnHeader`. Each event args exposes `e.DrawBackground()`, `e.DrawText()`, `e.DrawFocusRectangle()` helpers and a `DrawDefault` flag to fall back to built-in painting per part.
+  - Events: `SelectionChanged`, `SelectedIndexChanged`, `CellClick`, `CellCheckChanged`, `ColumnClick`.
 
-- `ComboBox`, `ScrollBar`, `MenuStrip`, `ContextMenuStrip` — controls follow the same `ElementBase` patterns (measure, arrange, paint, input). See each file for behavior specifics.
+- `ListBox` and `CheckedListBox` (`Orivy/Controls/ListBox.cs`, `CheckedListBox.cs`)
+  - WinForms-compatible surface: `Items` (with `AddRange`), `SelectedIndex/Item/Indices/Items`, `SelectionMode` (None/One/MultiSimple/MultiExtended), `ItemHeight`, `DisplayMember`, `TopIndex`, `FindString(Exact)`, `IndexFromPoint`, `BeginUpdate`/`EndUpdate`, `MoveItem/MoveItemUp/MoveItemDown`.
+  - Check-box mode: `CheckBoxes` + `CheckOnClick`, `GetItemChecked`/`SetItemChecked`, `CheckedItems`/`CheckedIndices`, cancelable `ItemCheck` and `ItemChecked` events. `CheckedListBox` is simply a `ListBox` preconfigured with `CheckBoxes = true`.
+  - Owner drawing: `DrawMode` (`OwnerDrawFixed`/`OwnerDrawVariable`) + `DrawItem` event with `DrawItemEventArgs` (canvas, bounds, state, `DrawBackground()` helper).
+
+- `PropertyGrid` (`Orivy/Controls/PropertyGrid.cs`) — WinForms PropertyGrid equivalent built on `GridList`
+  - `SelectedObject` reflects browsable properties, honoring `[Category]`, `[Description]`, `[DisplayName]`, `[ReadOnly]`, `[Browsable]`, and custom `TypeConverter`s (including `ExpandableObjectConverter`).
+  - `PropertySort` (Categorized/Alphabetical/NoSort) with animated expand/collapse chevrons for nested objects, collections, and arrays (elements shown as `[0]`, `[1]`, … and editable when the list is writable).
+  - Type-specific inline editors, all Orivy controls: `TextBox` (strings), `NumericUpDown` (numbers), drop-down picker (bool/enum), `DatePicker` (DateTime, calendar auto-opens), `ColorPicker` popup (`SKColor`/`System.Drawing.Color`). Enter/F2 edits the highlighted row; Esc cancels.
+  - Collection management: right-click a collection or element row for Add / Remove / Move up / Move down; programmatic access via `TryGetSelectedCollectionElement(out list, out index)` + `Refresh()` (keeps expansion while re-syncing rows). `ExpandAllGridItems()`/`CollapseAllGridItems()` mirror WinForms.
+  - Events: `PropertyValueChanged`, `SelectedObjectChanged`, `SelectedPropertyChanged` (pair with `SelectedPropertyDescription` for a help pane).
+
+- Dialogs
+  - Native file dialogs (`Orivy/Windowing/Desktop/Windows`): `FileSelectionDialog` (with `FileName` pre-fill), `SaveFileDialog`, `FolderSelectionDialog`, plus WinForms-style aliases `OpenFileDialog` (`Multiselect`, `FileNames`, `DialogResult` result) and `FolderBrowserDialog` (`SelectedPath`, `Description`). All file dialogs accept the WinForms pipe `Filter` string (`"Text files (*.txt)|*.txt|All files (*.*)|*.*"`).
+  - Orivy-rendered modal dialogs: `MessageBox`, `ColorDialog` (hosts `ColorPicker`, `Color` property), `FontDialog` (family/size/bold/italic with live preview, `Font` property). Both return `DialogResult` from `ShowDialog()`.
+
+- `TabView` — tabbed container with embedded/title-bar modes, horizontal/vertical layouts, scrollable tab strips, and `SelectedIndex`/`SelectedTab`/`SelectedIndexChanged`.
+
+- `ComboBox`, `ScrollBar`, `MenuStrip`, `ContextMenuStrip`, `TreeView`, `NumericUpDown`, `ColorPicker`, `SplitContainer`, `ProgressBar`, `TrackBar`, `SwitchButton` — controls follow the same `ElementBase` patterns (measure, arrange, paint, input). See each file for behavior specifics.
 
 ## Implementing a new control (step-by-step)
 

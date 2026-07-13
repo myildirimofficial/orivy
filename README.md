@@ -9,7 +9,8 @@ Orivy is a Windows-first retained-mode UI framework for .NET 8 built on top of S
 - state-driven styling through `ColorScheme` and `ConfigureVisualStyles(...)`
 - built-in animation, motion effects, and theme transitions
 - `Link(...)` data binding with `DataContext` and collection support
-- example app and studio app included in the solution
+- WinForms-compatible API surface (`DockStyle`, `AnchorStyles`, `DialogResult`, `Application`, common dialogs) to ease migration
+- example app and settings-preview app included in the solution
 
 ## Projects
 
@@ -17,7 +18,7 @@ Orivy is a Windows-first retained-mode UI framework for .NET 8 built on top of S
 | --- | --- |
 | `Orivy` | Core UI framework library |
 | `Orivy.Example` | Runnable sample app for controls, visual styles, binding, and rendering behavior |
-| `Orivy.Studio` | Experimental studio app built on the same framework |
+| `Orivy.SettingsPreview` | Small settings-window preview app built on the same framework |
 
 ## Quick Start
 
@@ -33,10 +34,10 @@ Run the example app:
 dotnet run --project Orivy.Example/Orivy.Example.csproj -c Debug
 ```
 
-Run the studio app:
+Run the settings-preview app:
 
 ```powershell
-dotnet run --project Orivy.Studio/Orivy.Studio.csproj -c Debug
+dotnet run --project Orivy.SettingsPreview/Orivy.SettingsPreview.csproj -c Debug
 ```
 
 ## Documentation
