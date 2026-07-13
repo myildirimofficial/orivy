@@ -395,9 +395,33 @@ public sealed class GridListItem
         };
     }
 
+    /// <summary>Creates an item with one text cell per string (WinForms ListViewItem(string[]) ergonomics).</summary>
+    public GridListItem(string?[] cells)
+    {
+        Cells = new GridListCellCollection(this);
+        if (cells != null)
+            Cells.AddRange(cells);
+    }
+
     internal GridList? Owner { get; private set; }
 
     public GridListCellCollection Cells { get; }
+
+    /// <summary>
+    /// The text of the first cell (WinForms ListViewItem.Text equivalent). Setting it creates the
+    /// first cell when the item is still empty.
+    /// </summary>
+    public string Text
+    {
+        get => Cells.Count > 0 ? Cells[0].Text : string.Empty;
+        set
+        {
+            if (Cells.Count == 0)
+                Cells.Add(new GridListCell { Text = value ?? string.Empty });
+            else
+                Cells[0].Text = value ?? string.Empty;
+        }
+    }
 
     public object? Tag { get; set; }
 

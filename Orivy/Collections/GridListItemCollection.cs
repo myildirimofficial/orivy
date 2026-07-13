@@ -104,6 +104,30 @@ public sealed class GridListItemCollection : Collection<GridListItem>
         Insert(toIndex, item);
     }
 
+    /// <summary>Adds an item with a single text cell and returns it (WinForms ListView.Items.Add ergonomics).</summary>
+    public GridListItem Add(string? text)
+    {
+        var item = new GridListItem(text ?? string.Empty);
+        Add(item);
+        return item;
+    }
+
+    /// <summary>Adds an item for an arbitrary value; its text is the value's string representation.</summary>
+    public GridListItem Add(object? value)
+    {
+        var item = new GridListItem(value?.ToString() ?? string.Empty) { Tag = value };
+        Add(item);
+        return item;
+    }
+
+    /// <summary>Adds an item with one text cell per string and returns it.</summary>
+    public GridListItem Add(string?[] cells)
+    {
+        var item = new GridListItem(cells ?? Array.Empty<string?>());
+        Add(item);
+        return item;
+    }
+
     /// <summary>Adds an item with the given key (Name) and a single text cell, and returns it.</summary>
     public GridListItem Add(string key, string text)
     {
