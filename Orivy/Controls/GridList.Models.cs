@@ -261,6 +261,43 @@ public sealed class GridListColumn
     [DefaultValue(true)]
     public bool ShowIcons { get; set; } = true;
 
+    private SKColor _columnBackColor = SKColor.Empty;
+
+    /// <summary>Optional background for every cell in this column. Empty = default.</summary>
+    public SKColor BackColor
+    {
+        get => _columnBackColor;
+        set
+        {
+            if (_columnBackColor == value)
+                return;
+            _columnBackColor = value;
+            Owner?.OnColumnsChanged(layoutAffected: false);
+        }
+    }
+
+    private SKColor _columnForeColor = SKColor.Empty;
+
+    /// <summary>Optional text color for every cell in this column. Cell/item colors still win. Empty = default.</summary>
+    public SKColor ForeColor
+    {
+        get => _columnForeColor;
+        set
+        {
+            if (_columnForeColor == value)
+                return;
+            _columnForeColor = value;
+            Owner?.OnColumnsChanged(layoutAffected: false);
+        }
+    }
+
+    /// <summary>Clears the custom colors so the column falls back to the grid's default styling.</summary>
+    public void ResetStyle()
+    {
+        BackColor = SKColor.Empty;
+        ForeColor = SKColor.Empty;
+    }
+
     [DefaultValue(ContentAlignment.MiddleLeft)]
     public ContentAlignment TextAlign
     {
@@ -365,7 +402,42 @@ public sealed class GridListCell
 
     public SKImage? Icon { get; set; }
 
-    public SKColor ForeColor { get; set; } = SKColor.Empty;
+    private SKColor _cellForeColor = SKColor.Empty;
+
+    /// <summary>Optional text color for this cell. Empty = inherit (item, then column, then control).</summary>
+    public SKColor ForeColor
+    {
+        get => _cellForeColor;
+        set
+        {
+            if (_cellForeColor == value)
+                return;
+            _cellForeColor = value;
+            ParentItem?.NotifyCellChanged(layoutAffected: false);
+        }
+    }
+
+    private SKColor _cellBackColor = SKColor.Empty;
+
+    /// <summary>Optional background for this cell. Empty = inherit (item, then column, then default).</summary>
+    public SKColor BackColor
+    {
+        get => _cellBackColor;
+        set
+        {
+            if (_cellBackColor == value)
+                return;
+            _cellBackColor = value;
+            ParentItem?.NotifyCellChanged(layoutAffected: false);
+        }
+    }
+
+    /// <summary>Clears the custom colors so the cell falls back to item/column/grid styling.</summary>
+    public void ResetStyle()
+    {
+        BackColor = SKColor.Empty;
+        ForeColor = SKColor.Empty;
+    }
 
     internal void AttachParent(GridListItem parent)
     {
@@ -509,6 +581,76 @@ public sealed class GridListItem
     }
 
     public SKImage? Icon { get; set; }
+
+    private SKColor _backColor = SKColor.Empty;
+
+    /// <summary>Optional row background (WinForms ListViewItem.BackColor). Empty = default.</summary>
+    public SKColor BackColor
+    {
+        get => _backColor;
+        set
+        {
+            if (_backColor == value)
+                return;
+            _backColor = value;
+            Owner?.OnItemsChanged(layoutAffected: false);
+        }
+    }
+
+    private SKColor _foreColor = SKColor.Empty;
+
+    /// <summary>
+    /// Optional row text color (WinForms ListViewItem.ForeColor). Empty = default. A cell's own
+    /// ForeColor still wins over this.
+    /// </summary>
+    public SKColor ForeColor
+    {
+        get => _foreColor;
+        set
+        {
+            if (_foreColor == value)
+                return;
+            _foreColor = value;
+            Owner?.OnItemsChanged(layoutAffected: false);
+        }
+    }
+
+    /// <summary>Tooltip shown while the mouse hovers this row (WinForms ListViewItem.ToolTipText).</summary>
+    public string ToolTipText { get; set; } = string.Empty;
+
+    /// <summary>The zero-based index of this item in its owning grid, or -1 when detached.</summary>
+    public int Index => Owner?.Items.IndexOf(this) ?? -1;
+
+    /// <summary>Gets or sets whether this row is selected (WinForms ListViewItem.Selected).</summary>
+    public bool Selected
+    {
+        get
+        {
+            var index = Index;
+            return index >= 0 && Owner!.IsItemSelected(index);
+        }
+        set
+        {
+            var index = Index;
+            if (index >= 0)
+                Owner!.SetItemSelected(index, value);
+        }
+    }
+
+    /// <summary>Removes this item from its owning grid (WinForms ListViewItem.Remove).</summary>
+    public void Remove()
+    {
+        var index = Index;
+        if (index >= 0)
+            Owner!.Items.RemoveAt(index);
+    }
+
+    /// <summary>Clears the custom colors so the row falls back to the grid's default styling.</summary>
+    public void ResetStyle()
+    {
+        BackColor = SKColor.Empty;
+        ForeColor = SKColor.Empty;
+    }
 
     internal void AttachOwner(GridList owner)
     {

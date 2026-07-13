@@ -256,6 +256,22 @@ internal sealed partial class GridListDemoPage : Container
         ConfigurePrimaryGridList(healthyIcon, warningIcon, lockedIcon, pulseIcon);
         ConfigureCompactGridList(healthyIcon, pulseIcon, warningIcon);
 
+        // Item / cell / column color showcase (WinForms ListViewItem.BackColor/ForeColor style):
+        // row 1 gets a full-row tint, row 2 highlights a single cell, and the "note" column text
+        // is dimmed column-wide (cell/item colors still win over the column color).
+        if (gridListCompact.Items.Count > 2)
+        {
+            gridListCompact.Items[0].ToolTipText = "Row tooltip: this feed watches repository commits.";
+            gridListCompact.Items[1].BackColor = new SKColor(59, 130, 246, 26);
+            gridListCompact.Items[1].ForeColor = new SKColor(59, 130, 246);
+
+            gridListCompact.Items[2].Cells[1].BackColor = new SKColor(245, 158, 11, 40);
+            gridListCompact.Items[2].Cells[1].ForeColor = new SKColor(245, 158, 11);
+        }
+
+        if (gridListCompact.Columns.Count > 2)
+            gridListCompact.Columns[2].ForeColor = ColorScheme.ForeColor.WithAlpha(150);
+
         gridListPrimary.SelectedIndex = 0;
         gridListCompact.SelectedIndex = 0;
         UpdateGridListButtons();

@@ -104,19 +104,33 @@ public sealed class GridListItemCollection : Collection<GridListItem>
         Insert(toIndex, item);
     }
 
+    /// <summary>
+    /// Adds an item. Redeclared so overload resolution keeps preferring this over the
+    /// <see cref="Add(object?)"/> convenience overload (members declared here hide the base
+    /// <c>Collection&lt;T&gt;.Add</c>, which otherwise made Add(item) bind to Add(object) and wrap
+    /// the item into a new one — or recurse).
+    /// </summary>
+    public new void Add(GridListItem item) => base.Add(item);
+
     /// <summary>Adds an item with a single text cell and returns it (WinForms ListView.Items.Add ergonomics).</summary>
     public GridListItem Add(string? text)
     {
         var item = new GridListItem(text ?? string.Empty);
-        Add(item);
+        base.Add(item);
         return item;
     }
 
     /// <summary>Adds an item for an arbitrary value; its text is the value's string representation.</summary>
     public GridListItem Add(object? value)
     {
+        if (value is GridListItem existing)
+        {
+            base.Add(existing);
+            return existing;
+        }
+
         var item = new GridListItem(value?.ToString() ?? string.Empty) { Tag = value };
-        Add(item);
+        base.Add(item);
         return item;
     }
 
@@ -124,7 +138,7 @@ public sealed class GridListItemCollection : Collection<GridListItem>
     public GridListItem Add(string?[] cells)
     {
         var item = new GridListItem(cells ?? Array.Empty<string?>());
-        Add(item);
+        base.Add(item);
         return item;
     }
 

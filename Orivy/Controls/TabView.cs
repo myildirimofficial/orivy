@@ -714,6 +714,29 @@ public partial class TabView : ElementBase
         return null;
     }
 
+    /// <summary>
+    /// Gets or sets the currently selected tab page (WinForms TabControl.SelectedTab equivalent).
+    /// Setting a page that is not part of this TabView is ignored.
+    /// </summary>
+    public ElementBase? SelectedTab
+    {
+        get => GetPageAt(_selectedIndex);
+        set
+        {
+            if (value == null)
+                return;
+
+            for (var i = 0; i < Count; i++)
+            {
+                if (ReferenceEquals(GetPageAt(i), value))
+                {
+                    SelectedIndex = i;
+                    return;
+                }
+            }
+        }
+    }
+
     public int SelectedIndex
     {
         get => _selectedIndex;

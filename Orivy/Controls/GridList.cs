@@ -56,6 +56,7 @@ public class GridList : ElementBase
     private int _hoveredHeaderResizeColumnIndex = -1;
     private int _hoveredGroupIndex = -1;
     private int _hoveredItemIndex = -1;
+    private bool _rowToolTipActive;
     private int _hoveredRowResizeIndex = -1;
     private float _horizontalOffset;
     private bool _isResizingColumn;
@@ -453,6 +454,11 @@ public class GridList : ElementBase
         _hoveredGroupIndex = -1;
         _hoveredItemIndex = -1;
         _hoveredRowResizeIndex = -1;
+        if (_rowToolTipActive)
+        {
+            ToolTipText = string.Empty;
+            _rowToolTipActive = false;
+        }
         Cursor = Cursors.Default;
         _vScrollBar?.SetHostHover(false);
         _hScrollBar?.SetHostHover(false);
@@ -508,6 +514,23 @@ public class GridList : ElementBase
         _hoveredGroupIndex = hoverInfo.GroupIndex;
         _hoveredItemIndex = hoverInfo.ItemIndex;
         _hoveredRowResizeIndex = hoverInfo.Kind == HitKind.RowResize ? hoverInfo.ItemIndex : -1;
+
+        // Surface the hovered row's ToolTipText through the element tooltip system. Only manage the
+        // control-level tooltip when a row supplies one, so a user-set grid tooltip is preserved.
+        var rowTip = hoverInfo.ItemIndex >= 0 && hoverInfo.ItemIndex < Items.Count
+            ? Items[hoverInfo.ItemIndex].ToolTipText
+            : string.Empty;
+        if (!string.IsNullOrEmpty(rowTip))
+        {
+            if (!string.Equals(ToolTipText, rowTip, StringComparison.Ordinal))
+                ToolTipText = rowTip;
+            _rowToolTipActive = true;
+        }
+        else if (_rowToolTipActive)
+        {
+            ToolTipText = string.Empty;
+            _rowToolTipActive = false;
+        }
         Cursor = hoverInfo.Kind switch
         {
             HitKind.HeaderResize => Cursors.SizeWE,
@@ -883,6 +906,39 @@ public class GridList : ElementBase
         }
 
         return -1;
+    }
+
+    internal bool IsItemSelected(int index) => _selectedIndices.Contains(index);
+
+    /// <summary>Adds/removes a single row to/from the selection (backs GridListItem.Selected).</summary>
+    internal void SetItemSelected(int index, bool selected)
+    {
+        if (index < 0 || index >= Items.Count || selected == _selectedIndices.Contains(index))
+            return;
+
+        var previous = _selectedIndex;
+
+        if (selected)
+        {
+            if (!MultiSelect)
+                _selectedIndices.Clear();
+            _selectedIndices.Add(index);
+            _selectedIndex = index;
+        }
+        else
+        {
+            _selectedIndices.Remove(index);
+            if (_selectedIndex == index)
+                _selectedIndex = _selectedIndices.Count > 0 ? _selectedIndices.First() : -1;
+        }
+
+        Invalidate();
+
+        if (previous != _selectedIndex)
+        {
+            SelectedIndexChanged?.Invoke(this, previous);
+            SelectionChanged?.Invoke(this, new GridListSelectionChangedEventArgs(previous, _selectedIndex));
+        }
     }
 
     private void SetSelectedIndexCore(int index, bool clearExisting, bool raiseEvent)
@@ -1523,6 +1579,7 @@ public class GridList : ElementBase
     {
         if (selected) { _fillPaint.Color = SelectionBackColor; canvas.DrawRect(bounds, _fillPaint); }
         else if (hovered) { _fillPaint.Color = HoverRowBackColor; canvas.DrawRect(bounds, _fillPaint); }
+        else if (Items[itemIndex].BackColor != SKColor.Empty) { _fillPaint.Color = Items[itemIndex].BackColor; canvas.DrawRect(bounds, _fillPaint); }
         else if ((itemIndex & 1) == 1) { _fillPaint.Color = AlternatingRowBackColor; canvas.DrawRect(bounds, _fillPaint); }
     }
 
@@ -1542,8 +1599,9 @@ public class GridList : ElementBase
             return;
 
         var contentRect = new SKRect(cellBounds.Left + CellPadding, cellBounds.Top, cellBounds.Right - CellPadding, cellBounds.Bottom);
-        var foreColor = cell != null && cell.ForeColor != SKColor.Empty
-            ? cell.ForeColor
+        var foreColor = cell != null && cell.ForeColor != SKColor.Empty ? cell.ForeColor
+            : item.ForeColor != SKColor.Empty ? item.ForeColor
+            : column.ForeColor != SKColor.Empty ? column.ForeColor
             : (item.Enabled ? ForeColor : ForeColor.WithAlpha(140));
         _textPaint.Color = foreColor;
         TextRenderer.DrawText(canvas, text, contentRect, _textPaint, font, alignment ?? column.CellTextAlign, true, false);
@@ -1627,6 +1685,11 @@ public class GridList : ElementBase
             _fillPaint.Color = WithOpacity(HoverRowBackColor, revealProgress);
             canvas.DrawRect(bounds, _fillPaint);
         }
+        else if (item.BackColor != SKColor.Empty)
+        {
+            _fillPaint.Color = WithOpacity(item.BackColor, revealProgress);
+            canvas.DrawRect(bounds, _fillPaint);
+        }
         else if ((itemIndex & 1) == 1)
         {
             _fillPaint.Color = WithOpacity(AlternatingRowBackColor, revealProgress);
@@ -1657,6 +1720,17 @@ public class GridList : ElementBase
                 }
             }
 
+            // Per-cell / per-column background (selection & hover keep the row-wide treatment).
+            if (!isSelected && !isHovered)
+            {
+                var cellBack = cell != null && cell.BackColor != SKColor.Empty ? cell.BackColor : column.BackColor;
+                if (cellBack != SKColor.Empty)
+                {
+                    _fillPaint.Color = WithOpacity(cellBack, revealProgress);
+                    canvas.DrawRect(cellRect, _fillPaint);
+                }
+            }
+
             if (ShouldShowCheckBox(column, layout.ColumnIndex))
             {
                 var checkboxRect = GetCheckBoxRect(contentRect);
@@ -1678,7 +1752,10 @@ public class GridList : ElementBase
 
             if (!string.IsNullOrEmpty(text))
             {
-                var foreColor = cell != null && cell.ForeColor != SKColor.Empty ? cell.ForeColor : (item.Enabled ? ForeColor : ForeColor.WithAlpha(140));
+                var foreColor = cell != null && cell.ForeColor != SKColor.Empty ? cell.ForeColor
+                    : item.ForeColor != SKColor.Empty ? item.ForeColor
+                    : column.ForeColor != SKColor.Empty ? column.ForeColor
+                    : (item.Enabled ? ForeColor : ForeColor.WithAlpha(140));
                 _textPaint.Color = WithOpacity(foreColor, revealProgress);
                 TextRenderer.DrawText(canvas, text, contentRect, _textPaint, font, column.CellTextAlign, true, false);
             }
