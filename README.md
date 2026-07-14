@@ -19,6 +19,7 @@ Orivy is a Windows-first retained-mode UI framework for .NET 8 built on top of S
 | `Orivy` | Core UI framework library |
 | `Orivy.Example` | Runnable sample app for controls, visual styles, binding, and rendering behavior |
 | `Orivy.SettingsPreview` | Small settings-window preview app built on the same framework |
+| `Orivy.Studio` | Figma-style visual designer: live WYSIWYG canvas, move/resize/snap, PropertyGrid editing, Designer-code export ([details](Orivy.Studio/README.md)) |
 
 ## Quick Start
 

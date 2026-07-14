@@ -858,6 +858,23 @@ public class GridList : ElementBase
         Invalidate();
     }
 
+    /// <summary>
+    /// Scrolls the grid so the specified item is visible.
+    /// </summary>
+    public void EnsureVisible(GridListItem item)
+    {
+        var index = Items.IndexOf(item);
+        EnsureItemVisible(index);
+    }
+
+    /// <summary>
+    /// Scrolls the grid so the item at the specified index is visible.
+    /// </summary>
+    public void EnsureVisible(int itemIndex)
+    {
+        EnsureItemVisible(itemIndex);
+    }
+
     private void ToggleSort(int columnIndex)
     {
         var column = GetColumn(columnIndex);
@@ -961,7 +978,7 @@ public class GridList : ElementBase
             _selectedIndices.Add(index);
 
         _selectedIndex = index;
-        EnsureSelectedItemVisible();
+        EnsureItemVisible(_selectedIndex);
         Invalidate();
 
         if (raiseEvent && previous != _selectedIndex)
@@ -971,16 +988,16 @@ public class GridList : ElementBase
         }
     }
 
-    private void EnsureSelectedItemVisible()
+    /// <summary>
+    /// Ensures the specified item index is visible in the viewport by scrolling if necessary.
+    /// </summary>
+    public void EnsureItemVisible(int itemIndex)
     {
-        if (_selectedIndex < 0)
-            return;
-
         EnsureLayoutState();
         for (var i = 0; i < _layoutEntries.Count; i++)
         {
             var entry = _layoutEntries[i];
-            if (entry.Kind != EntryKind.Item || entry.ItemIndex != _selectedIndex)
+            if (entry.Kind != EntryKind.Item || entry.ItemIndex != itemIndex)
                 continue;
 
             var itemTop = entry.Bounds.Top;

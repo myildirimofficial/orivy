@@ -439,6 +439,14 @@ public sealed class GridListCell
         ForeColor = SKColor.Empty;
     }
 
+    /// <summary>
+    /// Ensures the parent item of this cell is visible in the grid by scrolling if necessary.
+    /// </summary>
+    public void EnsureVisible()
+    {
+        ParentItem?.Owner?.EnsureVisible(ParentItem);
+    }
+
     internal void AttachParent(GridListItem parent)
     {
         ParentItem = parent;
@@ -650,6 +658,14 @@ public sealed class GridListItem
     {
         BackColor = SKColor.Empty;
         ForeColor = SKColor.Empty;
+    }
+
+    /// <summary>
+    /// Ensures this item is visible in its owning grid by scrolling if necessary.
+    /// </summary>
+    public void EnsureVisible()
+    {
+        Owner?.EnsureVisible(this);
     }
 
     internal void AttachOwner(GridList owner)
