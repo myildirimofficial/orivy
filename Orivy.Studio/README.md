@@ -10,14 +10,16 @@ The app is built as independent modules so features can grow without entangling 
 
 | Module | File(s) | Responsibility |
 | --- | --- | --- |
-| **Catalog** | `Toolbox/ControlCatalog.cs` | Reflection-based discovery of every instantiable `ElementBase` in Orivy.Controls. No static list — a new control appears automatically. |
+| **Catalog** | `Toolbox/ControlCatalog.cs` | Reflection-based discovery of every instantiable `ElementBase` in Orivy.Controls. No static list — a new control appears automatically. Frees placed controls from ctor `AutoSize` so the designer fully owns their bounds. |
 | **Selection** | `Canvas/SelectionService.cs` | Multi-selection state with a primary anchor; raises `Changed`. |
 | **History** | `History/CommandStack.cs` | Undo/redo command stack (`Execute` for new ops, `Push` for already-applied interactive edits). |
-| **Canvas Engine** | `DesignSurface.cs` | Zoom/pan viewport (rides `ChildRenderScale`), overlay input, selection adorners, grip resize, grid + smart-guide snapping, alignment/distribution, Z-order, preview mode. Every mutation is an undoable command. |
-| **Persistence** | `Persistence/DesignSerializer.cs` | Save/load the document as JSON (`.orivy.json`). |
+| **Canvas Engine** | `DesignSurface.cs` | Zoom/pan viewport (rides `ChildRenderScale`), overlay input, selection adorners, grip resize, grid + smart-guide snapping, alignment/distribution, Z-order, preview mode, external `DropAt`. Every mutation is an undoable command. |
+| **Documents** | `Documents/DesignDocument.cs` | One design document (a `Container` page hosting a surface) — the unit of the multi-document TabView. |
+| **Drag & drop** | `Canvas/DragLayer.cs` | Full-window capture overlay that ghosts a toolbox entry to the cursor and drops it on the active canvas. |
+| **Persistence** | `Persistence/DesignSerializer.cs` | Save/load the document as JSON (`.orivy.json`), including Dock/Anchor. |
 | **Export** | `CodeGenerator.cs` | Emits WinForms-style `InitializeComponent` Designer code. |
-| **UI panels** | `Panels/ToolboxPanel.cs`, `Panels/LayersPanel.cs` | Searchable categorized toolbox; layers outline with visibility/lock toggles. |
-| **Shell** | `StudioWindow.cs` | Toolbar + panel layout, wires all modules together. |
+| **UI panels** | `Panels/ToolboxPanel.cs` + `Panels/ToolboxList.cs`, `Panels/LayersPanel.cs`, `Panels/LayoutHelperBar.cs` | Owner-drawn categorized toolbox (glyph badges, search, double-click or drag); rebindable layers outline with visibility/lock; quick Dock/Anchor editors. |
+| **Shell** | `StudioWindow.cs` | Toolbar + an embedded-tab TabView of documents inside resizable `SplitContainer` columns (left \| canvas \| right); rebinds panels to the active document. |
 
 ```
 ┌ Toolbar · Undo/Redo · New/Open/Save · Export · Preview · Zoom · Snap/Guides/Theme ┐
@@ -45,13 +47,21 @@ marquee box-selection, multi-select move, 8-grip resize, arrow-key nudge, alignm
 distribution, bring-to-front/send-to-back, lock, per-control visibility, right-click context menu,
 and a **Preview** mode that makes the design fully interactive.
 
+**Toolbox** — every entry can be **double-clicked** or **dragged** onto the canvas; a ghost chip
+follows the cursor and the control drops where you release.
+
+**Multi-document** — the center is a TabView; **＋ Doc** opens another Window design and every panel
+(toolbox, layers, inspector, layout, history) rebinds to the active tab.
+
 **Inspector** — Orivy's own `PropertyGrid` edits the live control (color→ColorPicker,
-enum→drop-down, number→NumericUpDown, date→DatePicker). Edits are recorded as undoable commands.
+enum→drop-down, number→NumericUpDown, date→DatePicker), plus a quick **Dock/Anchor** helper bar.
+Every edit relayouts the canvas and is recorded as an undoable command.
 
-**History** — full undo/redo (Ctrl+Z / Ctrl+Y) over every add, delete, move, resize, reorder and
-property edit.
+**History** — full undo/redo (Ctrl+Z / Ctrl+Y) over every add, delete, move, resize, reorder,
+dock/anchor and property edit.
 
-**Files** — Save/Open JSON projects (`.orivy.json`), Export C# Designer code (preview + Save .cs).
+**Files** — Save/Open JSON projects (`.orivy.json`, Dock/Anchor preserved), Export C# Designer
+code (preview + Save .cs).
 
 ## Shortcuts
 
@@ -69,8 +79,8 @@ property edit.
 
 ## Roadmap
 
-- Container drop targets (design inside Card/Panel/TabView/SplitContainer children)
+- Container drop targets (design *inside* Card/Panel/TabView/SplitContainer children)
 - Rotation handles and design tokens / component variants
-- Dock/Anchor + Auto-Layout visual editors, responsive breakpoints
+- Auto-Layout (flex/grid) editors and responsive breakpoints
 - Round-trip code import and event-stub generation in the exporter
 - Assets/icons manager and a plugin system for custom design-time behaviors

@@ -1,7 +1,10 @@
 using Orivy;
 using Orivy.Controls;
+using Orivy.Studio.Canvas;
+using Orivy.Studio.Documents;
 using Orivy.Studio.Panels;
 using Orivy.Studio.Persistence;
+using Orivy.Studio.Toolbox;
 using Orivy.Windowing.Desktop.Windows;
 using SkiaSharp;
 using System;
@@ -10,212 +13,268 @@ using System.Linq;
 namespace Orivy.Studio;
 
 /// <summary>
-/// Orivy.Studio shell — Figma-style visual designer for Orivy.
-/// Layout: toolbar (undo/redo · file · export/preview · zoom · toggles · theme) on top, dynamic
-/// reflection-driven Toolbox on the left, infinite zoom/pan canvas in the middle, Layers +
-/// PropertyGrid inspector on the right, live status bar at the bottom.
+/// Orivy.Studio shell — Figma-style multi-document visual designer.
+/// Toolbar (undo/redo · file · export/preview · zoom · toggles · theme) on top, reflection-driven
+/// Toolbox on the left, a TabView of design documents in the middle, and Layers + Layout + a live
+/// PropertyGrid inspector on the right. The toolbox supports both double-click and drag-and-drop.
 /// </summary>
 public sealed class StudioWindow : Window
 {
-    private readonly DesignSurface _surface = new() { Dock = DockStyle.Fill };
-    private readonly ToolboxPanel _toolbox;
+    private readonly TabView _documents = new() { Dock = DockStyle.Fill };
+    private readonly ToolboxPanel _toolbox = new() { Dock = DockStyle.Fill };
     private readonly LayersPanel _layers;
     private readonly PropertyGrid _inspector = new() { Dock = DockStyle.Fill, PropertySort = PropertySort.Categorized };
+    private readonly LayoutHelperBar _layoutBar;
+    private readonly DragLayer _dragLayer = new();
 
     private readonly Button _undoButton = ToolButton("↶ Undo", 92);
     private readonly Button _redoButton = ToolButton("↷ Redo", 92);
     private readonly Button _previewButton = ToolButton("▶ Preview", 104);
     private readonly Element _zoomLabel;
-    private string? _projectPath;
+    private readonly Element _statusHost;
+
+    private DesignSurface _active = null!;
+    private int _documentCounter;
     private bool _suppressInspectorCommit;
 
     public StudioWindow()
     {
         Text = "Orivy Studio";
-        ClientSize = new SKSize(1380, 860);
+        ClientSize = new SKSize(1440, 900);
         MinimumSize = new SKSize(1024, 640);
         StartPosition = FormStartPosition.CenterScreen;
 
-        _toolbox = new ToolboxPanel { Dock = DockStyle.Fill };
-        _layers = new LayersPanel(_surface) { Dock = DockStyle.Top, Height = 240, Margin = new Thickness(0, 0, 0, 10) };
-
         _zoomLabel = new Element
         {
-            Text = "100%",
-            Dock = DockStyle.Left,
-            Width = 58,
-            BackColor = SKColors.Transparent,
-            Border = new Thickness(0),
-            Radius = new Radius(0),
+            Text = "100%", Dock = DockStyle.Left, Width = 58,
+            BackColor = SKColors.Transparent, Border = new Thickness(0), Radius = new Radius(0),
             TextAlign = ContentAlignment.MiddleCenter,
         };
+        _statusHost = new Element
+        {
+            Dock = DockStyle.Bottom, Height = 32, Padding = new Thickness(14, 0, 14, 0),
+            BackColor = ColorScheme.SurfaceContainer, ForeColor = ColorScheme.ForeColor.WithAlpha(190),
+            Border = new Thickness(0), Radius = new Radius(0), TextAlign = ContentAlignment.MiddleLeft,
+        };
+
+        // First document must exist before panels bind to it.
+        var firstDoc = NewDocument();
+        _active = firstDoc.Surface;
+        _layers = new LayersPanel(_active) { Dock = DockStyle.Top, Height = 230, Margin = new Thickness(0, 0, 0, 10) };
+        _layoutBar = new LayoutHelperBar(() => _active) { Dock = DockStyle.Top, Height = 92, Margin = new Thickness(0, 0, 0, 10) };
 
         BuildLayout();
-        WireEvents();
-        UpdateHistoryButtons();
-        UpdateStatus();
+        AttachSurface(_active);
+        WireShell();
+
+        _documents.SelectedTab = firstDoc;
+        SwitchActive(firstDoc.Surface);
 
         if (Environment.GetEnvironmentVariable("ORIVY_STUDIO_SEED") == "1")
             SeedDemoLayout();
-    }
-
-    /// <summary>Populates a small demo layout — used by automated UI verification.</summary>
-    private void SeedDemoLayout()
-    {
-        var catalog = Toolbox.ControlCatalog.Discover();
-        Toolbox.ControlEntry Entry(string name) => catalog.First(e => e.DisplayName == name);
-
-        var label = _surface.AddControl(Entry("Element"), new SKPoint(28, 28));
-        label.Text = "Sign in";
-        var user = _surface.AddControl(Entry("TextBox"), new SKPoint(28, 74));
-        var pass = _surface.AddControl(Entry("TextBox"), new SKPoint(28, 124));
-        var button = _surface.AddControl(Entry("Button"), new SKPoint(28, 178));
-        button.Text = "Continue";
-        _surface.Selection.SetMany(new[] { user, pass });
     }
 
     // ── Layout ───────────────────────────────────────────────────────────────
 
     private void BuildLayout()
     {
-        // Toolbar
         var toolbar = Panel(DockStyle.Top, height: 54);
         toolbar.Padding = new Thickness(10, 8, 10, 8);
 
-        var newButton = ToolButton("New", 66);
-        var openButton = ToolButton("Open…", 82);
-        var saveButton = ToolButton("Save", 70);
-        var exportButton = ToolButton("Export Code", 118);
+        var newDocButton = ToolButton("＋ Doc", 78);
+        var newButton = ToolButton("New", 62);
+        var openButton = ToolButton("Open…", 78);
+        var saveButton = ToolButton("Save", 66);
+        var exportButton = ToolButton("Export", 82);
         var zoomOut = ToolButton("−", 40);
         var zoomIn = ToolButton("+", 40);
-        var zoomFit = ToolButton("Fit", 56);
+        var zoomFit = ToolButton("Fit", 52);
+        var gridToggle = Toggle("Grid", true, 80);
         var snapToggle = Toggle("Snap", true, 84);
-        var guidesToggle = Toggle("Guides", true, 100);
-        var themeToggle = Toggle("Dark", ColorScheme.IsDarkMode, 84);
+        var guidesToggle = Toggle("Guides", true, 96);
+        var themeToggle = Toggle("Dark", ColorScheme.IsDarkMode, 82);
 
-        // Dock=Left stacks in reverse-add order; add right-to-left visual order accordingly.
         foreach (var c in new ElementBase[]
         {
-            themeToggle, guidesToggle, snapToggle,
+            themeToggle, guidesToggle, snapToggle, gridToggle,
             zoomFit, zoomIn, _zoomLabel, zoomOut,
             _previewButton, exportButton,
-            saveButton, openButton, newButton,
+            saveButton, openButton, newButton, newDocButton,
             _redoButton, _undoButton,
         })
         {
             toolbar.Controls.Add(c);
         }
 
-        // Left: toolbox
-        var left = Panel(DockStyle.Left, width: 230);
-        left.Controls.Add(_toolbox);
-        left.Controls.Add(Header("Toolbox — Orivy.Controls (auto-discovered)"));
+        // Embedded tab strip so document tabs actually render inside the control (the default
+        // TitleBar mode draws them in the window chrome, i.e. invisible here).
+        _documents.TabMode = TabViewMode.Embedded;
 
-        // Right: layers + inspector
-        var right = Panel(DockStyle.Right, width: 350);
-        right.Controls.Add(_inspector);
-        right.Controls.Add(Header("Properties"));
-        right.Controls.Add(_layers);
-        right.Controls.Add(Header("Layers"));
+        // Resizable three-column layout via nested SplitContainers: [ left | center | right ].
+        var outerSplit = new SplitContainer
+        {
+            Dock = DockStyle.Fill, Orientation = Orientation.Vertical,
+            SplitterDistance = 248f, SplitterWidth = 8f, PanelMinSize = 180f,
+        };
+        var innerSplit = new SplitContainer
+        {
+            Dock = DockStyle.Fill, Orientation = Orientation.Vertical,
+            SplitterDistance = 720f, SplitterWidth = 8f, PanelMinSize = 300f,
+        };
 
-        _statusInit(out var status);
-        Controls.Add(_surface);
-        Controls.Add(left);
-        Controls.Add(right);
+        StylePanel(outerSplit.Panel1);
+        StylePanel(innerSplit.Panel2);
+
+        outerSplit.Panel1.Controls.Add(_toolbox);
+        outerSplit.Panel1.Controls.Add(Header("Toolbox — Orivy.Controls (auto)"));
+
+        innerSplit.Panel1.Controls.Add(_documents);
+
+        innerSplit.Panel2.Controls.Add(_inspector);
+        innerSplit.Panel2.Controls.Add(Header("Properties"));
+        innerSplit.Panel2.Controls.Add(_layoutBar);
+        innerSplit.Panel2.Controls.Add(Header("Layout"));
+        innerSplit.Panel2.Controls.Add(_layers);
+        innerSplit.Panel2.Controls.Add(Header("Layers"));
+
+        outerSplit.Panel2.Controls.Add(innerSplit);
+
+        // Keep the right inspector a fixed width while the canvas absorbs horizontal growth.
+        innerSplit.SizeChanged += (_, _) =>
+        {
+            var target = innerSplit.Width - 360f - innerSplit.SplitterWidth;
+            if (target > 300f)
+                innerSplit.SplitterDistance = target;
+        };
+
+        Controls.Add(outerSplit);
         Controls.Add(toolbar);
-        Controls.Add(status);
+        Controls.Add(_statusHost);
+        Controls.Add(_dragLayer); // topmost; hidden until a drag begins
 
-        // Toolbar actions
-        newButton.Click += (_, _) => { _surface.ClearAll(); _projectPath = null; };
+        newDocButton.Click += (_, _) => { var d = NewDocument(); _documents.SelectedTab = d; SwitchActive(d.Surface); };
+        newButton.Click += (_, _) => _active.ClearAll();
         openButton.Click += (_, _) => OpenProject();
         saveButton.Click += (_, _) => SaveProject();
         exportButton.Click += (_, _) => ExportCode();
-        _undoButton.Click += (_, _) => _surface.Commands.Undo();
-        _redoButton.Click += (_, _) => _surface.Commands.Redo();
+        _undoButton.Click += (_, _) => _active.Commands.Undo();
+        _redoButton.Click += (_, _) => _active.Commands.Redo();
         _previewButton.Click += (_, _) => TogglePreview();
-        zoomOut.Click += (_, _) => _surface.Zoom /= 1.25f;
-        zoomIn.Click += (_, _) => _surface.Zoom *= 1.25f;
-        zoomFit.Click += (_, _) => _surface.FitToView();
-        snapToggle.CheckedChanged += (_, _) => { _surface.SnapToGrid = snapToggle.Checked; _surface.Invalidate(); };
-        guidesToggle.CheckedChanged += (_, _) => _surface.SmartGuides = guidesToggle.Checked;
+        zoomOut.Click += (_, _) => _active.Zoom /= 1.25f;
+        zoomIn.Click += (_, _) => _active.Zoom *= 1.25f;
+        zoomFit.Click += (_, _) => _active.FitToView();
+        gridToggle.CheckedChanged += (_, _) => _active.ShowGrid = gridToggle.Checked;
+        snapToggle.CheckedChanged += (_, _) => { _active.SnapToGrid = snapToggle.Checked; _active.Invalidate(); };
+        guidesToggle.CheckedChanged += (_, _) => _active.SmartGuides = guidesToggle.Checked;
         themeToggle.CheckedChanged += (_, _) => ColorScheme.SetThemeInstant(themeToggle.Checked);
     }
 
-    private Element _statusHost = null!;
-
-    private void _statusInit(out Element status)
+    private void WireShell()
     {
-        _statusHost = new Element
-        {
-            Dock = DockStyle.Bottom,
-            Height = 32,
-            Padding = new Thickness(14, 0, 14, 0),
-            BackColor = ColorScheme.SurfaceContainer,
-            ForeColor = ColorScheme.ForeColor.WithAlpha(190),
-            Border = new Thickness(0),
-            Radius = new Radius(0),
-            TextAlign = ContentAlignment.MiddleLeft,
-        };
-        status = _statusHost;
-    }
+        _toolbox.PlaceRequested += entry => _active.AddControl(entry);
+        _toolbox.DragStarted += (entry, screen) => _dragLayer.Begin(entry, screen);
 
-    private Element _statusRef => _statusHost;
-
-    // ── Wiring ───────────────────────────────────────────────────────────────
-
-    private void WireEvents()
-    {
-        _toolbox.PlaceRequested += entry => _surface.AddControl(entry);
-
-        _surface.Selection.Changed += () =>
+        _dragLayer.Dropped += (entry, screen) =>
         {
-            SetInspectorObject(_surface.ActiveObject);
-            UpdateStatus();
-        };
-        _surface.StructureChanged += () =>
-        {
-            SetInspectorObject(_surface.ActiveObject);
-            UpdateStatus();
-        };
-        _surface.SelectionBoundsChanged += () =>
-        {
-            _suppressInspectorCommit = true;
-            try { _inspector.Refresh(); }
-            finally { _suppressInspectorCommit = false; }
-            UpdateStatus();
-        };
-        _surface.ZoomChanged += () => _zoomLabel.Text = $"{_surface.Zoom * 100f:0}%";
-        _surface.Commands.Changed += () =>
-        {
-            UpdateHistoryButtons();
-            _layers.Rebuild();
+            var client = _active.PointToClient(screen);
+            if (client.X >= 0 && client.Y >= 0 && client.X <= _active.Width && client.Y <= _active.Height)
+                _active.DropAt(entry, client);
         };
 
-        // Inspector edits become undoable document commands.
+        _documents.SelectedIndexChanged += (_, _) =>
+        {
+            if (_documents.SelectedTab is DesignDocument doc)
+                SwitchActive(doc.Surface);
+        };
+
         _inspector.PropertyValueChanged += (_, e) =>
         {
-            if (!_suppressInspectorCommit && e.ChangedItem != null)
-                _surface.CommitPropertyEdit(e.ChangedItem, _inspector.SelectedObject!, e.OldValue);
-            _surface.Invalidate();
+            if (!_suppressInspectorCommit && e.ChangedItem != null && _inspector.SelectedObject != null)
+                _active.CommitPropertyEdit(e.ChangedItem, _inspector.SelectedObject, e.OldValue);
+            _active.RelayoutRoot();
             _layers.Rebuild();
+            _layoutBar.Refresh();
             UpdateStatus();
         };
 
-        // Global shortcuts (work regardless of focused panel).
         KeyDown += (_, e) =>
         {
             if (e.Handled || !e.Control)
                 return;
-
             switch (e.KeyCode)
             {
-                case Keys.Z: _surface.Commands.Undo(); e.Handled = true; break;
-                case Keys.Y: _surface.Commands.Redo(); e.Handled = true; break;
+                case Keys.Z: _active.Commands.Undo(); e.Handled = true; break;
+                case Keys.Y: _active.Commands.Redo(); e.Handled = true; break;
                 case Keys.S: SaveProject(); e.Handled = true; break;
             }
         };
+    }
 
-        SetInspectorObject(_surface.ActiveObject);
+    // ── Documents ──────────────────────────────────────────────────────────
+
+    private DesignDocument NewDocument()
+    {
+        _documentCounter++;
+        var doc = new DesignDocument($"Window{_documentCounter}");
+        _documents.Controls.Add(doc);
+        return doc;
+    }
+
+    private void SwitchActive(DesignSurface surface)
+    {
+        if (ReferenceEquals(_active, surface))
+        {
+            RefreshAllPanels();
+            return;
+        }
+
+        DetachSurface(_active);
+        _active = surface;
+        AttachSurface(_active);
+
+        _layers.Attach(_active);
+        _layoutBar.Refresh();
+        RefreshAllPanels();
+    }
+
+    private void AttachSurface(DesignSurface s)
+    {
+        s.Selection.Changed += OnSelectionChanged;
+        s.StructureChanged += OnStructureChanged;
+        s.SelectionBoundsChanged += OnBoundsChanged;
+        s.ZoomChanged += OnZoomChanged;
+        s.Commands.Changed += OnCommandsChanged;
+    }
+
+    private void DetachSurface(DesignSurface s)
+    {
+        s.Selection.Changed -= OnSelectionChanged;
+        s.StructureChanged -= OnStructureChanged;
+        s.SelectionBoundsChanged -= OnBoundsChanged;
+        s.ZoomChanged -= OnZoomChanged;
+        s.Commands.Changed -= OnCommandsChanged;
+    }
+
+    private void OnSelectionChanged() { SetInspectorObject(_active.ActiveObject); _layoutBar.Refresh(); UpdateStatus(); }
+    private void OnStructureChanged() { SetInspectorObject(_active.ActiveObject); UpdateStatus(); }
+    private void OnZoomChanged() => _zoomLabel.Text = $"{_active.Zoom * 100f:0}%";
+    private void OnCommandsChanged() { UpdateHistoryButtons(); _layers.Rebuild(); }
+
+    private void OnBoundsChanged()
+    {
+        _suppressInspectorCommit = true;
+        try { _inspector.Refresh(); }
+        finally { _suppressInspectorCommit = false; }
+        _layoutBar.Refresh();
+        UpdateStatus();
+    }
+
+    private void RefreshAllPanels()
+    {
+        SetInspectorObject(_active.ActiveObject);
+        UpdateHistoryButtons();
+        OnZoomChanged();
+        UpdateStatus();
     }
 
     private void SetInspectorObject(object target)
@@ -227,29 +286,29 @@ public sealed class StudioWindow : Window
 
     private void UpdateHistoryButtons()
     {
-        _undoButton.Enabled = _surface.Commands.CanUndo;
-        _redoButton.Enabled = _surface.Commands.CanRedo;
-        _undoButton.ToolTipText = _surface.Commands.UndoLabel ?? string.Empty;
-        _redoButton.ToolTipText = _surface.Commands.RedoLabel ?? string.Empty;
+        _undoButton.Enabled = _active.Commands.CanUndo;
+        _redoButton.Enabled = _active.Commands.CanRedo;
+        _undoButton.ToolTipText = _active.Commands.UndoLabel ?? string.Empty;
+        _redoButton.ToolTipText = _active.Commands.RedoLabel ?? string.Empty;
     }
 
     private void UpdateStatus()
     {
-        var count = _surface.DesignedControls.Count;
-        if (_surface.PreviewMode)
-            _statusRef.Text = "PREVIEW — controls are live. Click ⏹ Design to return.";
-        else if (_surface.Selection.Count > 1)
-            _statusRef.Text = $"{_surface.Selection.Count} selected · right-click for align/distribute · {count} control(s)";
-        else if (_surface.Selection.Primary is { } s)
-            _statusRef.Text = $"{s.Name} ({s.GetType().Name})   X={s.Location.X:0} Y={s.Location.Y:0}  W={s.Width:0} H={s.Height:0}   · {count} control(s)";
+        var count = _active.DesignedControls.Count;
+        if (_active.PreviewMode)
+            _statusHost.Text = "PREVIEW — controls are live. Click ⏹ Design to return.";
+        else if (_active.Selection.Count > 1)
+            _statusHost.Text = $"{_active.Selection.Count} selected · right-click for align/distribute · {count} control(s)";
+        else if (_active.Selection.Primary is { } s)
+            _statusHost.Text = $"{s.Name} ({s.GetType().Name})   X={s.Location.X:0} Y={s.Location.Y:0}  W={s.Width:0} H={s.Height:0}   · {count} control(s)";
         else
-            _statusRef.Text = $"Design root — {count} control(s) · double-click toolbox to add · Ctrl+wheel zoom · wheel pan · middle-drag pan";
+            _statusHost.Text = $"{count} control(s) · drag or double-click toolbox to add · Ctrl+wheel zoom · wheel/middle-drag pan";
     }
 
     private void TogglePreview()
     {
-        _surface.PreviewMode = !_surface.PreviewMode;
-        _previewButton.Text = _surface.PreviewMode ? "⏹ Design" : "▶ Preview";
+        _active.PreviewMode = !_active.PreviewMode;
+        _previewButton.Text = _active.PreviewMode ? "⏹ Design" : "▶ Preview";
         UpdateStatus();
     }
 
@@ -257,22 +316,26 @@ public sealed class StudioWindow : Window
 
     private void SaveProject()
     {
-        if (_projectPath == null)
+        var doc = _documents.SelectedTab as DesignDocument;
+        if (doc == null)
+            return;
+
+        if (doc.FilePath == null)
         {
             var dialog = new SaveFileDialog
             {
                 Title = "Save Orivy Studio project",
-                FileName = "design.orivy.json",
+                FileName = $"{doc.Text}.orivy.json",
                 Filter = "Orivy Studio project (*.orivy.json)|*.orivy.json|JSON (*.json)|*.json|All files (*.*)|*.*",
             };
             var path = dialog.ShowDialog(this);
             if (string.IsNullOrWhiteSpace(path))
                 return;
-            _projectPath = path;
+            doc.FilePath = path;
         }
 
-        System.IO.File.WriteAllText(_projectPath, DesignSerializer.Save(_surface));
-        _statusRef.Text = $"Saved → {_projectPath}";
+        System.IO.File.WriteAllText(doc.FilePath, DesignSerializer.Save(_active));
+        _statusHost.Text = $"Saved → {doc.FilePath}";
     }
 
     private void OpenProject()
@@ -282,20 +345,22 @@ public sealed class StudioWindow : Window
             Title = "Open Orivy Studio project",
             Filter = "Orivy Studio project (*.orivy.json;*.json)|*.orivy.json;*.json|All files (*.*)|*.*",
         };
-
-        var selectedFiles = dialog.ShowDialog(this);
-
-        if (selectedFiles.Length == 0)
+        var files = dialog.ShowDialog(this);
+        if (files.Length == 0)
             return;
 
         try
         {
-            var skipped = DesignSerializer.Load(_surface, System.IO.File.ReadAllText(dialog.FileName));
-            _projectPath = dialog.FileName;
-            _surface.NotifyStructureChanged();
-            _statusRef.Text = skipped.Count == 0
-                ? $"Opened {_projectPath}"
-                : $"Opened with {skipped.Count} unknown type(s) skipped: {string.Join(", ", skipped)}";
+            var target = NewDocument();
+            var skipped = DesignSerializer.Load(target.Surface, System.IO.File.ReadAllText(files[0]));
+            target.FilePath = files[0];
+            target.Text = System.IO.Path.GetFileNameWithoutExtension(files[0]);
+            _documents.SelectedTab = target;
+            SwitchActive(target.Surface);
+            target.Surface.NotifyStructureChanged();
+            _statusHost.Text = skipped.Count == 0
+                ? $"Opened {target.FilePath}"
+                : $"Opened; {skipped.Count} unknown type(s) skipped: {string.Join(", ", skipped)}";
         }
         catch (Exception ex)
         {
@@ -305,14 +370,15 @@ public sealed class StudioWindow : Window
 
     private void ExportCode()
     {
-        var code = CodeGenerator.Generate(_surface);
+        var code = CodeGenerator.Generate(_active,
+            (_documents.SelectedTab as DesignDocument)?.Text ?? "MyWindow");
+
         var preview = new Window
         {
             Text = "Generated Designer Code",
             ClientSize = new SKSize(760, 580),
             StartPosition = FormStartPosition.CenterScreen,
-            MinimizeBox = false,
-            MaximizeBox = false,
+            MinimizeBox = false, MaximizeBox = false,
         };
 
         var bar = new Element { Dock = DockStyle.Bottom, Height = 52, Padding = new Thickness(12, 10, 12, 10), BackColor = SKColors.Transparent, Border = new Thickness(0), Radius = new Radius(0) };
@@ -338,50 +404,55 @@ public sealed class StudioWindow : Window
         preview.ShowDialog();
     }
 
+    private void SeedDemoLayout()
+    {
+        var catalog = ControlCatalog.Discover();
+        ControlEntry Entry(string name) => catalog.First(e => e.DisplayName == name);
+
+        var label = _active.AddControl(Entry("Element"), new SKPoint(28, 28));
+        label.Text = "Sign in";
+        var user = _active.AddControl(Entry("TextBox"), new SKPoint(28, 74));
+        _active.AddControl(Entry("TextBox"), new SKPoint(28, 124));
+        var button = _active.AddControl(Entry("Button"), new SKPoint(28, 178));
+        button.Text = "Continue";
+        _active.Selection.SelectOnly(button);
+    }
+
     // ── UI factories ─────────────────────────────────────────────────────────
 
     private static Element Panel(DockStyle dock, int width = 0, int height = 0)
     {
         var panel = new Element
         {
-            Dock = dock,
-            BackColor = ColorScheme.SurfaceContainer,
-            Border = new Thickness(0),
-            Radius = new Radius(0),
-            Padding = new Thickness(10),
+            Dock = dock, BackColor = ColorScheme.SurfaceContainer,
+            Border = new Thickness(0), Radius = new Radius(0), Padding = new Thickness(10),
         };
         if (width > 0) panel.Width = width;
         if (height > 0) panel.Height = height;
         return panel;
     }
 
+    private static void StylePanel(Element panel)
+    {
+        panel.BackColor = ColorScheme.SurfaceContainer;
+        panel.Padding = new Thickness(10);
+    }
+
     private static Element Header(string text) => new()
     {
-        Text = text,
-        Dock = DockStyle.Top,
-        Height = 28,
-        BackColor = SKColors.Transparent,
-        ForeColor = ColorScheme.ForeColor.WithAlpha(170),
-        Border = new Thickness(0),
-        Radius = new Radius(0),
-        TextAlign = ContentAlignment.MiddleLeft,
-        Margin = new Thickness(2, 0, 0, 6),
+        Text = text, Dock = DockStyle.Top, Height = 26,
+        BackColor = SKColors.Transparent, ForeColor = ColorScheme.ForeColor.WithAlpha(170),
+        Border = new Thickness(0), Radius = new Radius(0), TextAlign = ContentAlignment.MiddleLeft,
+        Margin = new Thickness(2, 0, 0, 4),
     };
 
     private static Button ToolButton(string text, int width) => new()
     {
-        Text = text,
-        Dock = DockStyle.Left,
-        Width = width,
-        Margin = new Thickness(0, 0, 8, 0),
+        Text = text, Dock = DockStyle.Left, Width = width, Margin = new Thickness(0, 0, 8, 0),
     };
 
     private static CheckBox Toggle(string text, bool value, int width) => new()
     {
-        Text = text,
-        Checked = value,
-        Dock = DockStyle.Left,
-        Width = width,
-        Margin = new Thickness(4, 0, 4, 0),
+        Text = text, Checked = value, Dock = DockStyle.Left, Width = width, Margin = new Thickness(4, 0, 4, 0),
     };
 }

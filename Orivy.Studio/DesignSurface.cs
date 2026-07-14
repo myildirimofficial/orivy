@@ -148,6 +148,15 @@ public sealed class DesignSurface : Element
     public bool SnapToGrid { get; set; } = true;
     public bool SmartGuides { get; set; } = true;
 
+    private bool _showGrid = true;
+
+    /// <summary>Draws the design grid inside the root frame.</summary>
+    public bool ShowGrid
+    {
+        get => _showGrid;
+        set { _showGrid = value; Invalidate(); }
+    }
+
     private bool _previewMode;
 
     /// <summary>Preview mode hides the overlay: designed controls become fully interactive.</summary>
@@ -187,6 +196,7 @@ public sealed class DesignSurface : Element
     public ElementBase AddControl(ControlEntry entry, SKPoint? location = null)
     {
         var control = entry.CreateInstance();
+        PrepareForDesign(control);
         control.Name = MakeUniqueName(char.ToLowerInvariant(entry.DisplayName[0]) + entry.DisplayName[1..]);
         if (string.IsNullOrEmpty(control.Text))
             control.Text = control.Name;
@@ -201,6 +211,31 @@ public sealed class DesignSurface : Element
             () => { Selection.Remove(control); _root.Controls.Remove(control); Locked.Remove(control); AfterStructureChange(); }));
 
         return control;
+    }
+
+    /// <summary>Drops a toolbox entry at a point given in this surface's client (screen-derived) space.</summary>
+    public ElementBase DropAt(ControlEntry entry, SKPoint clientPoint)
+    {
+        // Convert client → logical child space (undo pan + zoom), then to root-relative.
+        var logical = new SKPoint(clientPoint.X / _zoom, clientPoint.Y / _zoom);
+        var rootRel = new SKPoint(logical.X - _root.Location.X, logical.Y - _root.Location.Y);
+
+        var size = entry.CreateInstance().Size; // default size to center the drop under the cursor
+        var target = new SKPoint(rootRel.X - size.Width / 2f, rootRel.Y - size.Height / 2f);
+        return AddControl(entry, target);
+    }
+
+    /// <summary>
+    /// Frees a control from content-driven auto-sizing so the designer fully owns its bounds. Many
+    /// Orivy controls (Button, CheckBox…) enable AutoSize=GrowOnly in their constructor, which is
+    /// exactly why their Location/Size would otherwise refuse to change on the canvas.
+    /// </summary>
+    public static void PrepareForDesign(ElementBase control)
+    {
+        control.AutoSize = false;
+        control.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        if (control.Dock == DockStyle.None)
+            control.Anchor = AnchorStyles.Top | AnchorStyles.Left;
     }
 
     public void DeleteSelection()
@@ -242,10 +277,13 @@ public sealed class DesignSurface : Element
                 continue;
 
             ControlCatalog.ApplyDesignDefaults(clone);
+            PrepareForDesign(clone);
             clone.Name = MakeUniqueName(source.GetType().Name.ToLowerInvariant());
             clone.Text = source.Text;
             clone.Size = source.Size;
             clone.BackColor = source.BackColor;
+            clone.Dock = source.Dock;
+            clone.Anchor = source.Anchor;
             clone.Location = new SKPoint(source.Location.X + 16f, source.Location.Y + 16f);
             clones.Add(clone);
         }
@@ -301,10 +339,18 @@ public sealed class DesignSurface : Element
     public void CommitPropertyEdit(System.ComponentModel.PropertyDescriptor descriptor, object component, object? oldValue)
     {
         var newValue = descriptor.GetValue(component);
+        RelayoutRoot();
         Commands.Push(new DelegateCommand(
             $"Edit {descriptor.Name}",
-            () => { descriptor.SetValue(component, newValue); AfterStructureChange(); },
-            () => { descriptor.SetValue(component, oldValue); AfterStructureChange(); }));
+            () => { descriptor.SetValue(component, newValue); RelayoutRoot(); AfterStructureChange(); },
+            () => { descriptor.SetValue(component, oldValue); RelayoutRoot(); AfterStructureChange(); }));
+    }
+
+    /// <summary>Forces the design root to re-run layout so Dock/Anchor/Size edits take effect immediately.</summary>
+    public void RelayoutRoot()
+    {
+        _root.PerformLayout();
+        Invalidate();
     }
 
     public void BringToFront(ElementBase control) => ShiftZ(control, +1_000, "Bring to front");
@@ -446,13 +492,26 @@ public sealed class DesignSurface : Element
         {
             base.OnPaint(canvas);
 
-            if (_s.SnapToGrid)
+            if (_s.ShowGrid)
             {
                 var r = SKRect.Create(Root.Location, Root.Size);
-                _grid.Color = ColorScheme.Outline.WithAlpha(55);
-                for (var y = r.Top + GridStep; y < r.Bottom; y += GridStep * 2)
-                    for (var x = r.Left + GridStep; x < r.Right; x += GridStep * 2)
-                        canvas.DrawRect(x, y, 1f, 1f, _grid);
+                var minor = GridStep;
+
+                // Minor lines.
+                _grid.Style = SKPaintStyle.Stroke;
+                _grid.StrokeWidth = 1f;
+                _grid.Color = ColorScheme.Outline.WithAlpha(34);
+                for (var x = r.Left + minor; x < r.Right; x += minor)
+                    canvas.DrawLine(x, r.Top, x, r.Bottom, _grid);
+                for (var y = r.Top + minor; y < r.Bottom; y += minor)
+                    canvas.DrawLine(r.Left, y, r.Right, y, _grid);
+
+                // Major lines every 5 cells for readability.
+                _grid.Color = ColorScheme.Outline.WithAlpha(70);
+                for (var x = r.Left + minor * 5; x < r.Right; x += minor * 5)
+                    canvas.DrawLine(x, r.Top, x, r.Bottom, _grid);
+                for (var y = r.Top + minor * 5; y < r.Bottom; y += minor * 5)
+                    canvas.DrawLine(r.Left, y, r.Right, y, _grid);
             }
 
             // Selection adorners.

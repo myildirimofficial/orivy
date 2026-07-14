@@ -13,7 +13,7 @@ namespace Orivy.Studio.Panels;
 /// </summary>
 public sealed class LayersPanel : Element
 {
-    private readonly DesignSurface _surface;
+    private DesignSurface _surface;
     private readonly GridList _list;
     private readonly List<ElementBase> _rows = new();
     private bool _syncing;
@@ -93,6 +93,22 @@ public sealed class LayersPanel : Element
 
         toFront.Click += (_, _) => { if (_surface.Selection.Primary is { } c) _surface.BringToFront(c); Rebuild(); };
         toBack.Click += (_, _) => { if (_surface.Selection.Primary is { } c) _surface.SendToBack(c); Rebuild(); };
+
+        _surface.StructureChanged += Rebuild;
+        _surface.Selection.Changed += SyncSelectionFromSurface;
+        Rebuild();
+    }
+
+    /// <summary>Rebinds this panel to a different document's surface (multi-document switching).</summary>
+    public void Attach(DesignSurface surface)
+    {
+        if (ReferenceEquals(_surface, surface))
+            return;
+
+        _surface.StructureChanged -= Rebuild;
+        _surface.Selection.Changed -= SyncSelectionFromSurface;
+
+        _surface = surface;
 
         _surface.StructureChanged += Rebuild;
         _surface.Selection.Changed += SyncSelectionFromSurface;

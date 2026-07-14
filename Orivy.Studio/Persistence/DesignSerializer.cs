@@ -29,6 +29,8 @@ public sealed class DesignDocumentDto
         public int Z { get; set; }
         public bool Visible { get; set; } = true;
         public bool Locked { get; set; }
+        public string Dock { get; set; } = "None";
+        public string Anchor { get; set; } = "Top, Left";
     }
 }
 
@@ -63,6 +65,8 @@ public static class DesignSerializer
                 Z = control.ZOrder,
                 Visible = control.Visible,
                 Locked = surface.Locked.Contains(control),
+                Dock = control.Dock.ToString(),
+                Anchor = control.Anchor.ToString(),
             });
         }
 
@@ -96,8 +100,13 @@ public static class DesignSerializer
             }
 
             var control = entry.CreateInstance();
+            DesignSurface.PrepareForDesign(control);
             control.Name = node.Name;
             control.Text = node.Text;
+            if (Enum.TryParse<DockStyle>(node.Dock, out var dock))
+                control.Dock = dock;
+            if (Enum.TryParse<AnchorStyles>(node.Anchor, out var anchor))
+                control.Anchor = anchor;
             control.Location = new SKPoint(node.X, node.Y);
             control.Size = new SKSize(node.W, node.H);
             control.ZOrder = node.Z;
