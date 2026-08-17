@@ -350,14 +350,14 @@ public class MenuItem
             height = Math.Max(height, imageHeight + Padding.Vertical);
         }
 
-        if (HasDropDown && ShowSubmenuArrow) width += 12; // Ok işareti için ekstra genişlik
+        if (HasDropDown && ShowSubmenuArrow) width += 12; // extra width for the submenu arrow
 
         if (ShortcutKeys != Keys.None)
         {
             var shortcutText = ShortcutKeys.ToString();
             var shortcutBounds = new SkiaSharp.SKRect();
             scaledFont.MeasureText(shortcutText, out shortcutBounds);
-            width += (int)shortcutBounds.Width + 20; // Kısayol tuşu için ekstra genişlik
+            width += (int)shortcutBounds.Width + 20; // extra width for the shortcut key
         }
 
         _size = new SKSize(width, height);

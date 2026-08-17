@@ -1021,9 +1021,9 @@ public class MenuStrip : ElementBase
         }
         else
         {
-            // Dikey menüler ve ContextMenuStrip için; separator'lar da
-            // ContextMenuStrip'teki satır yerleşimi ile aynı mantığı kullanmalı ki
-            // hover alanı ile çizim hizalı olsun.
+            // For vertical menus and ContextMenuStrip; separators must follow the same layout
+            // logic as ContextMenuStrip's row layout so the hover area stays aligned with the
+            // drawing.
             const float margin = 0f;
             var y = margin + _itemPadding;
             var w = b.Width - margin * 2 - _itemPadding * 2;
@@ -1038,7 +1038,7 @@ public class MenuStrip : ElementBase
 
                 if (item.IsSeparator)
                 {
-                    // İnce çizgi için küçük bir satır yüksekliği ayırıyoruz.
+                    // Reserve a small row height for the thin separator line.
                     var sepHeight = _separatorMargin * 2 + 1;
                     rects.Add(SKRect.Create(x, y, w, sepHeight));
                     y += sepHeight + _itemPadding;
@@ -1217,7 +1217,7 @@ public class MenuStrip : ElementBase
         else
             activeDropDown.ShowAnchoredBelow(this, itemBounds);
 
-        // İlk açılışta da her zaman en üst z-index'te olsun.
+        // Always stay at the topmost z-index on the initial open too.
         if (FindForm() is WindowBase uiw)
         {
             uiw.BringToFront(activeDropDown);

@@ -30,14 +30,14 @@ public sealed class LayersPanel : Element
         var buttons = new Element
         {
             Dock = DockStyle.Bottom,
-            Height = 38,
+            Height = 36,
             Padding = new Thickness(0, 6, 0, 0),
             BackColor = SKColors.Transparent,
             Border = new Thickness(0),
             Radius = new Radius(0),
         };
-        var toFront = new Button { Text = "▲ Front", Dock = DockStyle.Left, Width = 92, Margin = new Thickness(0, 0, 6, 0) };
-        var toBack = new Button { Text = "▼ Back", Dock = DockStyle.Left, Width = 92 };
+        var toFront = new ToolbarButton("bring-front", "Bring to front", 28f);
+        var toBack = new ToolbarButton("send-back", "Send to back", 28f);
         buttons.Controls.Add(toBack);
         buttons.Controls.Add(toFront);
 

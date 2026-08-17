@@ -391,6 +391,15 @@ public class TextBox : ElementBase
         EnsureCaretVisible();
     }
 
+    /// <summary>Returns the character index closest to <paramref name="point"/>,
+    /// given in control-local coordinates (e.g. from a <see cref="MouseEventArgs"/>).
+    /// The point is clamped to the text viewport, so positions outside the
+    /// control still resolve to the nearest valid index.</summary>
+    public virtual int GetCharIndexFromPosition(SKPoint point)
+    {
+        return GetTextIndexFromPoint(ClampTextInteractionPoint(point));
+    }
+
     public bool CanCopy()
     {
         return SelectionLength > 0;

@@ -1,5 +1,6 @@
 using Orivy;
 using Orivy.Controls;
+using Orivy.Helpers;
 using Orivy.Studio.Canvas;
 using Orivy.Studio.History;
 using Orivy.Studio.Toolbox;
@@ -27,7 +28,7 @@ public sealed class DesignSurface : Element
     private const float MinZoom = 0.25f;
     private const float MaxZoom = 4f;
 
-    private readonly Element _root;
+    private readonly DesignRootCanvas _root;
     private readonly DesignOverlay _overlay;
     private float _zoom = 1f;
     private int _nameCounter;
@@ -44,23 +45,25 @@ public sealed class DesignSurface : Element
 
     public DesignSurface()
     {
-        BackColor = ColorScheme.SurfaceContainerLow;
         Padding = new Thickness(0);
         Border = new Thickness(0);
         Radius = new Radius(0);
+        // Tint reactively (not via a snapshot BackColor=) so it follows live dark/light toggles.
+        ConfigureVisualStyles(styles => styles.Base(b => b.Background(ColorScheme.SurfaceContainerLow)));
 
-        _root = new Element
+        _root = new DesignRootCanvas(this)
         {
             Name = "designRoot",
             Text = string.Empty,
             Location = new SKPoint(48, 40),
             Size = new SKSize(640, 440),
-            BackColor = ColorScheme.Surface,
             Border = new Thickness(1),
-            BorderColor = ColorScheme.Outline.WithAlpha(140),
             Radius = new Radius(8),
             Padding = new Thickness(0),
         };
+        _root.ConfigureVisualStyles(styles => styles.Base(b => b
+            .Background(ColorScheme.Surface)
+            .BorderColor(ColorScheme.Outline.WithAlpha(140))));
 
         _overlay = new DesignOverlay(this)
         {
@@ -216,13 +219,45 @@ public sealed class DesignSurface : Element
     /// <summary>Drops a toolbox entry at a point given in this surface's client (screen-derived) space.</summary>
     public ElementBase DropAt(ControlEntry entry, SKPoint clientPoint)
     {
+        var size = entry.CreateInstance().Size; // default size to center the drop under the cursor
+        var target = DropTargetLocation(clientPoint, size);
+        ClearDropPreview();
+        return AddControl(entry, target);
+    }
+
+    private ControlEntry? _previewEntry;
+    private SKRect _previewRect;
+
+    /// <summary>
+    /// Shows a live ghost of where <paramref name="entry"/> would land if dropped at
+    /// <paramref name="clientPoint"/> right now — called continuously while a toolbox drag hovers
+    /// over the canvas, so the user sees the snapped placement before releasing.
+    /// </summary>
+    public void PreviewDrop(ControlEntry entry, SKPoint clientPoint)
+    {
+        var size = ControlCatalog.DefaultSizeFor(entry);
+        var location = DropTargetLocation(clientPoint, size);
+        _previewEntry = entry;
+        _previewRect = SKRect.Create(location, size);
+        Invalidate();
+    }
+
+    /// <summary>Hides the drop ghost (drag left the canvas, was dropped, or was cancelled).</summary>
+    public void ClearDropPreview()
+    {
+        if (_previewEntry == null)
+            return;
+        _previewEntry = null;
+        Invalidate();
+    }
+
+    /// <summary>Snapped, root-relative top-left for a <paramref name="size"/>d control centered under a client-space point.</summary>
+    private SKPoint DropTargetLocation(SKPoint clientPoint, SKSize size)
+    {
         // Convert client → logical child space (undo pan + zoom), then to root-relative.
         var logical = new SKPoint(clientPoint.X / _zoom, clientPoint.Y / _zoom);
         var rootRel = new SKPoint(logical.X - _root.Location.X, logical.Y - _root.Location.Y);
-
-        var size = entry.CreateInstance().Size; // default size to center the drop under the cursor
-        var target = new SKPoint(rootRel.X - size.Width / 2f, rootRel.Y - size.Height / 2f);
-        return AddControl(entry, target);
+        return new SKPoint(Snap(rootRel.X - size.Width / 2f), Snap(rootRel.Y - size.Height / 2f));
     }
 
     /// <summary>
@@ -338,12 +373,25 @@ public sealed class DesignSurface : Element
     /// <summary>Records an already-applied property edit (from the inspector) as undoable.</summary>
     public void CommitPropertyEdit(System.ComponentModel.PropertyDescriptor descriptor, object component, object? oldValue)
     {
-        var newValue = descriptor.GetValue(component);
+        object? newValue;
+        try { newValue = descriptor.GetValue(component); }
+        catch { return; }
+
         RelayoutRoot();
         Commands.Push(new DelegateCommand(
             $"Edit {descriptor.Name}",
-            () => { descriptor.SetValue(component, newValue); RelayoutRoot(); AfterStructureChange(); },
-            () => { descriptor.SetValue(component, oldValue); RelayoutRoot(); AfterStructureChange(); }));
+            () => { TrySetValue(descriptor, component, newValue); RelayoutRoot(); AfterStructureChange(); },
+            () => { TrySetValue(descriptor, component, oldValue); RelayoutRoot(); AfterStructureChange(); }));
+    }
+
+    /// <summary>
+    /// Property setters are reached through reflection from the inspector; a bad value or a
+    /// control-specific validation failure must not crash the designer or corrupt the undo stack.
+    /// </summary>
+    private static void TrySetValue(System.ComponentModel.PropertyDescriptor descriptor, object component, object? value)
+    {
+        try { descriptor.SetValue(component, value); }
+        catch { /* keep the previous value in place */ }
     }
 
     /// <summary>Forces the design root to re-run layout so Dock/Anchor/Size edits take effect immediately.</summary>
@@ -459,6 +507,51 @@ public sealed class DesignSurface : Element
 
     public enum AlignKind { Left, CenterH, Right, Top, CenterV, Bottom }
 
+    /// <summary>
+    /// The designed "page" itself. Draws the reference grid as part of its own background — i.e.
+    /// BEFORE its children render — so placed controls sit visually on top of the grid instead of
+    /// the grid being painted over them by the (necessarily topmost, input-owning) overlay.
+    /// </summary>
+    private sealed class DesignRootCanvas : Element
+    {
+        private readonly DesignSurface _s;
+        private readonly SKPaint _grid = new() { IsAntialias = false, Style = SKPaintStyle.Stroke };
+
+        public DesignRootCanvas(DesignSurface surface) => _s = surface;
+
+        public override void OnPaint(SKCanvas canvas)
+        {
+            base.OnPaint(canvas);
+
+            if (!_s.ShowGrid)
+                return;
+
+            var r = new SKRect(0, 0, Width, Height);
+            var minor = GridStep;
+
+            _grid.StrokeWidth = 1f;
+            _grid.Color = ColorScheme.Outline.WithAlpha(34);
+            for (var x = r.Left + minor; x < r.Right; x += minor)
+                canvas.DrawLine(x, r.Top, x, r.Bottom, _grid);
+            for (var y = r.Top + minor; y < r.Bottom; y += minor)
+                canvas.DrawLine(r.Left, y, r.Right, y, _grid);
+
+            // Major lines every 5 cells for readability.
+            _grid.Color = ColorScheme.Outline.WithAlpha(70);
+            for (var x = r.Left + minor * 5; x < r.Right; x += minor * 5)
+                canvas.DrawLine(x, r.Top, x, r.Bottom, _grid);
+            for (var y = r.Top + minor * 5; y < r.Bottom; y += minor * 5)
+                canvas.DrawLine(r.Left, y, r.Right, y, _grid);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+                _grid.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
     // ═════════════════════════ Overlay ══════════════════════════════════════
 
     private enum Grip
@@ -479,8 +572,9 @@ public sealed class DesignSurface : Element
 
         private readonly SKPaint _stroke = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.4f };
         private readonly SKPaint _fill = new() { IsAntialias = true };
-        private readonly SKPaint _grid = new() { IsAntialias = false };
         private readonly SKPaint _guide = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1f };
+        private readonly SKPathEffect _previewDash = SKPathEffect.CreateDash(new[] { 5f, 4f }, 0f);
+        private readonly SKFont _labelFont = Application.DefaultFont;
 
         public DesignOverlay(DesignSurface surface) => _s = surface;
 
@@ -492,26 +586,27 @@ public sealed class DesignSurface : Element
         {
             base.OnPaint(canvas);
 
-            if (_s.ShowGrid)
+            // Live drop ghost — where a toolbox entry would land if released right now.
+            if (_s._previewEntry is { } previewEntry)
             {
-                var r = SKRect.Create(Root.Location, Root.Size);
-                var minor = GridStep;
+                var pr = _s._previewRect;
+                var overlayRect = SKRect.Create(Root.Location.X + pr.Left, Root.Location.Y + pr.Top, pr.Width, pr.Height);
 
-                // Minor lines.
-                _grid.Style = SKPaintStyle.Stroke;
-                _grid.StrokeWidth = 1f;
-                _grid.Color = ColorScheme.Outline.WithAlpha(34);
-                for (var x = r.Left + minor; x < r.Right; x += minor)
-                    canvas.DrawLine(x, r.Top, x, r.Bottom, _grid);
-                for (var y = r.Top + minor; y < r.Bottom; y += minor)
-                    canvas.DrawLine(r.Left, y, r.Right, y, _grid);
+                _fill.Color = ColorScheme.Primary.WithAlpha(38);
+                canvas.DrawRoundRect(overlayRect, 6f, 6f, _fill);
 
-                // Major lines every 5 cells for readability.
-                _grid.Color = ColorScheme.Outline.WithAlpha(70);
-                for (var x = r.Left + minor * 5; x < r.Right; x += minor * 5)
-                    canvas.DrawLine(x, r.Top, x, r.Bottom, _grid);
-                for (var y = r.Top + minor * 5; y < r.Bottom; y += minor * 5)
-                    canvas.DrawLine(r.Left, y, r.Right, y, _grid);
+                _stroke.Color = ColorScheme.Primary.WithAlpha(210);
+                _stroke.PathEffect = _previewDash;
+                canvas.DrawRoundRect(overlayRect, 6f, 6f, _stroke);
+                _stroke.PathEffect = null;
+
+                var label = previewEntry.DisplayName;
+                var textWidth = _labelFont.MeasureText(label);
+                var chip = SKRect.Create(overlayRect.Left, overlayRect.Top - 24f, textWidth + 16f, 19f);
+                _fill.Color = ColorScheme.Primary;
+                canvas.DrawRoundRect(chip, 4f, 4f, _fill);
+                _fill.Color = SKColors.White;
+                TextRenderer.DrawText(canvas, label, chip.Left + 8f, chip.MidY + _labelFont.Size * 0.35f, _labelFont, _fill);
             }
 
             // Selection adorners.
@@ -673,6 +768,14 @@ public sealed class DesignSurface : Element
             Release();
             Invalidate();
         }
+
+        /// <summary>
+        /// This overlay drives pan/zoom straight off the wheel instead of the built-in
+        /// scrollbar-backed AutoScroll path, so it must opt in explicitly — otherwise
+        /// <c>ElementBase</c>'s wheel routing never considers it a wheel target and
+        /// <see cref="OnMouseWheel"/> below is never actually invoked.
+        /// </summary>
+        protected override bool HandlesMouseWheelInput => true;
 
         public override void OnMouseWheel(MouseEventArgs e)
         {
@@ -866,8 +969,8 @@ public sealed class DesignSurface : Element
 
             if (hasSelection)
             {
-                menu.AddItem(new MenuItem("Duplicate\tCtrl+D", (_, _) => _s.DuplicateSelection()));
-                menu.AddItem(new MenuItem("Delete\tDel", (_, _) => _s.DeleteSelection()));
+                menu.AddItem(new MenuItem("Duplicate", (_, _) => _s.DuplicateSelection()) { ShortcutKeys = Keys.Control | Keys.D });
+                menu.AddItem(new MenuItem("Delete", (_, _) => _s.DeleteSelection()) { ShortcutKeys = Keys.Delete });
                 if (single != null)
                 {
                     menu.AddItem(new MenuItem("Bring to front", (_, _) => _s.BringToFront(single)));
@@ -894,7 +997,7 @@ public sealed class DesignSurface : Element
             }
             else
             {
-                menu.AddItem(new MenuItem("Select all\tCtrl+A", (_, _) => _s.Selection.SetMany(_s.DesignedControls)));
+                menu.AddItem(new MenuItem("Select all", (_, _) => _s.Selection.SetMany(_s.DesignedControls)) { ShortcutKeys = Keys.Control | Keys.A });
                 menu.AddItem(new MenuItem("Fit to view", (_, _) => _s.FitToView()));
             }
 
@@ -986,8 +1089,9 @@ public sealed class DesignSurface : Element
             {
                 _stroke.Dispose();
                 _fill.Dispose();
-                _grid.Dispose();
                 _guide.Dispose();
+                _previewDash.Dispose();
+                _labelFont.Dispose();
             }
 
             base.Dispose(disposing);

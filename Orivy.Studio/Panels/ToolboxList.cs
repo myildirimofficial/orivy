@@ -17,8 +17,8 @@ namespace Orivy.Studio.Panels;
 /// </summary>
 public sealed class ToolboxList : Element
 {
-    private const float HeaderHeight = 26f;
-    private const float RowHeight = 34f;
+    private const float HeaderHeight = 22f;
+    private const float RowHeight = 32f;
     private const float DragThreshold = 5f;
 
     private abstract record Row(float Height);
@@ -42,13 +42,23 @@ public sealed class ToolboxList : Element
 
     public ToolboxList()
     {
-        BackColor = ColorScheme.Surface;
         Border = new Thickness(1);
-        BorderColor = ColorScheme.Outline.WithAlpha(60);
         Radius = new Radius(12);
         Padding = new Thickness(0);
         _baseFontSize = _font.Size;
+
+        // Reactive tint (re-evaluated on every theme change) instead of a frozen BackColor snapshot.
+        ConfigureVisualStyles(styles => styles.Base(b => b
+            .Background(ColorScheme.Surface)
+            .BorderColor(ColorScheme.Outline.WithAlpha(60))));
     }
+
+    /// <summary>
+    /// This list manages its own scroll offset (<see cref="_scroll"/>) instead of the built-in
+    /// scrollbar-backed AutoScroll path, so it must opt in explicitly — otherwise
+    /// <c>ElementBase</c>'s wheel routing never considers it a wheel target at all.
+    /// </summary>
+    protected override bool HandlesMouseWheelInput => true;
 
     public event Action<ControlEntry>? PlaceRequested;
     public event Action<ControlEntry, SKPoint>? DragStarted;
@@ -123,15 +133,22 @@ public sealed class ToolboxList : Element
         }
     }
 
+    // Every other control renders text via CreateRenderFont, which converts the nominal point size
+    // to actual pixels through the framework's Topx() (× 1.333 × DPI ScaleFactor) — this custom-drawn
+    // list never went through that path, so its text rendered ~25% smaller than everywhere else in
+    // the app for the exact same nominal Font.Size. Applying Topx() here matches it for real instead
+    // of just nudging the point size up.
+    private float Px(float pointSize) => pointSize.Topx(this);
+
     private void PaintRow(SKCanvas canvas, int index, Row row, SKRect rect)
     {
         if (row is HeaderRow header)
         {
-            _font.Size = _baseFontSize - 1.5f;
-            _text.Color = ColorScheme.ForeColor.WithAlpha(120);
+            _font.Size = Px(_baseFontSize - 1f);
+            _text.Color = ColorScheme.ForeColor.WithAlpha(130);
             TextRenderer.DrawText(canvas, header.Category.ToUpperInvariant(),
                 rect.Left + 8f, rect.MidY + _font.Size * 0.35f, _font, _text);
-            _font.Size = _baseFontSize;
+            _font.Size = Px(_baseFontSize);
             return;
         }
 
@@ -157,16 +174,18 @@ public sealed class ToolboxList : Element
         _fill.Color = CategoryColor(entry.Category).WithAlpha((byte)(selected ? 235 : 210));
         canvas.DrawRoundRect(badge, 6f, 6f, _fill);
 
-        _font.Size = _baseFontSize - 1f;
+        _font.Size = Px(_baseFontSize - 1f);
         _text.Color = SKColors.White;
         var glyph = entry.DisplayName[..1].ToUpperInvariant();
         var gw = _font.MeasureText(glyph);
         TextRenderer.DrawText(canvas, glyph, badge.MidX - gw / 2f, badge.MidY + _font.Size * 0.35f, _font, _text);
-        _font.Size = _baseFontSize;
+        _font.Size = Px(_baseFontSize);
 
-        // Name.
+        // Name — a touch larger than the base UI font so entries read clearly in a scannable list.
+        _font.Size = Px(_baseFontSize + 1f);
         _text.Color = selected ? ColorScheme.Primary : ColorScheme.ForeColor;
         TextRenderer.DrawText(canvas, entry.DisplayName, badge.Right + 10f, rect.MidY + _font.Size * 0.35f, _font, _text);
+        _font.Size = Px(_baseFontSize);
     }
 
     private static SKColor CategoryColor(string category) => category switch

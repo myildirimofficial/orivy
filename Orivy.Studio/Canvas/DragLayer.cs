@@ -19,6 +19,7 @@ public sealed class DragLayer : Element
 
     private readonly SKPaint _chipFill = new() { IsAntialias = true };
     private readonly SKPaint _chipText = new() { IsAntialias = true };
+    private readonly SKFont _font = Application.DefaultFont;
 
     public DragLayer()
     {
@@ -34,6 +35,9 @@ public sealed class DragLayer : Element
 
     /// <summary>Raised on drop with the dragged entry and the drop point in screen coordinates.</summary>
     public event Action<ControlEntry, SKPoint>? Dropped;
+
+    /// <summary>Raised on every pointer move while a drag is in progress (entry, screen point).</summary>
+    public event Action<ControlEntry, SKPoint>? Dragging;
 
     public bool IsDragging => _entry != null;
 
@@ -53,6 +57,7 @@ public sealed class DragLayer : Element
         if (!IsDragging)
             return;
         _ghost = e.Location;
+        Dragging?.Invoke(_entry!, PointToScreen(e.Location));
         Invalidate();
     }
 
@@ -83,8 +88,7 @@ public sealed class DragLayer : Element
             return;
 
         var label = _entry.DisplayName;
-        using var font = Application.DefaultFont;
-        var textWidth = font.MeasureText(label);
+        var textWidth = _font.MeasureText(label);
         var padding = 12f;
         var chip = SKRect.Create(_ghost.X + 14f, _ghost.Y + 10f, textWidth + padding * 2f, 30f);
 
@@ -92,8 +96,8 @@ public sealed class DragLayer : Element
         canvas.DrawRoundRect(chip, 8f, 8f, _chipFill);
 
         _chipText.Color = SKColors.White;
-        var baseline = chip.MidY + font.Size * 0.35f;
-        TextRenderer.DrawText(canvas, label, chip.Left + padding, baseline, font, _chipText);
+        var baseline = chip.MidY + _font.Size * 0.35f;
+        TextRenderer.DrawText(canvas, label, chip.Left + padding, baseline, _font, _chipText);
     }
 
     protected override void Dispose(bool disposing)
@@ -102,6 +106,7 @@ public sealed class DragLayer : Element
         {
             _chipFill.Dispose();
             _chipText.Dispose();
+            _font.Dispose();
         }
 
         base.Dispose(disposing);

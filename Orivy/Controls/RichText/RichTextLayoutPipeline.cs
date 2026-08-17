@@ -1,30 +1,30 @@
 // SPDX-License-Identifier: MIT
 // Orivy RichText — RichTextLayoutPipeline
 //
-// v5.1: Tam çalışan layout + draw pipeline.
+// v5.1: Fully working layout + draw pipeline.
 //
-// PROBLEM (v5.0): DrawRichTextContent stub olduğu için modlu modlarda
-// (MarkdownSource, MarkdownPreview, Rtf) HİÇBİR ŞEY çizilmiyordu. Plain
-// mod dışında kullanıcı yazılan metni göremiyordu.
+// PROBLEM (v5.0): because DrawRichTextContent was a stub, NOTHING was drawn in the
+// moded modes (MarkdownSource, MarkdownPreview, Rtf). Outside Plain mode, users
+// couldn't see the text they typed.
 //
-// ÇÖZÜM (v5.1): Kendi layout + draw pipeline'ımız. Base TextBox'ın
-// `_lines`, `_lineHeight`, `_baselineOffset`, `BuildTextLayout`,
+// SOLUTION (v5.1): our own layout + draw pipeline. An INDEPENDENT alternative to
+// the base TextBox's `_lines`, `_lineHeight`, `_baselineOffset`, `BuildTextLayout`,
 // `DrawTextContent`, `MeasureTextWidth`, `GetLineText`, `GetTextViewport`,
 // `GetVerticalScrollOffset`, `GetContentTopInset`, `_placeholderText`,
-// `_placeholderPaint`, `_textPaint` üyelerine BAĞIMSIZ alternative.
+// `_placeholderPaint`, `_textPaint` members.
 //
-// Bu sınıf, RichTextBox tarafından kullanılır. Base TextBox üyelerine
-// ERFİYOR — sadece şu public/protected üyelere ihtiyaç duyar:
+// This class is used by RichTextBox. It REACHES into base TextBox members — it
+// only needs the following public/protected members:
 //   - Text, Font, ForeColor, Focused, Enabled
 //   - DisplayRectangle (SKRect)
 //   - ScaleFactor (float)
-//   - AutoScrollMinSize (SKSize) — set edilebilir
+//   - AutoScrollMinSize (SKSize) — must be settable
 //   - UpdateScrollBars() — protected internal
-//   - _vScrollBar, _hScrollBar (protected internal field'lar)
+//   - _vScrollBar, _hScrollBar (protected internal fields)
 //
-// Eğer bu üyeler private ise, RichTextBox'ın OnPaint'inde bu sınıfı
-// çağırmadan önce mevcut base.OnPaint çağrılmalı ve base class'ın layout'ı
-// kullanılmalı (PLAIN mod için). Modlu modlarda bu pipeline devreye girer.
+// If these members are private, RichTextBox's OnPaint must call the existing
+// base.OnPaint and use the base class's layout (for PLAIN mode) before calling
+// into this class. This pipeline takes over in the moded modes.
 
 using System;
 using System.Collections.Generic;
@@ -32,8 +32,8 @@ using SkiaSharp;
 
 namespace Orivy.Controls.RichText;
 
-/// <summary>Satır layout bilgisi. Mevcut TextBox'ın TextLineLayout struct'ının
-/// aynısı — ama run-aware ölçüm ile doldurulur.</summary>
+/// <summary>Line layout info. Identical to the existing TextBox's TextLineLayout
+/// struct — but populated using run-aware measurement.</summary>
 public readonly struct RichTextLineLayout
 {
     public RichTextLineLayout(int start, int length, int breakLength, float width)
@@ -51,8 +51,8 @@ public readonly struct RichTextLineLayout
 }
 
 /// <summary>
-/// Run-aware text layout + draw pipeline. Bir RichTextBox örneğine bağlı.
-/// Plain mod dışındaki tüm modlarda kullanılır.
+/// Run-aware text layout + draw pipeline. Bound to a RichTextBox instance.
+/// Used in every mode except Plain.
 /// </summary>
 public sealed class RichTextLayoutPipeline
 {
@@ -67,7 +67,7 @@ public sealed class RichTextLayoutPipeline
     private int _lastTextHash;
     private int _lastRunsVersion = -1;
 
-    // Owner'a erişim.
+    // Access to the owner.
     private readonly RichTextBox _owner;
     private readonly Func<string> _getText;
     private readonly Func<IReadOnlyList<TextRun>> _getRuns;
@@ -85,7 +85,7 @@ public sealed class RichTextLayoutPipeline
     private readonly Func<float> _getHorizontalScroll;
     private readonly Action<SKSize> _setAutoScrollMinSize;
 
-    // Render kaynakları (owner'dan paylaşılır).
+    // Render resources (shared from the owner).
     private readonly FontCache _fontCache;
     private readonly RunAwareMeasurer _measurer;
 
@@ -152,7 +152,7 @@ public sealed class RichTextLayoutPipeline
         var textHash = text.GetHashCode();
         var runsVersion = runs.GetHashCode();
 
-        // Eğer text/runs/viewport değişmediyse, skip.
+        // Skip if text/runs/viewport haven't changed.
         if (Math.Abs(viewportWidth - _lastViewportWidth) < 0.5f
             && textHash == _lastTextHash
             && runsVersion == _lastRunsVersion)
@@ -165,7 +165,7 @@ public sealed class RichTextLayoutPipeline
         BuildLayout(text, runs, viewportWidth);
         UpdateScrollMetrics(viewport);
 
-        // Multiline + wrap modunda, viewport değişince re-wrap gerekir.
+        // In multiline + wrap mode, a viewport change requires a re-wrap.
         if (_getMultiline() && _getWrapMode() != TextWrap.None)
         {
             var refinedViewport = _getViewport();
@@ -183,7 +183,7 @@ public sealed class RichTextLayoutPipeline
         _layoutDirty = false;
     }
 
-    /// <summary>Font metriklerini hesapla (_lineHeight, _baselineOffset).</summary>
+    /// <summary>Compute font metrics (_lineHeight, _baselineOffset).</summary>
     private void EnsureFontMetrics()
     {
         var baseFont = _getBaseFont() ?? _fontCache.GetBaseFont();
@@ -194,8 +194,8 @@ public sealed class RichTextLayoutPipeline
         _lineHeight = Math.Max(16f * scale, rawLineHeight * 1.18f);
     }
 
-    /// <summary>Text + runs → _lines listesi. Mevcut TextBox'ın BuildTextLayout
-    /// mantığının run-aware versiyonu.</summary>
+    /// <summary>Text + runs → the _lines list. A run-aware version of the
+    /// existing TextBox's BuildTextLayout logic.</summary>
     private void BuildLayout(string text, IReadOnlyList<TextRun> runs, float viewportWidth)
     {
         _lines.Clear();
@@ -246,8 +246,8 @@ public sealed class RichTextLayoutPipeline
         _contentHeight = Math.Max(_lineHeight, _lines.Count * _lineHeight);
     }
 
-    /// <summary>Paragrafı satırlara böl (wrap). Mevcut TextBox'ın AddParagraphLines
-    /// mantığının run-aware versiyonu.</summary>
+    /// <summary>Split a paragraph into lines (wrap). A run-aware version of the
+    /// existing TextBox's AddParagraphLines logic.</summary>
     private void AddParagraphLines(string text, IReadOnlyList<TextRun> runs,
                                     int paragraphStart, int paragraphEnd, int breakLength,
                                     bool wrapEnabled, float wrapWidth)
@@ -306,8 +306,8 @@ public sealed class RichTextLayoutPipeline
         _lines.Add(new RichTextLineLayout(start, safeLength, breakLength, width));
     }
 
-    /// <summary>Run-aware ölçüm. Verilen range içindeki tüm run'ları çizer,
-    /// her birini kendi fontu ile ölçer, topla.</summary>
+    /// <summary>Run-aware measurement. Walks every run within the given range,
+    /// measures each with its own font, and sums the result.</summary>
     private float MeasureTextWidth(string text, IReadOnlyList<TextRun> runs, int start, int length)
     {
         if (length <= 0)
@@ -318,16 +318,16 @@ public sealed class RichTextLayoutPipeline
         var end = start + length;
         var totalWidth = 0f;
 
-        // Binary search ile başlangıç run'ını bul.
+        // Find the starting run via binary search.
         var runIdx = LowerBound(runs, start);
 
-        // Boşluk/run-gap'ler dahil — line baseStyle ile ölçülür.
+        // Gaps/whitespace between runs are included — measured with the line's baseStyle.
         var currentPos = start;
         while (currentPos < end)
         {
             if (runIdx >= runs.Count)
             {
-                // Kalan kısım baseStyle ile.
+                // Remaining portion uses baseStyle.
                 var remaining = end - currentPos;
                 var font = _fontCache.GetFont(baseStyle, baseFont);
                 totalWidth += font.MeasureText(text.AsSpan(currentPos, remaining));
@@ -338,7 +338,7 @@ public sealed class RichTextLayoutPipeline
 
             if (run.Start >= end)
             {
-                // Tüm remaining baseStyle.
+                // Everything remaining uses baseStyle.
                 var remaining = end - currentPos;
                 var font = _fontCache.GetFont(baseStyle, baseFont);
                 totalWidth += font.MeasureText(text.AsSpan(currentPos, remaining));
@@ -394,8 +394,8 @@ public sealed class RichTextLayoutPipeline
         return lo;
     }
 
-    /// <summary>Scroll metriklerini güncelle. Mevcut TextBox'ın UpdateScrollMetrics
-    /// mantığının aynısı.</summary>
+    /// <summary>Update scroll metrics. Identical to the existing TextBox's
+    /// UpdateScrollMetrics logic.</summary>
     private void UpdateScrollMetrics(SKRect viewport)
     {
         var multiline = _getMultiline();
@@ -415,7 +415,7 @@ public sealed class RichTextLayoutPipeline
         _setAutoScrollMinSize(new SKSize(minWidth, minHeight));
     }
 
-    /// <summary>Verilen caret indeksinin hangi satırda olduğunu bul.</summary>
+    /// <summary>Find which line a given caret index falls on.</summary>
     public int FindLineIndexForCaret(int caretIndex)
     {
         EnsureLayout();
@@ -429,7 +429,7 @@ public sealed class RichTextLayoutPipeline
         return _lines.Count - 1;
     }
 
-    /// <summary>Verilen satırın text'ini döndür.</summary>
+    /// <summary>Return the given line's text.</summary>
     public string GetLineText(RichTextLineLayout line)
     {
         if (line.Length <= 0)
@@ -438,7 +438,16 @@ public sealed class RichTextLayoutPipeline
         return text.Substring(line.Start, line.Length);
     }
 
-    /// <summary>Satırın içindeki belirli bir karaktere kadar olan x offset'i.</summary>
+    /// <summary>Run-aware width measurement — measures every run within
+    /// [start, start+length) with its own font and sums the result. Used for
+    /// hit-testing (character index ↔ x offset); shares the same measurement
+    /// logic BuildLayout uses.</summary>
+    public float MeasureRangeWidth(int start, int length)
+    {
+        return MeasureTextWidth(_getText(), _getRuns(), start, length);
+    }
+
+    /// <summary>The x offset up to a specific character within the line.</summary>
     public float MeasureLocalX(string lineText, int length, SKFont font)
     {
         if (length <= 0 || string.IsNullOrEmpty(lineText))
@@ -448,7 +457,7 @@ public sealed class RichTextLayoutPipeline
         return font.MeasureText(lineText.AsSpan(0, length));
     }
 
-    /// <summary>Top inset — multiline değilse satırı dikey ortalamak için.</summary>
+    /// <summary>Top inset — used to vertically center the line when not multiline.</summary>
     public float GetContentTopInset(SKRect viewport)
     {
         if (_getMultiline())

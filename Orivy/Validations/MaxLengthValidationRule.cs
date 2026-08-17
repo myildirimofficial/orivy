@@ -10,7 +10,7 @@ public class MaxLengthValidationRule : ValidationRule
     {
         if (element.Text.Length > MaxLength)
         {
-            errorMessage = ErrorMessage ?? $"Bu alan en fazla {MaxLength} karakter olmalıdır.";
+            errorMessage = ErrorMessage ?? $"This field must be at most {MaxLength} characters.";
             return false;
         }
 

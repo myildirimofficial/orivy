@@ -1,4 +1,5 @@
 using Orivy.Animation;
+using Orivy.Windowing.Desktop.Windows;
 using SkiaSharp;
 using System;
 using System.Collections;
@@ -26,6 +27,11 @@ public class PropertyGrid : GridList
 
     private readonly List<PropNode> _rootNodes = new();
 
+    private const float SearchBoxHeight = 32f;
+    private readonly TextBox _searchBox;
+    private string _searchFilter = string.Empty;
+    private bool _showSearchBox = true;
+
     private TextBox? _textEditor;
     private NumericUpDown? _numericEditor;
     private DatePicker? _dateEditor;
@@ -48,6 +54,23 @@ public class PropertyGrid : GridList
     private GridListItem? _editingItem;
     private SKRect _editorBounds;
     private bool _suppressEditorEvents;
+
+    // Bool-toggle / color-swatch value-cell icons.
+    private SKImage? _toggleOn;
+    private SKImage? _toggleOff;
+    private SKColor _toggleAccent;
+    private int _toggleDpi;
+    private readonly Dictionary<uint, SKImage> _swatchCache = new();
+
+    // Figma-style click-drag "scrub" editing for numeric rows.
+    private PropNode? _scrubNode;
+    private GridListItem? _scrubItem;
+    private SKPoint _scrubStart;
+    private decimal _scrubStartValue;
+    private object? _scrubOriginalValue;
+    private Type _scrubType = typeof(object);
+    private bool _scrubActive;
+    private bool _suppressNextClick;
 
     /// <summary>Occurs after a property value has been changed through an editor.</summary>
     public event EventHandler<PropertyValueChangedEventArgs>? PropertyValueChanged;
@@ -99,6 +122,51 @@ public class PropertyGrid : GridList
 
         CellClick += OnCellClicked;
         SelectionChanged += (_, _) => SelectedPropertyChanged?.Invoke(this, EventArgs.Empty);
+
+        // Reuses Orivy's own TextBox rather than a bespoke search field. GetOuterViewport (see
+        // below) reserves the room for it, so every GridList row/scrollbar/hit-test computation —
+        // which all funnel through that one method — stays consistent automatically.
+        _searchBox = new TextBox
+        {
+            Dock = DockStyle.Top,
+            Height = (int)SearchBoxHeight,
+            Margin = new Thickness(6, 6, 6, 6),
+            PlaceholderText = "Search properties…",
+        };
+        _searchBox.TextChanged += (_, _) =>
+        {
+            _searchFilter = _searchBox.Text?.Trim() ?? string.Empty;
+            RebuildRows();
+        };
+        Controls.Add(_searchBox);
+    }
+
+    /// <summary>Whether the built-in property search box is shown above the grid.</summary>
+    [DefaultValue(true)]
+    public bool ShowSearchBox
+    {
+        get => _showSearchBox;
+        set
+        {
+            if (_showSearchBox == value)
+                return;
+            _showSearchBox = value;
+            _searchBox.Visible = value;
+            if (!value)
+            {
+                _searchBox.Text = string.Empty;
+                _searchFilter = string.Empty;
+            }
+            RebuildRows();
+        }
+    }
+
+    protected override SKRect GetOuterViewport()
+    {
+        var outer = base.GetOuterViewport();
+        return _showSearchBox
+            ? new SKRect(outer.Left, outer.Top + SearchBoxHeight + _searchBox.Margin.Top + _searchBox.Margin.Bottom, outer.Right, outer.Bottom)
+            : outer;
     }
 
     #region Expand chevron + reveal animation
@@ -154,6 +222,113 @@ public class PropertyGrid : GridList
         canvas.DrawPath(path, paint);
         return surface.Snapshot();
     }
+
+    #endregion
+
+    #region Value-cell affordance icons (bool toggle pill, color swatch)
+
+    private SKImage GetToggleIcon(bool on)
+    {
+        var accent = ColorScheme.Primary;
+        var dpi = DeviceDpi;
+        if (_toggleOn == null || _toggleOff == null || _toggleDpi != dpi || _toggleAccent != accent)
+        {
+            _toggleOn?.Dispose();
+            _toggleOff?.Dispose();
+            _toggleOn = CreateToggleImage(true, accent);
+            _toggleOff = CreateToggleImage(false, accent);
+            _toggleDpi = dpi;
+            _toggleAccent = accent;
+        }
+
+        return on ? _toggleOn! : _toggleOff!;
+    }
+
+    // GridList always draws a cell Icon into a fixed 16×16 destination rect (see GridList.cs's
+    // paint code) regardless of the source bitmap's own size — so the bitmap itself MUST be 16×16,
+    // or it gets stretched to whatever aspect ratio the destination forces. A wider-than-tall
+    // source (the original 30×16 pill) got squashed into a near-square, which is what made the
+    // switch look distorted/low-quality.
+    private const float IconBitmapSize = 16f;
+
+    private static SKImage CreateToggleImage(bool on, SKColor accent)
+    {
+        using var surface = SKSurface.Create(new SKImageInfo((int)IconBitmapSize, (int)IconBitmapSize, SKColorType.Bgra8888, SKAlphaType.Premul));
+        var canvas = surface.Canvas;
+        canvas.Clear(SKColors.Transparent);
+
+        const float trackHeight = 9f;
+        var track = SKRect.Create(0, (IconBitmapSize - trackHeight) / 2f, IconBitmapSize, trackHeight);
+        using var trackPaint = new SKPaint { IsAntialias = true, Color = on ? accent : ColorScheme.Outline.WithAlpha(130) };
+        canvas.DrawRoundRect(track, trackHeight / 2f, trackHeight / 2f, trackPaint);
+
+        var knobRadius = trackHeight / 2f - 1.3f;
+        var knobX = on ? track.Right - trackHeight / 2f : track.Left + trackHeight / 2f;
+        using var knobPaint = new SKPaint { IsAntialias = true, Color = SKColors.White };
+        canvas.DrawCircle(knobX, IconBitmapSize / 2f, knobRadius, knobPaint);
+
+        return surface.Snapshot();
+    }
+
+    private SKImage GetSwatchIcon(SKColor color)
+    {
+        var key = ((uint)color.Alpha << 24) | ((uint)color.Red << 16) | ((uint)color.Green << 8) | color.Blue;
+        if (_swatchCache.TryGetValue(key, out var cached))
+            return cached;
+
+        // Unbounded per-distinct-color caching would leak under a color-picker dragged through
+        // thousands of hues; a full flush at a generous cap keeps this bounded and simple.
+        if (_swatchCache.Count > 128)
+        {
+            foreach (var image in _swatchCache.Values)
+                image.Dispose();
+            _swatchCache.Clear();
+        }
+
+        var created = CreateSwatchImage(color);
+        _swatchCache[key] = created;
+        return created;
+    }
+
+    private static SKImage CreateSwatchImage(SKColor color)
+    {
+        using var surface = SKSurface.Create(new SKImageInfo((int)IconBitmapSize, (int)IconBitmapSize, SKColorType.Bgra8888, SKAlphaType.Premul));
+        var canvas = surface.Canvas;
+        canvas.Clear(SKColors.Transparent);
+
+        // A 1px margin keeps the border stroke from getting clipped at the bitmap edge.
+        var rect = SKRect.Create(1, 1, IconBitmapSize - 2, IconBitmapSize - 2);
+        using var fill = new SKPaint { IsAntialias = true, Color = color };
+        canvas.DrawRoundRect(rect, 3f, 3f, fill);
+
+        using var border = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1f, Color = ColorScheme.Outline.WithAlpha(150) };
+        canvas.DrawRoundRect(rect, 3f, 3f, border);
+
+        return surface.Snapshot();
+    }
+
+    /// <summary>Value-cell affordance icon for a leaf row — a toggle pill for bool, a swatch for color, or none.</summary>
+    private SKImage? GetValueIcon(PropNode node)
+    {
+        if (node.Expandable)
+            return null;
+
+        var t = Nullable.GetUnderlyingType(node.ValueType) ?? node.ValueType;
+        object? value;
+        try { value = node.GetValue(); } catch { return null; }
+        if (value == null)
+            return null;
+
+        if (t == typeof(bool) && value is bool b)
+            return GetToggleIcon(b);
+
+        if (t == typeof(SKColor) || t == typeof(System.Drawing.Color))
+            return GetSwatchIcon(ToSKColor(value));
+
+        return null;
+    }
+
+    #endregion
 
     private void ToggleNodeAnimated(PropNode node)
     {
@@ -270,8 +445,6 @@ public class PropertyGrid : GridList
         _revealItems.Clear();
         Invalidate();
     }
-
-    #endregion
 
     #region Public API
 
@@ -430,9 +603,18 @@ public class PropertyGrid : GridList
             _rootNodes.Add(CreatePropertyNode(pd, _selectedObject, depth: 0));
     }
 
+    /// <summary>
+    /// True for reflection noise that is never worth a row: read-only, non-expandable "IsXxx" bool
+    /// helpers (e.g. <c>Thickness.IsEmpty</c>, <c>Radius.IsEmpty</c>, <c>SKRect.IsEmpty</c>) are
+    /// derived from other properties already shown and can't be acted on.
+    /// </summary>
+    private static bool IsNoiseProperty(PropertyDescriptor pd) =>
+        pd.IsReadOnly && pd.PropertyType == typeof(bool) && pd.Name.StartsWith("Is", StringComparison.Ordinal);
+
     private IEnumerable<PropertyDescriptor> GetProperties(object component)
     {
-        var props = TypeDescriptor.GetProperties(component).Cast<PropertyDescriptor>().Where(p => p.IsBrowsable);
+        var props = TypeDescriptor.GetProperties(component).Cast<PropertyDescriptor>()
+            .Where(p => p.IsBrowsable && !IsNoiseProperty(p));
 
         return _propertySort switch
         {
@@ -474,8 +656,11 @@ public class PropertyGrid : GridList
         if (value is IEnumerable)
             return true;
 
-        // Complex object with at least one browsable property.
-        return TypeDescriptor.GetProperties(value).Cast<PropertyDescriptor>().Any(p => p.IsBrowsable);
+        // Complex object with at least one browsable property. Reflection over an arbitrary object
+        // graph can throw (native-backed types, converters with side effects) — treat that as "not
+        // expandable" rather than letting it escape into the caller.
+        try { return TypeDescriptor.GetProperties(value).Cast<PropertyDescriptor>().Any(p => p.IsBrowsable && !IsNoiseProperty(p)); }
+        catch { return false; }
     }
 
     private void EnsureChildren(PropNode node)
@@ -497,46 +682,71 @@ public class PropertyGrid : GridList
             node.CollectionValue = list;
             var elementType = GetCollectionElementType(value.GetType());
             var index = 0;
-            foreach (var element in enumerable)
+            try
             {
-                var elementIndex = index;
-                var captured = element;
-                var runtimeType = captured?.GetType() ?? elementType;
-                var canEditElement = list is { IsReadOnly: false } && IsSimple(runtimeType);
-
-                var child = new PropNode
+                foreach (var element in enumerable)
                 {
-                    Descriptor = null,
-                    Component = value,
-                    Label = $"[{index}]",
-                    Category = "Misc",
-                    Depth = node.Depth + 1,
-                    ValueType = runtimeType,
-                    ParentList = list,
-                    ElementIndex = elementIndex,
-                    Getter = () => list != null && elementIndex < list.Count ? list[elementIndex] : captured,
-                    Setter = canEditElement ? v => list![elementIndex] = v : null
-                };
-                child.Expandable = IsExpandable(runtimeType, captured);
-                node.Children.Add(child);
-                index++;
+                    var elementIndex = index;
+                    var captured = element;
+                    var runtimeType = captured?.GetType() ?? elementType;
+                    var canEditElement = list is { IsReadOnly: false } && IsSimple(runtimeType);
+
+                    var child = new PropNode
+                    {
+                        Descriptor = null,
+                        Component = value,
+                        Label = $"[{index}]",
+                        Category = "Misc",
+                        Depth = node.Depth + 1,
+                        ValueType = runtimeType,
+                        ParentList = list,
+                        ElementIndex = elementIndex,
+                        Getter = () => list != null && elementIndex < list.Count ? list[elementIndex] : captured,
+                        Setter = canEditElement ? v => list![elementIndex] = v : null
+                    };
+                    child.Expandable = IsExpandable(runtimeType, captured);
+                    node.Children.Add(child);
+                    index++;
+                }
+            }
+            catch
+            {
+                // The collection was mutated (or a getter throws) mid-enumeration — keep whatever
+                // elements were already collected rather than propagating out of the grid.
             }
 
             return;
         }
 
         // Nested object: reflect its properties. Honor a custom TypeConverter
-        // (e.g. ExpandableObjectConverter) that projects a different property set.
-        var converter = TypeDescriptor.GetConverter(value);
-        var props = converter.GetPropertiesSupported()
-            ? converter.GetProperties(value)
-            : TypeDescriptor.GetProperties(value);
-
-        foreach (var pd in (props ?? new PropertyDescriptorCollection(Array.Empty<PropertyDescriptor>()))
-                     .Cast<PropertyDescriptor>().Where(p => p.IsBrowsable)
-                     .OrderBy(p => p.DisplayName, StringComparer.CurrentCultureIgnoreCase))
+        // (e.g. ExpandableObjectConverter) that projects a different property set. Reflection over
+        // third-party/native-backed objects can throw (disposed handles, converters with bad ctors,
+        // properties that assert on missing context) — never let one bad node blow up the whole grid.
+        PropertyDescriptorCollection? props;
+        try
         {
-            node.Children.Add(CreatePropertyNode(pd, value, node.Depth + 1));
+            var converter = TypeDescriptor.GetConverter(value);
+            props = converter.GetPropertiesSupported()
+                ? converter.GetProperties(value)
+                : TypeDescriptor.GetProperties(value);
+        }
+        catch
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var pd in (props ?? new PropertyDescriptorCollection(Array.Empty<PropertyDescriptor>()))
+                         .Cast<PropertyDescriptor>().Where(p => p.IsBrowsable && !IsNoiseProperty(p))
+                         .OrderBy(p => p.DisplayName, StringComparer.CurrentCultureIgnoreCase))
+            {
+                node.Children.Add(CreatePropertyNode(pd, value, node.Depth + 1));
+            }
+        }
+        catch
+        {
+            // Leave whatever children were built before the failure; better a partial list than none.
         }
     }
 
@@ -557,7 +767,17 @@ public class PropertyGrid : GridList
 
     private static bool IsSimple(Type t)
         => t.IsPrimitive || t.IsEnum || t == typeof(string) || t == typeof(decimal)
-           || t == typeof(DateTime) || t == typeof(TimeSpan) || t == typeof(Guid) || t == typeof(SKColor);
+           || t == typeof(DateTime) || t == typeof(TimeSpan) || t == typeof(Guid) || t == typeof(SKColor)
+           || t == typeof(SKImage) || IsCompactStruct(t);
+
+    /// <summary>
+    /// Small geometry structs that read/write better as one compact "a, b" text shortcut (matching
+    /// how WinForms' PropertyGrid shows Size/Point/Rectangle) than as a drill-down tree of a
+    /// Width/Height (or X/Y, or Left/Top/Right/Bottom) row apiece.
+    /// </summary>
+    private static bool IsCompactStruct(Type t) =>
+        t == typeof(SKSize) || t == typeof(SKSizeI) || t == typeof(SKPoint) || t == typeof(SKPointI)
+        || t == typeof(SKRect) || t == typeof(SKRectI);
 
     private static string CategoryOf(PropertyDescriptor pd)
         => string.IsNullOrWhiteSpace(pd.Category) ? "Misc" : pd.Category;
@@ -580,9 +800,36 @@ public class PropertyGrid : GridList
         }
 
         foreach (var node in _rootNodes)
-            AppendRow(node, node.Category);
+            if (NodeMatchesSearch(node))
+                AppendRow(node, node.Category);
 
         Invalidate();
+    }
+
+    /// <summary>
+    /// Object graphs reflected from an arbitrary component are frequently cyclic (an ElementBase's
+    /// Parent leads back to a Controls collection that leads back down to the same element, etc.).
+    /// Both the search match test and the search auto-expand below recurse through that graph, so
+    /// both need a hard depth cap — without one a cycle recurses until the stack overflows.
+    /// </summary>
+    private const int MaxSearchDepth = 6;
+
+    /// <summary>True when no search is active, the node's own label matches, or (for expandable
+    /// nodes, up to <see cref="MaxSearchDepth"/>) any descendant matches — so a hit deep in a
+    /// collapsed nested object still surfaces its ancestor chain instead of disappearing entirely.</summary>
+    private bool NodeMatchesSearch(PropNode node)
+    {
+        if (string.IsNullOrEmpty(_searchFilter))
+            return true;
+
+        if (node.Label.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (!node.Expandable || node.Depth >= MaxSearchDepth)
+            return false;
+
+        EnsureChildren(node);
+        return node.Children.Any(NodeMatchesSearch);
     }
 
     private void AppendRow(PropNode node, string rootCategory)
@@ -600,14 +847,19 @@ public class PropertyGrid : GridList
             Text = FormatLabel(node),
             Icon = node.Expandable ? GetChevron(node.Expanded) : null
         });
-        item.Cells.Add(new GridListCell { Text = FormatValue(node) });
+        item.Cells.Add(new GridListCell { Text = FormatValue(node), Icon = GetValueIcon(node) });
         Items.Add(item);
 
-        if (node.Expandable && node.Expanded)
+        // While actively searching, auto-expand every expandable node (up to MaxSearchDepth) so
+        // nested matches are reachable without the user having to manually drill in first.
+        var autoExpandForSearch = !string.IsNullOrEmpty(_searchFilter) && node.Depth < MaxSearchDepth;
+        var effectivelyExpanded = node.Expanded || autoExpandForSearch;
+        if (node.Expandable && effectivelyExpanded)
         {
             EnsureChildren(node);
             foreach (var child in node.Children)
-                AppendRow(child, rootCategory);
+                if (NodeMatchesSearch(child))
+                    AppendRow(child, rootCategory);
         }
     }
 
@@ -644,6 +896,12 @@ public class PropertyGrid : GridList
         if (!IsSimple(t) && node.Expandable)
             return value.GetType().Name;
 
+        if (IsCompactStruct(t))
+            return FormatCompactStruct(value);
+
+        if (value is SKImage image)
+            return $"{image.Width} × {image.Height} image";
+
         if (node.Descriptor?.Converter is { } conv && conv.CanConvertTo(typeof(string)))
         {
             try { return conv.ConvertToString(value) ?? value.ToString() ?? string.Empty; }
@@ -658,9 +916,20 @@ public class PropertyGrid : GridList
         for (var i = 0; i < Items.Count; i++)
         {
             if (Items[i].Tag is PropNode node && Items[i].Cells.Count > ValueColumn)
+            {
                 Items[i].Cells[ValueColumn].Text = FormatValue(node);
+                Items[i].Cells[ValueColumn].Icon = GetValueIcon(node);
+            }
         }
     }
+
+    /// <summary>
+    /// Cheap text-only refresh of the currently visible rows — re-reads each value and updates its
+    /// cell text without rebuilding the tree or re-enumerating collections. Safe (and intended) to
+    /// call on every frame of a live drag/resize; use <see cref="Refresh"/> instead when the object
+    /// graph itself may have changed shape (children added/removed).
+    /// </summary>
+    public void RefreshVisibleValues() => RefreshValues();
 
     #endregion
 
@@ -668,6 +937,12 @@ public class PropertyGrid : GridList
 
     private void OnCellClicked(object? sender, GridListCellEventArgs e)
     {
+        if (_suppressNextClick)
+        {
+            _suppressNextClick = false;
+            return;
+        }
+
         if (e.Item.Tag is not PropNode node)
         {
             CommitEditor();
@@ -695,12 +970,49 @@ public class PropertyGrid : GridList
     {
         var t = Nullable.GetUnderlyingType(type) ?? type;
         if (t == typeof(bool) || t.IsEnum || IsNumeric(t) || t == typeof(string)
-            || t == typeof(DateTime) || t == typeof(SKColor) || t == typeof(System.Drawing.Color))
+            || t == typeof(DateTime) || t == typeof(SKColor) || t == typeof(System.Drawing.Color)
+            || IsCompactStruct(t) || t == typeof(SKImage))
             return true;
 
         var converter = TypeDescriptor.GetConverter(t);
         return converter.CanConvertFrom(typeof(string)) && converter.CanConvertTo(typeof(string));
     }
+
+    /// <summary>Parses the "a, b" / "a, b, c, d" shortcut text for the compact geometry structs
+    /// (see <see cref="IsCompactStruct"/>). Returns null if the text doesn't parse cleanly.</summary>
+    private static object? ParseCompactStruct(Type t, string text)
+    {
+        var parts = text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+        float F(int i) => float.Parse(parts[i], CultureInfo.InvariantCulture);
+        int I(int i) => (int)MathF.Round(F(i));
+
+        try
+        {
+            if (t == typeof(SKSize) && parts.Length == 2) return new SKSize(F(0), F(1));
+            if (t == typeof(SKSizeI) && parts.Length == 2) return new SKSizeI(I(0), I(1));
+            if (t == typeof(SKPoint) && parts.Length == 2) return new SKPoint(F(0), F(1));
+            if (t == typeof(SKPointI) && parts.Length == 2) return new SKPointI(I(0), I(1));
+            if (t == typeof(SKRect) && parts.Length == 4) return new SKRect(F(0), F(1), F(2), F(3));
+            if (t == typeof(SKRectI) && parts.Length == 4) return new SKRectI(I(0), I(1), I(2), I(3));
+        }
+        catch (FormatException) { /* fall through */ }
+
+        return null;
+    }
+
+    /// <summary>"120, 40" / "10, 10, 120, 40" — same order ToString() below produces, so a copied
+    /// value pastes back in cleanly.</summary>
+    private static string FormatCompactStruct(object value) => value switch
+    {
+        SKSize s => FormattableString.Invariant($"{s.Width:0.##}, {s.Height:0.##}"),
+        SKSizeI s => FormattableString.Invariant($"{s.Width}, {s.Height}"),
+        SKPoint p => FormattableString.Invariant($"{p.X:0.##}, {p.Y:0.##}"),
+        SKPointI p => FormattableString.Invariant($"{p.X}, {p.Y}"),
+        SKRect r => FormattableString.Invariant($"{r.Left:0.##}, {r.Top:0.##}, {r.Right:0.##}, {r.Bottom:0.##}"),
+        SKRectI r => FormattableString.Invariant($"{r.Left}, {r.Top}, {r.Right}, {r.Bottom}"),
+        _ => value.ToString() ?? string.Empty,
+    };
 
     private static bool IsNumeric(Type t)
     {
@@ -714,6 +1026,23 @@ public class PropertyGrid : GridList
     {
         CommitEditor();
 
+        var t = Nullable.GetUnderlyingType(node.ValueType) ?? node.ValueType;
+
+        // Bools don't need a picker at all — a single click flips a switch, same as flipping the
+        // toggle icon directly.
+        if (t == typeof(bool))
+        {
+            ToggleBool(node);
+            return;
+        }
+
+        // Images open a file picker rather than an inline editor — there's nothing sensible to type.
+        if (t == typeof(SKImage))
+        {
+            PickImage(node);
+            return;
+        }
+
         var bounds = GetCellBounds(itemIndex, ValueColumn);
         if (bounds.IsEmpty)
             return;
@@ -722,9 +1051,7 @@ public class PropertyGrid : GridList
         _editingItem = item;
         _editorBounds = bounds;
 
-        var t = Nullable.GetUnderlyingType(node.ValueType) ?? node.ValueType;
-
-        if (t == typeof(bool) || t.IsEnum)
+        if (t.IsEnum)
             ShowChoiceDropDown(node, bounds, t);
         else if (IsNumeric(t))
             ShowNumericEditor(node, bounds, t);
@@ -734,6 +1061,58 @@ public class PropertyGrid : GridList
             ShowColorEditor(node, bounds);
         else
             ShowTextEditor(node, bounds);
+    }
+
+    /// <summary>Opens a native file picker and loads the chosen file into an <see cref="SKImage"/>.
+    /// Ctrl+click (or picking, then immediately cancelling isn't an option here) has no "clear"
+    /// gesture yet — right-click-to-clear could be added the same way collections get their
+    /// context menu, but a plain click covers the common "pick a picture" case.</summary>
+    private void PickImage(PropNode node)
+    {
+        if (node.Setter == null)
+            return;
+
+        var dialog = new FileSelectionDialog
+        {
+            Title = "Select image",
+            Filter = "Image files (*.png;*.jpg;*.jpeg;*.bmp;*.webp;*.gif)|*.png;*.jpg;*.jpeg;*.bmp;*.webp;*.gif|All files (*.*)|*.*",
+        };
+
+        string[] files;
+        try { files = dialog.ShowDialog(GetParentWindow()); }
+        catch { return; }
+        if (files.Length == 0)
+            return;
+
+        SKImage? image;
+        try
+        {
+            using var data = SKData.Create(files[0]);
+            image = data == null ? null : SKImage.FromEncodedData(data);
+        }
+        catch { return; }
+        if (image == null)
+            return;
+
+        var oldValue = node.GetValue();
+        try { node.Setter(image); }
+        catch { return; }
+        RaiseValueChanged(node, oldValue);
+    }
+
+    /// <summary>Flips a bool property in place — no editor/dropdown needed for a two-state value.</summary>
+    private void ToggleBool(PropNode node)
+    {
+        if (node.Setter == null)
+            return;
+
+        var oldValue = node.GetValue();
+        var next = !(oldValue is bool current && current);
+
+        try { node.Setter(next); }
+        catch { return; }
+
+        RaiseValueChanged(node, oldValue);
     }
 
     private void ShowDateEditor(PropNode node, SKRect bounds)
@@ -819,11 +1198,9 @@ public class PropertyGrid : GridList
         editor.Focus();
     }
 
-    private void ShowChoiceDropDown(PropNode node, SKRect bounds, Type type)
+    private void ShowChoiceDropDown(PropNode node, SKRect bounds, Type enumType)
     {
-        var options = type == typeof(bool)
-            ? new[] { bool.TrueString, bool.FalseString }
-            : Enum.GetNames(type);
+        var options = Enum.GetNames(enumType);
 
         var menu = new ContextMenuStrip();
         foreach (var option in options)
@@ -979,9 +1356,17 @@ public class PropertyGrid : GridList
             else if (_textEditor is { Visible: true })
             {
                 var text = _textEditor.Text ?? string.Empty;
-                var converter = node.Descriptor?.Converter ?? TypeDescriptor.GetConverter(t);
-                converted = converter.ConvertFromString(null, CultureInfo.CurrentCulture, text);
-                haveValue = true;
+                if (IsCompactStruct(t))
+                {
+                    converted = ParseCompactStruct(t, text);
+                    haveValue = converted != null;
+                }
+                else
+                {
+                    var converter = node.Descriptor?.Converter ?? TypeDescriptor.GetConverter(t);
+                    converted = converter.ConvertFromString(null, CultureInfo.CurrentCulture, text);
+                    haveValue = true;
+                }
             }
 
             if (haveValue)
@@ -1005,7 +1390,10 @@ public class PropertyGrid : GridList
     private void RaiseValueChanged(PropNode node, object? oldValue)
     {
         if (_editingItem is { } item && item.Cells.Count > ValueColumn)
+        {
             item.Cells[ValueColumn].Text = FormatValue(node);
+            item.Cells[ValueColumn].Icon = GetValueIcon(node);
+        }
         else
             RefreshValues();
 
@@ -1048,7 +1436,97 @@ public class PropertyGrid : GridList
                 return;
         }
 
+        if (e.Button == MouseButtons.Left && _editingNode == null)
+            TryBeginScrub(e.Location);
+
         base.OnMouseDown(e);
+    }
+
+    // ── Figma-style drag-scrub for numeric rows: click-drag the value left/right to change it,
+    // plain click (no drag past the threshold) still opens the precise numeric editor as before. ──
+
+    private const float ScrubThreshold = 3f;
+
+    private void TryBeginScrub(SKPoint location)
+    {
+        var hit = HitTest(location);
+        if (hit.Item?.Tag is not PropNode node || hit.ColumnIndex != ValueColumn)
+            return;
+        if (node.Expandable || node.Setter == null)
+            return;
+
+        var t = Nullable.GetUnderlyingType(node.ValueType) ?? node.ValueType;
+        if (!IsNumeric(t))
+            return;
+
+        object? current;
+        try { current = node.GetValue(); }
+        catch { return; }
+        if (current == null)
+            return;
+
+        _scrubNode = node;
+        _scrubItem = hit.Item;
+        _scrubType = t;
+        _scrubOriginalValue = current;
+        _scrubStartValue = Convert.ToDecimal(current, CultureInfo.InvariantCulture);
+        _scrubStart = location;
+        _scrubActive = false;
+    }
+
+    public override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+
+        if (_scrubNode == null)
+            return;
+
+        var dx = e.X - _scrubStart.X;
+        if (!_scrubActive && MathF.Abs(dx) < ScrubThreshold)
+            return;
+
+        _scrubActive = true;
+
+        var isFloating = _scrubType == typeof(float) || _scrubType == typeof(double) || _scrubType == typeof(decimal);
+        var baseStep = isFloating ? 0.1m : 1m;
+        var multiplier = (ModifierKeys & Keys.Shift) == Keys.Shift ? 10m
+            : (ModifierKeys & Keys.Control) == Keys.Control ? 0.1m
+            : 1m;
+
+        var proposed = _scrubStartValue + (decimal)dx * baseStep * multiplier;
+
+        try
+        {
+            var converted = Convert.ChangeType(proposed, _scrubType, CultureInfo.InvariantCulture);
+            _scrubNode.Setter!(converted);
+            if (_scrubItem != null && _scrubItem.Cells.Count > ValueColumn)
+                _scrubItem.Cells[ValueColumn].Text = FormatValue(_scrubNode);
+            Invalidate();
+        }
+        catch { /* out of range for this type at the current drag distance — hold last good value */ }
+    }
+
+    public override void OnMouseUp(MouseEventArgs e)
+    {
+        if (_scrubNode != null)
+        {
+            var node = _scrubNode;
+            var original = _scrubOriginalValue;
+            var wasActive = _scrubActive;
+            _scrubNode = null;
+            _scrubItem = null;
+            _scrubActive = false;
+
+            if (wasActive)
+            {
+                _suppressNextClick = true;
+                RaiseValueChanged(node, original);
+                base.OnMouseUp(e);
+                return;
+            }
+        }
+
+        base.OnMouseUp(e);
     }
 
     private bool TryShowCollectionMenu(PropNode node, SKPoint location)
@@ -1220,6 +1698,11 @@ public class PropertyGrid : GridList
             _revealAnim.Dispose();
             _chevronRight?.Dispose();
             _chevronDown?.Dispose();
+            _toggleOn?.Dispose();
+            _toggleOff?.Dispose();
+            foreach (var image in _swatchCache.Values)
+                image.Dispose();
+            _swatchCache.Clear();
         }
 
         base.Dispose(disposing);

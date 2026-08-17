@@ -1423,7 +1423,12 @@ public class GridList : ElementBase
         return _collapsedGroups.TryGetValue(groupIndex, out var collapsed) && collapsed ? 0f : 1f;
     }
 
-    private SKRect GetOuterViewport()
+    /// <summary>
+    /// The rect every row/header/scrollbar/hit-test computation is anchored to. Every call site in
+    /// this file goes through this single method, so a subclass reserving chrome space above the
+    /// rows (e.g. a search box) only needs to override this one spot to stay consistent everywhere.
+    /// </summary>
+    protected virtual SKRect GetOuterViewport()
     {
         return new SKRect(Border.Left, Border.Top, Width - Border.Right, Height - Border.Bottom);
     }

@@ -305,14 +305,14 @@ public class ContextMenuStrip : MenuStrip
         if (!_ownerWindow.Controls.Contains(this))
             _ownerWindow.Controls.Add(this);
 
-        // Konumu ve boyutu belirle, sonra z-order'ı en üste çek.
+        // Determine location and size, then bring the z-order to the top.
         _anchorClientLocation = _ownerWindow.PointToClient(location);
         PositionDropDown(location);
         Visible = true;
         EnsureTopMostInOwner();
         _ownerWindow.UpdateCursor(this);
 
-        // WinForms z-order + Orivy'nin kendi ZOrder sistemini güncelle.
+        // Update both the WinForms z-order and Orivy's own ZOrder system.
         BringToFront();
         if (_ownerWindow is WindowBase uiw)
         {
@@ -1223,7 +1223,7 @@ public class ContextMenuStrip : MenuStrip
     {
         ApplyDpiMetrics(DeviceDpi);
 
-        // İçerik genişlik/yükseklik hesabı (shadow hariç)
+        // Content width/height calculation (excluding shadow)
         var verticalGap = GetVerticalItemGap();
         var contentWidth = ItemPadding * 2;
         float contentHeight;
@@ -1262,13 +1262,13 @@ public class ContextMenuStrip : MenuStrip
             }
         }
 
-        // Minimum genişlik garantisi
+        // Guarantee a minimum width
         contentWidth = Math.Max(contentWidth, BaseMinimumContentWidth * ScaleFactor);
         if (_minPopupWidth > 0f)
             contentWidth = Math.Max(contentWidth, _minPopupWidth);
 
-        // En alttaki öğenin border ile kesilmemesi için ekstra alan yok,
-        // çünkü son item'dan sonra zaten ItemPadding var.
+        // No extra space needed to keep the bottom item's border from being clipped,
+        // since ItemPadding already follows the last item.
 
         var totalWidth = contentWidth;
         var totalHeight = contentHeight;

@@ -1,5 +1,6 @@
 using Orivy;
 using Orivy.Controls;
+using Orivy.Controls.RichText;
 using Orivy.Studio.Canvas;
 using Orivy.Studio.Documents;
 using Orivy.Studio.Panels;
@@ -27,9 +28,9 @@ public sealed class StudioWindow : Window
     private readonly LayoutHelperBar _layoutBar;
     private readonly DragLayer _dragLayer = new();
 
-    private readonly Button _undoButton = ToolButton("↶ Undo", 92);
-    private readonly Button _redoButton = ToolButton("↷ Redo", 92);
-    private readonly Button _previewButton = ToolButton("▶ Preview", 104);
+    private readonly ToolbarButton _undoButton = new("undo", "Undo (Ctrl+Z)");
+    private readonly ToolbarButton _redoButton = new("redo", "Redo (Ctrl+Y)");
+    private readonly ToolbarButton _previewButton = new("play", "Preview");
     private readonly Element _zoomLabel;
     private readonly Element _statusHost;
 
@@ -43,19 +44,30 @@ public sealed class StudioWindow : Window
         ClientSize = new SKSize(1440, 900);
         MinimumSize = new SKSize(1024, 640);
         StartPosition = FormStartPosition.CenterScreen;
+        ShowIcon = true;
+
+        // Tabbed is the theme meant to cooperate with a TitleBar-mode TabView (see BuildLayout);
+        // it falls back to a flat surface automatically on older Windows.
+        WindowThemeType = WindowThemeType.Tabbed;
 
         _zoomLabel = new Element
         {
-            Text = "100%", Dock = DockStyle.Left, Width = 58,
-            BackColor = SKColors.Transparent, Border = new Thickness(0), Radius = new Radius(0),
+            Text = "100%", Dock = DockStyle.Left, Width = 44,
+            Border = new Thickness(0), Radius = new Radius(0),
             TextAlign = ContentAlignment.MiddleCenter,
         };
+        Tint(_zoomLabel, foreground: () => ColorScheme.ForeColor.WithAlpha(210));
+
         _statusHost = new Element
         {
-            Dock = DockStyle.Bottom, Height = 32, Padding = new Thickness(14, 0, 14, 0),
-            BackColor = ColorScheme.SurfaceContainer, ForeColor = ColorScheme.ForeColor.WithAlpha(190),
-            Border = new Thickness(0), Radius = new Radius(0), TextAlign = ContentAlignment.MiddleLeft,
+            Dock = DockStyle.Bottom, Height = 34, Padding = new Thickness(16, 0, 16, 0),
+            Border = new Thickness(0, 1, 0, 0),
+            Radius = new Radius(0), TextAlign = ContentAlignment.MiddleLeft,
         };
+        Tint(_statusHost,
+            background: () => ColorScheme.SurfaceContainerHigh,
+            foreground: () => ColorScheme.ForeColor.WithAlpha(190),
+            border: () => ColorScheme.Outline.WithAlpha(50));
 
         // First document must exist before panels bind to it.
         var firstDoc = NewDocument();
@@ -64,6 +76,7 @@ public sealed class StudioWindow : Window
         _layoutBar = new LayoutHelperBar(() => _active) { Dock = DockStyle.Top, Height = 92, Margin = new Thickness(0, 0, 0, 10) };
 
         BuildLayout();
+        TabView = _documents; // hosts the tab strip in the native title bar (TabViewMode.TitleBar)
         AttachSurface(_active);
         WireShell();
 
@@ -78,37 +91,95 @@ public sealed class StudioWindow : Window
 
     private void BuildLayout()
     {
-        var toolbar = Panel(DockStyle.Top, height: 54);
-        toolbar.Padding = new Thickness(10, 8, 10, 8);
+        var toolbar = Panel(DockStyle.Top, height: 48);
+        toolbar.Padding = new Thickness(12, 8, 12, 8);
+        toolbar.Border = new Thickness(0, 0, 0, 1);
+        Tint(toolbar, background: () => ColorScheme.SurfaceContainerHigh, border: () => ColorScheme.Outline.WithAlpha(50));
 
-        var newDocButton = ToolButton("＋ Doc", 78);
-        var newButton = ToolButton("New", 62);
-        var openButton = ToolButton("Open…", 78);
-        var saveButton = ToolButton("Save", 66);
-        var exportButton = ToolButton("Export", 82);
-        var zoomOut = ToolButton("−", 40);
-        var zoomIn = ToolButton("+", 40);
-        var zoomFit = ToolButton("Fit", 52);
-        var gridToggle = Toggle("Grid", true, 80);
-        var snapToggle = Toggle("Snap", true, 84);
-        var guidesToggle = Toggle("Guides", true, 96);
-        var themeToggle = Toggle("Dark", ColorScheme.IsDarkMode, 82);
+        var newDocButton = new ToolbarButton("new-doc", "New document");
+        var newButton = new ToolbarButton("new", "New (clear canvas)");
+        var openButton = new ToolbarButton("open", "Open project…");
+        var saveButton = new ToolbarButton("save", "Save project (Ctrl+S)");
+        var exportButton = new ToolbarButton("export", "Export designer code");
+        var zoomOut = new ToolbarButton("zoom-out", "Zoom out", 28f);
+        var zoomIn = new ToolbarButton("zoom-in", "Zoom in", 28f);
+        var zoomFit = new ToolbarButton("zoom-fit", "Fit to view", 28f);
+        var gridToggle = new ToolbarButton("grid", "Show grid", 28f) { CheckOnClick = true, Checked = true };
+        var snapToggle = new ToolbarButton("snap", "Snap to grid", 28f) { CheckOnClick = true, Checked = true };
+        var guidesToggle = new ToolbarButton("guides", "Smart guides", 28f) { CheckOnClick = true, Checked = true };
+        var themeToggle = new ToolbarButton("moon", "Toggle dark mode", 28f) { CheckOnClick = true, Checked = ColorScheme.IsDarkMode };
 
+        // A compact segmented "pill" for the zoom cluster instead of four loose buttons. Positioned
+        // with explicit Location/Size (Dock=None) rather than stacked Dock=Left — the reverse-order
+        // docking quirk the rest of the toolbar relies on turned out unreliable for this tightly
+        // packed a 4-in-a-row case: the last child to claim space could end up with zero width and
+        // silently fail to render.
+        const float zoomChildHeight = 28f;
+        var zoomGroup = new Element
+        {
+            Dock = DockStyle.Left, Width = 3 + 28 + 44 + 28 + 28 + 3,
+            Radius = new Radius(9),
+            Border = new Thickness(0), Padding = new Thickness(0),
+            Margin = new Thickness(0, 0, 8, 0),
+        };
+        Tint(zoomGroup, background: () => ColorScheme.SurfaceContainerLow);
+
+        PlaceInZoomGroup(zoomOut, 3f, 28f);
+        PlaceInZoomGroup(_zoomLabel, 31f, 44f);
+        PlaceInZoomGroup(zoomIn, 75f, 28f);
+        PlaceInZoomGroup(zoomFit, 103f, 28f);
+
+        void PlaceInZoomGroup(ElementBase control, float x, float width)
+        {
+            control.Dock = DockStyle.None;
+            control.Margin = new Thickness(0);
+            control.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+            control.Location = new SKPoint(x, 3f);
+            control.Size = new SKSize(width, zoomChildHeight);
+            zoomGroup.Controls.Add(control);
+        }
+
+        // Toolbar is built right-to-left (last-added docks leftmost); grouped into clusters with
+        // thin dividers so related actions read as one unit: theme | view toggles | zoom | preview
+        // | file ops | history.
         foreach (var c in new ElementBase[]
         {
-            themeToggle, guidesToggle, snapToggle, gridToggle,
-            zoomFit, zoomIn, _zoomLabel, zoomOut,
-            _previewButton, exportButton,
-            saveButton, openButton, newButton, newDocButton,
+            themeToggle,
+            Divider(),
+            guidesToggle, snapToggle, gridToggle,
+            Divider(),
+            zoomGroup,
+            Divider(),
+            _previewButton,
+            Divider(),
+            exportButton, saveButton, openButton, newButton, newDocButton,
+            Divider(),
             _redoButton, _undoButton,
         })
         {
             toolbar.Controls.Add(c);
         }
 
-        // Embedded tab strip so document tabs actually render inside the control (the default
-        // TitleBar mode draws them in the window chrome, i.e. invisible here).
-        _documents.TabMode = TabViewMode.Embedded;
+        // Documents live as tabs in the native title bar (like a browser or VS Code) instead of an
+        // embedded strip competing with the toolbar for vertical space. Requires WindowThemeType.Tabbed
+        // and Window.TabView (both set in the constructor) to cooperate with the native chrome.
+        _documents.TabMode = TabViewMode.TitleBar;
+        _documents.TabDesignMode = TabViewDesignMode.Rounded;
+        _documents.TransitionEffect = TabViewTransitionEffect.None;
+        _documents.TabOverflowMode = TabOverflowMode.Scroll;
+        _documents.NewTabButton = true;
+        _documents.TabCloseButton = true;
+        _documents.NewTabButtonClick += (_, _) =>
+        {
+            var d = NewDocument();
+            _documents.SelectedTab = d;
+            SwitchActive(d.Surface);
+        };
+        _documents.TabCloseButtonClick += (_, index) =>
+        {
+            if (_documents.Controls[index] is DesignDocument doc)
+                CloseDocument(doc);
+        };
 
         // Resizable three-column layout via nested SplitContainers: [ left | center | right ].
         var outerSplit = new SplitContainer
@@ -122,20 +193,20 @@ public sealed class StudioWindow : Window
             SplitterDistance = 720f, SplitterWidth = 8f, PanelMinSize = 300f,
         };
 
-        StylePanel(outerSplit.Panel1);
+        StylePanel(outerSplit.Panel1, () => ColorScheme.SurfaceContainerLow);
         StylePanel(innerSplit.Panel2);
 
         outerSplit.Panel1.Controls.Add(_toolbox);
-        outerSplit.Panel1.Controls.Add(Header("Toolbox — Orivy.Controls (auto)"));
+        outerSplit.Panel1.Controls.Add(Header("toolbox", "Toolbox"));
 
         innerSplit.Panel1.Controls.Add(_documents);
 
         innerSplit.Panel2.Controls.Add(_inspector);
-        innerSplit.Panel2.Controls.Add(Header("Properties"));
+        innerSplit.Panel2.Controls.Add(Header("sliders", "Properties"));
         innerSplit.Panel2.Controls.Add(_layoutBar);
-        innerSplit.Panel2.Controls.Add(Header("Layout"));
+        innerSplit.Panel2.Controls.Add(Header("layout", "Layout"));
         innerSplit.Panel2.Controls.Add(_layers);
-        innerSplit.Panel2.Controls.Add(Header("Layers"));
+        innerSplit.Panel2.Controls.Add(Header("layers", "Layers"));
 
         outerSplit.Panel2.Controls.Add(innerSplit);
 
@@ -146,6 +217,9 @@ public sealed class StudioWindow : Window
             if (target > 300f)
                 innerSplit.SplitterDistance = target;
         };
+
+        ExtendMenu = BuildExtendMenu();
+        ExtendBox = true; // ExtendMenu alone only wires the menu — the title-bar button itself opts in separately.
 
         Controls.Add(outerSplit);
         Controls.Add(toolbar);
@@ -166,7 +240,51 @@ public sealed class StudioWindow : Window
         gridToggle.CheckedChanged += (_, _) => _active.ShowGrid = gridToggle.Checked;
         snapToggle.CheckedChanged += (_, _) => { _active.SnapToGrid = snapToggle.Checked; _active.Invalidate(); };
         guidesToggle.CheckedChanged += (_, _) => _active.SmartGuides = guidesToggle.Checked;
-        themeToggle.CheckedChanged += (_, _) => ColorScheme.SetThemeInstant(themeToggle.Checked);
+        themeToggle.CheckedChanged += (_, _) => ColorScheme.IsDarkMode = themeToggle.Checked;
+    }
+
+    /// <summary>
+    /// Menu-driven access to everything the icon toolbar and canvas context menu already offer —
+    /// same actions, same <see cref="Keys"/> shortcuts (rendered automatically via ShortcutKeys,
+    /// not hand-typed into the label like the old context menu items were). Hung off the window's
+    /// native title-bar "extend" button (<see cref="Window.ExtendMenu"/>) instead of a docked
+    /// MenuStrip — matches the same title-bar-first chrome the TitleBar tab strip already uses.
+    /// </summary>
+    private ContextMenuStrip BuildExtendMenu()
+    {
+        var menu = new ContextMenuStrip { ShowShortcutKeys = true };
+
+        var file = menu.AddMenuItem("File");
+        file.AddMenuItem("New Document", (_, _) => { var d = NewDocument(); _documents.SelectedTab = d; SwitchActive(d.Surface); }, Keys.Control | Keys.N);
+        file.AddMenuItem("New (Clear Canvas)", (_, _) => _active.ClearAll());
+        file.AddMenuItem("Open Project…", (_, _) => OpenProject(), Keys.Control | Keys.O);
+        file.AddMenuItem("Save Project", (_, _) => SaveProject(), Keys.Control | Keys.S);
+        file.AddSeparator();
+        file.AddMenuItem("Export Designer Code…", (_, _) => ExportCode(), Keys.Control | Keys.E);
+        file.AddSeparator();
+        file.AddMenuItem("Close Tab", (_, _) => { if (_documents.SelectedTab is DesignDocument d) CloseDocument(d); }, Keys.Control | Keys.W);
+
+        var edit = menu.AddMenuItem("Edit");
+        edit.AddMenuItem("Undo", (_, _) => _active.Commands.Undo(), Keys.Control | Keys.Z);
+        edit.AddMenuItem("Redo", (_, _) => _active.Commands.Redo(), Keys.Control | Keys.Y);
+        edit.AddSeparator();
+        edit.AddMenuItem("Duplicate", (_, _) => _active.DuplicateSelection(), Keys.Control | Keys.D);
+        edit.AddMenuItem("Delete", (_, _) => _active.DeleteSelection(), Keys.Delete);
+        edit.AddMenuItem("Select All", (_, _) => _active.Selection.SetMany(_active.DesignedControls), Keys.Control | Keys.A);
+        edit.AddSeparator();
+        edit.AddMenuItem("Bring to Front", (_, _) => { if (_active.Selection.Primary is { } c) _active.BringToFront(c); });
+        edit.AddMenuItem("Send to Back", (_, _) => { if (_active.Selection.Primary is { } c) _active.SendToBack(c); });
+
+        var view = menu.AddMenuItem("View");
+        view.AddMenuItem("Preview", (_, _) => TogglePreview(), Keys.Control | Keys.P);
+        view.AddSeparator();
+        view.AddMenuItem("Zoom In", (_, _) => _active.Zoom *= 1.25f, Keys.Control | Keys.OemPlus);
+        view.AddMenuItem("Zoom Out", (_, _) => _active.Zoom /= 1.25f, Keys.Control | Keys.OemMinus);
+        view.AddMenuItem("Fit to View", (_, _) => _active.FitToView(), Keys.Control | Keys.D0);
+        view.AddSeparator();
+        view.AddMenuItem("Toggle Dark Mode", (_, _) => ColorScheme.IsDarkMode = !ColorScheme.IsDarkMode);
+
+        return menu;
     }
 
     private void WireShell()
@@ -176,9 +294,19 @@ public sealed class StudioWindow : Window
 
         _dragLayer.Dropped += (entry, screen) =>
         {
+            _active.ClearDropPreview();
             var client = _active.PointToClient(screen);
             if (client.X >= 0 && client.Y >= 0 && client.X <= _active.Width && client.Y <= _active.Height)
                 _active.DropAt(entry, client);
+        };
+
+        _dragLayer.Dragging += (entry, screen) =>
+        {
+            var client = _active.PointToClient(screen);
+            if (client.X >= 0 && client.Y >= 0 && client.X <= _active.Width && client.Y <= _active.Height)
+                _active.PreviewDrop(entry, client);
+            else
+                _active.ClearDropPreview();
         };
 
         _documents.SelectedIndexChanged += (_, _) =>
@@ -206,6 +334,10 @@ public sealed class StudioWindow : Window
                 case Keys.Z: _active.Commands.Undo(); e.Handled = true; break;
                 case Keys.Y: _active.Commands.Redo(); e.Handled = true; break;
                 case Keys.S: SaveProject(); e.Handled = true; break;
+                case Keys.W:
+                    if (_documents.SelectedTab is DesignDocument activeDoc) CloseDocument(activeDoc);
+                    e.Handled = true;
+                    break;
             }
         };
     }
@@ -218,6 +350,31 @@ public sealed class StudioWindow : Window
         var doc = new DesignDocument($"Window{_documentCounter}");
         _documents.Controls.Add(doc);
         return doc;
+    }
+
+    /// <summary>Closes a document tab (native title-bar close button or Ctrl+W). Closing the last
+    /// remaining document resets it to a blank canvas instead — there's always at least one tab.</summary>
+    private void CloseDocument(DesignDocument doc)
+    {
+        if (_documents.Controls.Count <= 1)
+        {
+            doc.Surface.ClearAll();
+            return;
+        }
+
+        var wasActive = ReferenceEquals(_active, doc.Surface);
+        var index = _documents.Controls.IndexOf(doc);
+        _documents.Controls.Remove(doc);
+
+        if (!wasActive)
+            return;
+
+        var nextIndex = Math.Min(index, _documents.Controls.Count - 1);
+        if (_documents.Controls[nextIndex] is DesignDocument next)
+        {
+            _documents.SelectedTab = next;
+            SwitchActive(next.Surface);
+        }
     }
 
     private void SwitchActive(DesignSurface surface)
@@ -262,8 +419,12 @@ public sealed class StudioWindow : Window
 
     private void OnBoundsChanged()
     {
+        // Fires on every mouse-move of a live drag/resize — a full Refresh() would re-walk the whole
+        // property tree (and re-enumerate any expanded collections) dozens of times per second, so
+        // just re-stamp the visible cell text instead. The structural Refresh() still runs once the
+        // gesture commits, via OnStructureChange-adjacent paths.
         _suppressInspectorCommit = true;
-        try { _inspector.Refresh(); }
+        try { _inspector.RefreshVisibleValues(); }
         finally { _suppressInspectorCommit = false; }
         _layoutBar.Refresh();
         UpdateStatus();
@@ -308,7 +469,8 @@ public sealed class StudioWindow : Window
     private void TogglePreview()
     {
         _active.PreviewMode = !_active.PreviewMode;
-        _previewButton.Text = _active.PreviewMode ? "⏹ Design" : "▶ Preview";
+        _previewButton.Icon = _active.PreviewMode ? "stop" : "play";
+        _previewButton.SetToolTip(_active.PreviewMode ? "Stop preview" : "Preview");
         UpdateStatus();
     }
 
@@ -387,7 +549,7 @@ public sealed class StudioWindow : Window
         bar.Controls.Add(close);
         bar.Controls.Add(save);
 
-        var box = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, Text = code, Margin = new Thickness(12) };
+        var box = new RichTextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, Text = code, Margin = new Thickness(12) };
         save.Click += (_, _) =>
         {
             var dialog = new SaveFileDialog { Title = "Save designer code", FileName = "MyWindow.Designer.cs", Filter = "C# source (*.cs)|*.cs" };
@@ -420,39 +582,92 @@ public sealed class StudioWindow : Window
 
     // ── UI factories ─────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Applies a theme-reactive tint via <see cref="ElementBase.ConfigureVisualStyles"/> instead of
+    /// a raw <c>BackColor =</c>/<c>ForeColor =</c> snapshot. A direct assignment freezes whatever
+    /// <see cref="ColorScheme"/> returned at construction time — it never updates on a dark/light
+    /// toggle. The color callbacks passed here are re-invoked live every time the theme changes.
+    /// </summary>
+    private static void Tint(ElementBase element, Func<SKColor>? background = null, Func<SKColor>? foreground = null, Func<SKColor>? border = null)
+    {
+        element.ConfigureVisualStyles(styles => styles.Base(b =>
+        {
+            if (background != null) b.Background(background());
+            if (foreground != null) b.Foreground(foreground());
+            if (border != null) b.BorderColor(border());
+        }));
+    }
+
     private static Element Panel(DockStyle dock, int width = 0, int height = 0)
     {
         var panel = new Element
         {
-            Dock = dock, BackColor = ColorScheme.SurfaceContainer,
-            Border = new Thickness(0), Radius = new Radius(0), Padding = new Thickness(10),
+            Dock = dock, Border = new Thickness(0), Radius = new Radius(0), Padding = new Thickness(10),
         };
         if (width > 0) panel.Width = width;
         if (height > 0) panel.Height = height;
         return panel;
     }
 
-    private static void StylePanel(Element panel)
+    /// <summary>Styles a split-container side column. A slightly lower tone than the toolbar/status
+    /// chrome keeps the three-tier depth (chrome → panel → canvas) readable at a glance.</summary>
+    private static void StylePanel(Element panel, Func<SKColor>? tone = null)
     {
-        panel.BackColor = ColorScheme.SurfaceContainer;
-        panel.Padding = new Thickness(10);
+        Tint(panel, background: tone ?? (() => ColorScheme.SurfaceContainer));
+        panel.Padding = new Thickness(10, 10, 10, 10);
     }
 
-    private static Element Header(string text) => new()
+    /// <summary>A thin vertical rule used to separate logical clusters of toolbar controls.</summary>
+    private static Element Divider()
     {
-        Text = text, Dock = DockStyle.Top, Height = 26,
-        BackColor = SKColors.Transparent, ForeColor = ColorScheme.ForeColor.WithAlpha(170),
-        Border = new Thickness(0), Radius = new Radius(0), TextAlign = ContentAlignment.MiddleLeft,
-        Margin = new Thickness(2, 0, 0, 4),
-    };
+        var divider = new Element
+        {
+            Dock = DockStyle.Left, Width = 1, Margin = new Thickness(6, 6, 6, 6),
+            Border = new Thickness(0), Radius = new Radius(0),
+        };
+        Tint(divider, background: () => ColorScheme.Outline.WithAlpha(65));
+        return divider;
+    }
 
-    private static Button ToolButton(string text, int width) => new()
+    /// <summary>Section header for a side panel: a small glyph + title, with an optional muted
+    /// subtitle underneath, separated from its content by a hairline.</summary>
+    private static Element Header(string icon, string title, string? subtitle = null)
     {
-        Text = text, Dock = DockStyle.Left, Width = width, Margin = new Thickness(0, 0, 8, 0),
-    };
+        var host = new Element
+        {
+            Dock = DockStyle.Top, Height = subtitle == null ? 30 : 44,
+            Border = new Thickness(0, 0, 0, 1),
+            Radius = new Radius(0), Padding = new Thickness(0, 0, 0, 6), Margin = new Thickness(0, 0, 0, 10),
+        };
+        Tint(host, border: () => ColorScheme.Outline.WithAlpha(45));
 
-    private static CheckBox Toggle(string text, bool value, int width) => new()
-    {
-        Text = text, Checked = value, Dock = DockStyle.Left, Width = width, Margin = new Thickness(4, 0, 4, 0),
-    };
+        if (subtitle != null)
+        {
+            var subtitleLabel = new Element
+            {
+                Text = subtitle, Dock = DockStyle.Top, Height = 16, Padding = new Thickness(22, 0, 0, 0),
+                Border = new Thickness(0), Radius = new Radius(0), TextAlign = ContentAlignment.TopLeft,
+            };
+            Tint(subtitleLabel, foreground: () => ColorScheme.ForeColor.WithAlpha(120));
+            host.Controls.Add(subtitleLabel);
+        }
+
+        var titleRow = new Element
+        {
+            Dock = DockStyle.Top, Height = subtitle == null ? 28 : 22,
+            Border = new Thickness(0), Radius = new Radius(0),
+        };
+        var titleLabel = new Element
+        {
+            Text = title, Dock = DockStyle.Fill,
+            Border = new Thickness(0), Radius = new Radius(0), TextAlign = ContentAlignment.MiddleLeft,
+        };
+        Tint(titleLabel, foreground: () => ColorScheme.ForeColor.WithAlpha(230));
+        titleRow.Controls.Add(titleLabel);
+        titleRow.Controls.Add(new IconGlyph(icon));
+        host.Controls.Add(titleRow);
+
+        return host;
+    }
+
 }

@@ -225,6 +225,8 @@ private IntPtr _hWnd;
     /// </summary>
     public bool IsLoaded { get; private set; }
 
+    private bool _shownFired;
+
     /// <summary>
     /// Gets or sets the width, in pixels, of the window's Desktop Window Manager (DWM) margin.
     /// </summary>
@@ -770,10 +772,17 @@ private IntPtr _hWnd;
 
     public override void  OnLoad(EventArgs e)
     {
+        // WindowBase declares its own Load event (line ~441), separate from — and hiding —
+        // ElementBase's Load event. Public code referencing a WindowBase/Window-typed variable
+        // (the overwhelmingly common case) binds to THIS field, so it must be raised here; calling
+        // only base.OnLoad(e) fires ElementBase's hidden field instead, which has no external
+        // subscribers and silently swallows every Load handler. The caller (see the WM_SHOWWINDOW
+        // case in WndProc) already guards against calling OnLoad more than once, so no extra guard
+        // is needed here.
         base.OnLoad(e);
+        Load?.Invoke(this, e);
 
         IsLoaded = true;
-        Load?.Invoke(this, e);
 
         foreach (var c in Controls)
             if (c is ElementBase child)
@@ -801,6 +810,13 @@ private IntPtr _hWnd;
         else if (_formStartPosition == FormStartPosition.CenterParent)
             CenterToParent();
 
+        // Load and Shown are both deferred until after WM_SHOWWINDOW's DefWindowProc call (see the
+        // WM_SHOWWINDOW case in WndProc). Orivy's MessageBox/notification dialogs are in-window
+        // overlays rendered by the owner's own surface, not separate native top-level windows, so
+        // they can only actually paint once this window is mapped and has completed its first native
+        // show/paint. Firing Load synchronously here (before ShowWindow) meant a blocking
+        // MessageBox.Show() called from a Load handler never let ShowWindow run at all, leaving the
+        // window permanently invisible.
         ShowWindow(_hWnd, 5);
         Application.SetActiveForm(this);
     }
@@ -829,11 +845,14 @@ private IntPtr _hWnd;
         else if (_formStartPosition == FormStartPosition.CenterParent)
             CenterToParent();
 
+        // See the comment in Show() — Load and Shown both fire after WM_SHOWWINDOW's native show
+        // sequence completes, deferred via BeginInvoke, so overlay dialogs opened from either handler
+        // can actually render.
         ShowWindow(_hWnd, 5);
         Application.SetActiveForm(this);
 
         MSG msg;
-        while (!_formClosed && GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
+        while (!_formClosed && !Application.ExitRequested && GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
         {
             TranslateMessage(ref msg);
             DispatchMessage(ref msg);
@@ -922,6 +941,7 @@ private IntPtr _hWnd;
                 child.EnsureUnloadedRecursively();
 
         IsLoaded = false;
+        _shownFired = false;
     }
 
     private SKPoint GetMousePosition(IntPtr lParam)
@@ -1417,15 +1437,29 @@ private IntPtr _hWnd;
                 }
             case WindowMessage.WM_SHOWWINDOW:
                 {
-                    // wParam: TRUE if the window is being shown, FALSE if being hidden
+                    // wParam: TRUE if the window is being shown, FALSE if being hidden.
+                    // Both Load and Shown are deferred via BeginInvoke instead of being raised
+                    // synchronously right here: this handler runs BEFORE DefWindowProc has finished
+                    // the native show sequence, so a modal/overlay dialog opened from either handler
+                    // used to leave the window's own first paint/activation stuck behind it — the
+                    // window looked frozen/invisible. Posting them lets DefWindowProc (and the
+                    // resulting WM_PAINT) run first, and Load is posted ahead of Shown so it still
+                    // fires first, matching normal event ordering.
+                    var result = DefWindowProc(hWnd, msg, wParam, lParam);
+
                     bool isShowing = wParam != IntPtr.Zero;
-                    if (isShowing && !IsLoaded)
+                    if (isShowing && !_shownFired)
                     {
-                        EnsureLoadedRecursively();
-                        IsLoaded = true;
-                        OnShown(EventArgs.Empty);
+                        _shownFired = true;
+                        BeginInvoke(() =>
+                        {
+                            if (!IsLoaded)
+                                OnLoad(EventArgs.Empty);
+                            BeginInvoke(() => OnShown(EventArgs.Empty));
+                        });
                     }
-                    return DefWindowProc(hWnd, msg, wParam, lParam);
+
+                    return result;
                 }
             case WindowMessage.WM_NCDESTROY:
                 {

@@ -8,7 +8,7 @@ public class RequiredFieldValidationRule : ValidationRule
     {
         if (string.IsNullOrWhiteSpace(element.Text))
         {
-            errorMessage = ErrorMessage ?? "Bu alan boş bırakılamaz.";
+            errorMessage = ErrorMessage ?? "This field cannot be left empty.";
             return false;
         }
 

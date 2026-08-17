@@ -106,6 +106,16 @@ public static class ControlCatalog
         ["SplitContainer"] = new(300, 200),
     };
 
+    private static readonly SKSize FallbackSize = new(160, 40);
+
+    /// <summary>
+    /// The size a freshly-placed instance of <paramref name="entry"/> would get, without paying for
+    /// an instantiation. Used for the live drag/drop ghost preview and to size a drop before the
+    /// real control exists.
+    /// </summary>
+    public static SKSize DefaultSizeFor(ControlEntry entry) =>
+        DefaultSizes.TryGetValue(entry.DisplayName, out var size) ? size : FallbackSize;
+
     public static IReadOnlyList<ControlEntry> Discover()
     {
         var assembly = typeof(ElementBase).Assembly;

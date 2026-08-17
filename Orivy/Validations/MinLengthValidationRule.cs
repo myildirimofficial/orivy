@@ -10,7 +10,7 @@ public class MinLengthValidationRule : ValidationRule
     {
         if (element.Text.Length < MinLength)
         {
-            errorMessage = ErrorMessage ?? $"Bu alan en az {MinLength} karakter olmalıdır.";
+            errorMessage = ErrorMessage ?? $"This field must be at least {MinLength} characters.";
             return false;
         }
 

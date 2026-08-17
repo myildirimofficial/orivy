@@ -276,9 +276,9 @@ public sealed class TextBlobBatcher : IDisposable
     /// all segments in the group. Avoids per-segment array allocation
     /// (was: ~500 allocs/frame for a 100-line window; now: 0).
     ///
-    /// v5.2 FIX: SkiaSharp 3.119'da SKFont.GetGlyphs(ReadOnlySpan<char>, Span<ushort>)
-    /// void döner. CountGlyphs ile gerçek glyph sayısını al, sonra span overload
-    /// ile buffer'ı doldur.</summary>
+    /// v5.2 FIX: in SkiaSharp 3.119, SKFont.GetGlyphs(ReadOnlySpan<char>, Span<ushort>)
+    /// returns void. Get the real glyph count via CountGlyphs first, then fill
+    /// the buffer with the span overload.</summary>
     private SKTextBlob? BuildBlob(List<int> segmentIndices)
     {
         if (segmentIndices.Count == 0)
@@ -291,17 +291,17 @@ public sealed class TextBlobBatcher : IDisposable
             var seg = _segments[idx];
             var textSpan = seg.Text.AsSpan(seg.TextStart, seg.TextLen);
 
-            // v5.2: CountGlyphs ile gerçek glyph sayısını al.
-            // (Combine marks vs simple text farkı için. Latin için == TextLen.)
+            // v5.2: get the real glyph count via CountGlyphs.
+            // (Accounts for combining marks vs. plain text; equals TextLen for Latin.)
             var glyphCount = seg.Font.CountGlyphs(textSpan);
             if (glyphCount == 0)
                 continue;
 
-            // Buffer'ı gerekiyorsa büyüt.
+            // Grow the buffer if needed.
             if (_reusableGlyphBuffer == null || _reusableGlyphBuffer.Length < glyphCount)
                 _reusableGlyphBuffer = new ushort[glyphCount];
 
-            // v5.2: void overload — buffer'ı doldurur, count döndürmez.
+            // v5.2: void overload — fills the buffer, doesn't return a count.
             seg.Font.GetGlyphs(textSpan, _reusableGlyphBuffer.AsSpan(0, glyphCount));
 
             // Allocate run with absolute (X, Y) baseline offset.

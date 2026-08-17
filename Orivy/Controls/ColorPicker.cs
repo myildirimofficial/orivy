@@ -353,7 +353,8 @@ public sealed partial class ColorPicker : ElementBase
 
         canvas.RestoreToCount(save);
 
-        // Alpha yüzdesini barın hemen yanına göster (bar içinde değil, sürükleyici topu etkilemez).
+        // Show the alpha percentage right next to the bar (not inside it, so it doesn't interfere
+        // with the drag thumb).
         var alphaText = FormattableString.Invariant($"{Math.Round(_alphaValue * 100f):0}%");
         var detailFont = GetDetailFont();
         var textMargin = Scale(10f, ScaleFactor, 8f);
@@ -362,7 +363,7 @@ public sealed partial class ColorPicker : ElementBase
 
         _textPaint!.Color = ForeColor;
 
-        // Sağ tarafa yaslanmış, barın yanındaki boşlukta.
+        // Right-aligned, in the gap next to the bar.
         var textBounds = SKRect.Create(textX, rect.Top, Scale(54f, ScaleFactor, 36f), rect.Height);
         TextRenderer.DrawText(canvas, alphaText, textBounds, _textPaint, detailFont, ContentAlignment.MiddleLeft, false, false);
     }

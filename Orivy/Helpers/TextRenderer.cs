@@ -536,13 +536,18 @@ public static class TextRenderer
         TextRenderOptions options)
     {
         var lines = TextWrapper.WrapText(text, font, options.MaxWidth, options.Wrap);
-        var baseLineHeight = GetBaseLineHeight(font);
         var lineAdvance = GetLineAdvance(font, options.LineSpacing);
         var currentY = y;
 
         foreach (var line in lines)
         {
-            var renderedHeight = (currentY - y) + baseLineHeight;
+            // Compare against lineAdvance (the caller's intended per-line height, honoring a
+            // compressed LineSpacing) rather than the font's raw, uncompressed metrics. A caller
+            // that reserves height using its own formula and compensates with LineSpacing < 1
+            // (e.g. NotificationToast sizing its message area) would otherwise have even the FIRST
+            // line rejected as "too tall" whenever the font's natural line height exceeds that
+            // formula's estimate, silently dropping the entire message.
+            var renderedHeight = (currentY - y) + lineAdvance;
             if (renderedHeight > options.MaxHeight)
                 break;
 
@@ -831,7 +836,6 @@ public static class TextRenderer
     {
         var lines = TextWrapper.WrapText(text, font, maxWidth, options.Wrap);
 
-        var baseLineHeight = GetBaseLineHeight(font);
         var lineAdvance = GetLineAdvance(font, options.LineSpacing);
 
         float totalHeight = 0;
@@ -840,7 +844,9 @@ public static class TextRenderer
 
         foreach (var line in lines)
         {
-            var nextHeight = lineCount == 0 ? baseLineHeight : baseLineHeight + (lineCount * lineAdvance);
+            // See DrawWrappedText for why this checks against lineAdvance (the caller's intended
+            // per-line height) rather than the font's raw, uncompressed baseLineHeight.
+            var nextHeight = (lineCount + 1) * lineAdvance;
             if (nextHeight > maxHeight)
                 break;
 

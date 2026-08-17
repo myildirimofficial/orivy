@@ -295,7 +295,7 @@ public class RichTextBox : Orivy.Controls.TextBox
         // v4: bump layout generation → line cache sees stale entries.
         _layoutGeneration++;
         _lineCache?.InvalidateAll();
-        // v5.1: pipeline'ı da invalidate et.
+        // v5.1: invalidate the pipeline too.
         _pipeline?.Invalidate();
     }
 
@@ -498,6 +498,72 @@ public class RichTextBox : Orivy.Controls.TextBox
     public TextStyle GetStyleAt(int charIndex)
         => _document.GetStyleAt(charIndex);
 
+    // ── Hit-testing ─────────────────────────────────────────────────────
+
+    /// <summary>Returns the character index closest to <paramref name="point"/>
+    /// (control-local coordinates). In Plain mode this delegates to the base
+    /// TextBox's single-font hit-test. In MarkdownSource/MarkdownPreview/Rtf
+    /// modes it uses the run-aware layout pipeline, since mixed fonts (bold,
+    /// monospace, headings, ...) make per-line x offsets differ from the
+    /// base class's single-font measurement.</summary>
+    public override int GetCharIndexFromPosition(SKPoint point)
+    {
+        if (_mode == RichTextMode.Plain)
+            return base.GetCharIndexFromPosition(point);
+
+        EnsureFontCache();
+        EnsureActiveRuns();
+        _pipeline!.EnsureLayout();
+
+        var viewport = GetTextViewportSafe();
+        var clampedX = Math.Clamp(point.X, viewport.Left, viewport.Right);
+        var clampedY = Math.Clamp(point.Y, viewport.Top, viewport.Bottom);
+
+        var lines = _pipeline.Lines;
+        var lineHeight = _pipeline.LineHeight;
+        var topInset = _pipeline.GetContentTopInset(viewport);
+        var scrollX = GetHorizontalScrollSafe();
+        var scrollY = GetVerticalScrollSafe();
+
+        var localY = clampedY - viewport.Top + scrollY - topInset;
+        var lineIndex = Math.Clamp((int)Math.Floor(localY / Math.Max(1f, lineHeight)), 0, lines.Count - 1);
+        var line = lines[lineIndex];
+
+        var localX = clampedX - viewport.Left + scrollX;
+        if (localX <= 0f || line.Length == 0)
+            return line.Start;
+
+        return line.Start + GetClosestRunAwareColumn(line, localX);
+    }
+
+    /// <summary>Binary search for the column within <paramref name="line"/> whose
+    /// run-aware x offset is closest to <paramref name="targetX"/>. Mirrors the
+    /// base TextBox's GetClosestColumn, but measures through the pipeline so
+    /// mixed-style runs are accounted for.</summary>
+    private int GetClosestRunAwareColumn(RichTextLineLayout line, float targetX)
+    {
+        var lower = 0;
+        var upper = line.Length;
+
+        while (lower < upper)
+        {
+            var mid = (lower + upper + 1) / 2;
+            var midX = _pipeline!.MeasureRangeWidth(line.Start, mid);
+            if (midX <= targetX)
+                lower = mid;
+            else
+                upper = mid - 1;
+        }
+
+        var next = Math.Min(line.Length, lower + 1);
+        if (next == lower)
+            return lower;
+
+        var lowerX = _pipeline!.MeasureRangeWidth(line.Start, lower);
+        var nextX = _pipeline!.MeasureRangeWidth(line.Start, next);
+        return Math.Abs(nextX - targetX) < Math.Abs(targetX - lowerX) ? next : lower;
+    }
+
     // ── v4: Undo / Redo ────────────────────────────────────────────────
 
     /// <summary>Take a snapshot of the current document state before a
@@ -566,9 +632,8 @@ public class RichTextBox : Orivy.Controls.TextBox
         _fontCache?.Clear();
         InvalidateRuns();
         InvalidateTextLayout();
-        // v5.1: pipeline invalidate (InvalidateRuns içinde zaten yapılıyor
-        // ama emin olmak için tekrar çağırıyoruz — _fontCache.Clear sonrası
-        // metrics değişmiş olabilir).
+        // v5.1: invalidate the pipeline (InvalidateRuns already does this, but we call it
+        // again to be safe — metrics may have changed after _fontCache.Clear).
         _pipeline?.Invalidate();
     }
 
@@ -582,7 +647,7 @@ public class RichTextBox : Orivy.Controls.TextBox
         InvalidateRuns();
     }
 
-    // v5.1: layout'a etki eden tüm değişikliklerde pipeline invalidate.
+    // v5.1: invalidate the pipeline on every change that affects layout.
     public override void  OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
@@ -787,21 +852,20 @@ public class RichTextBox : Orivy.Controls.TextBox
 
     private void DrawRichTextContent(SKCanvas canvas)
     {
-        // v5.2: TAM ÇALIŞAN pipeline + SCROLL DESTEĞİ.
+        // v5.2: FULLY WORKING pipeline + SCROLL SUPPORT.
         //
         // Pipeline:
-        //   1. EnsureActiveRuns() — text → runs (mod-bazlı)
+        //   1. EnsureActiveRuns() — text → runs (mode-based)
         //   2. _pipeline.EnsureLayout() — runs → _lines
         //   3. canvas.Save + ClipRect(viewport) + Translate(-scrollX, -scrollY)
         //   4. For each visible line: AddLineSegmentsToBatch
         //   5. _blobBatcher.Flush — batched draw
         //   6. canvas.Restore
         //
-        // SCROLL DÜZELTMESİ (v5.2): Önceden scroll offset uygulanmıyordu,
-        // bu yüzden scrollbar kaydırılsa bile metin sabit kalıyordu. Şimdi
-        // canvas.Translate(viewport.Left - scrollX, viewport.Top - scrollY)
-        // ile scroll offset'i uyguluyoruz — mevcut TextBox.OnPaint ile aynı
-        // pattern.
+        // SCROLL FIX (v5.2): scroll offset wasn't applied before, so the text stayed
+        // fixed even when the scrollbar was dragged. Now we apply the scroll offset via
+        // canvas.Translate(viewport.Left - scrollX, viewport.Top - scrollY) — the same
+        // pattern the existing TextBox.OnPaint uses.
 
         EnsureFontCache();
         EnsureActiveRuns();
@@ -812,24 +876,24 @@ public class RichTextBox : Orivy.Controls.TextBox
         if (viewport.Width <= 0f || viewport.Height <= 0f)
             return;
 
-        // v5.2: scroll offset'leri al.
+        // v5.2: get the scroll offsets.
         var scrollX = GetHorizontalScrollSafe();
         var scrollY = GetVerticalScrollSafe();
         var topInset = _pipeline.GetContentTopInset(viewport);
         var lineHeight = _pipeline.LineHeight;
         var baselineOffset = _pipeline.BaselineOffset;
 
-        // v5.2: canvas state'i kaydet, clip + translate uygula.
-        // Bu, mevcut TextBox.OnPaint'in yaptığı ile birebir aynı pattern.
+        // v5.2: save canvas state, apply clip + translate.
+        // This is the exact same pattern the existing TextBox.OnPaint uses.
         var saveCount = canvas.Save();
         canvas.ClipRect(viewport);
-        // Translate: viewport sol-üst köşesinden başla, scroll offset kadar geri kaydır.
-        // Böylece scroll yapıldıkça metin viewport içinde kayar.
+        // Translate: start from the viewport's top-left corner, shift back by the scroll offset.
+        // This makes the text move within the viewport as it's scrolled.
         canvas.Translate(viewport.Left - scrollX, viewport.Top - scrollY);
 
         try
         {
-            // Placeholder: text boşsa placeholder çiz.
+            // Placeholder: draw the placeholder when the text is empty.
             if (string.IsNullOrEmpty(text))
             {
                 DrawPlaceholder(canvas, viewport);
@@ -838,8 +902,8 @@ public class RichTextBox : Orivy.Controls.TextBox
 
             var lines = _pipeline.Lines;
 
-            // v5.2: visible satır aralığını scroll offset'e göre hesapla.
-            // scrollY arttıkça firstLine artar (daha aşağıdaki satırlar görünür).
+            // v5.2: compute the visible line range from the scroll offset.
+            // firstLine increases as scrollY increases (lower lines become visible).
             var firstLine = Math.Max(0, (int)Math.Floor(scrollY / Math.Max(1f, lineHeight)) - 1);
             var lastLine = Math.Min(lines.Count - 1,
                 (int)Math.Ceiling((scrollY + viewport.Height) / Math.Max(1f, lineHeight)) + 1);
@@ -847,7 +911,7 @@ public class RichTextBox : Orivy.Controls.TextBox
             var baseFont = _fontCache!.GetBaseFont();
             var baseStyle = new TextStyle { ForeColor = base.ForeColor };
 
-            // v3: SKTextBlob batching — tüm visible segmentleri topla, tek flush.
+            // v3: SKTextBlob batching — collect all visible segments, then a single flush.
             _blobBatcher!.BeginFrame();
 
             for (var i = firstLine; i <= lastLine; i++)
@@ -856,36 +920,36 @@ public class RichTextBox : Orivy.Controls.TextBox
                 if (line.Length == 0)
                     continue;
 
-                // v5.2: baseline Y hesabı — topInset + satır index * lineHeight + baseline.
-                // canvas Translate ile (-scrollY) uygulandığı için, bu Y değeri
-                // canvas space'te doğru pozisyona gelir.
+                // v5.2: baseline Y calculation — topInset + line index * lineHeight + baseline.
+                // Since canvas.Translate already applied (-scrollY), this Y value lands at the
+                // correct position in canvas space.
                 var baselineY = topInset + i * lineHeight + baselineOffset;
                 AddLineSegmentsToBatch(
                     text, line.Start, line.Length,
                     baselineY, _activeRuns, baseStyle, baseFont,
-                    canvasOriginX: 0);  // 0: çünkü canvas zaten translate edildi
+                    canvasOriginX: 0);  // 0: the canvas is already translated
             }
 
             _blobBatcher.Flush(canvas, _fillPaint!, _strokePaint!);
         }
         finally
         {
-            // v5.2: canvas state'i geri al.
+            // v5.2: restore canvas state.
             canvas.RestoreToCount(saveCount);
         }
     }
 
-    /// <summary>v5.1: Placeholder text çizimi. Multiline modda dahi doğru
-    /// pozisyonda çizilir — topInset hesaplanır, baseline offset uygulanır.
+    /// <summary>v5.1: Placeholder text drawing. Draws at the correct position even in
+    /// multiline mode — topInset is computed and the baseline offset applied.
     ///
-    /// DÜZELTME (v5.1): Mevcut TextBox'ta placeholder çizimi
+    /// FIX (v5.1): the existing TextBox used
     /// `DrawLineText(canvas, _placeholderText, 0f, _baselineOffset, _placeholderPaint)`
-    /// kullanıyordu — bu multiline'da topInset=0 olduğu için placeholder
-    /// çok yukarıda kalıyordu. Burada topInset hesaplanıyor.
+    /// for the placeholder — since topInset=0 in multiline mode, this left the
+    /// placeholder sitting too high. topInset is computed here instead.
     ///
-    /// v5.2: Bu metot DrawRichTextContent içinde canvas.Translate sonrası
-    /// çağrılır. Bu yüzden X=0 (translate zaten viewport.Left'e kaydırdı).
-    /// Placeholder scroll edilmez (text boşken scroll anlamsız).</summary>
+    /// v5.2: this method is called from DrawRichTextContent after canvas.Translate,
+    /// hence X=0 (the translate already shifted to viewport.Left).
+    /// The placeholder isn't scrolled (scrolling is meaningless while the text is empty).</summary>
     private void DrawPlaceholder(SKCanvas canvas, SKRect viewport)
     {
         var placeholder = base.PlaceholderText;
@@ -896,14 +960,14 @@ public class RichTextBox : Orivy.Controls.TextBox
         var topInset = _pipeline!.GetContentTopInset(viewport);
         var baselineY = topInset + _pipeline.BaselineOffset;
 
-        // Placeholder rengi: focused ise biraz daha parlak.
+        // Placeholder color: a bit brighter when focused.
         var placeholderColor = base.Enabled
             ? (base.Focused ? base.ForeColor.WithAlpha(124) : base.ForeColor.WithAlpha(96))
             : base.ForeColor.WithAlpha(82);
 
         _fillPaint!.Color = placeholderColor;
         _fillPaint.Style = SKPaintStyle.Fill;
-        // v5.2: canvas translate sonrası X=0 viewport.Left'e karşılık gelir.
+        // v5.2: after the canvas translate, X=0 corresponds to viewport.Left.
         canvas.DrawText(placeholder, 0, baselineY, SKTextAlign.Left, font, _fillPaint);
     }
 
@@ -1090,7 +1154,7 @@ public class RichTextBox : Orivy.Controls.TextBox
             _fillPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
             _strokePaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round };
 
-            // v5.1: layout pipeline. Func'larla owner state'ine erişir.
+            // v5.1: layout pipeline. Accesses owner state via delegates.
             _pipeline = new RichTextLayoutPipeline(
                 owner: this,
                 getText: () => GetActiveText(),
@@ -1121,49 +1185,48 @@ public class RichTextBox : Orivy.Controls.TextBox
         }
     }
 
-    // v5.2: base class üyelerine güvenli erişim. Bu metotlar base class'taki
-    // `_vScrollBar`, `_hScrollBar` field'larını ve `GetTextViewport`,
-    // `GetVerticalScrollOffset`, `GetHorizontalScrollOffset` metotlarını
-    // çağırır. Eğer bunlar protected internal DEĞİLSE, integrator
-    // INTEGRATION.md'ye göre expose etmeli.
+    // v5.2: safe access to base class members. These methods call the base class's
+    // `_vScrollBar`/`_hScrollBar` fields and `GetTextViewport`, `GetVerticalScrollOffset`,
+    // `GetHorizontalScrollOffset` methods. If those are NOT protected internal, the
+    // integrator needs to expose them per INTEGRATION.md.
     //
-    // Eğer base class hiçbirini expose etmiyorsa, bu metotlar 0 döner ve
-    // scroll ÇALIŞMAZ (metin sabit kalır). Bu, kullanıcının bildirdiği
-    // "scroll çalışmıyor" sorunudur.
+    // If the base class doesn't expose any of them, these methods return 0 and
+    // scrolling WON'T WORK (the text stays fixed). This is the user-reported
+    // "scroll doesn't work" issue.
 
     private SKRect GetTextViewportSafe()
     {
-        // Önce base class'ta GetTextViewport metodu varsa onu çağır.
-        // (Reflection ile değil, direkt — integrator protected internal yapmalı.)
-        // Şimdilik DisplayRectangle kullanıyoruz. Eğer base class expose
-        // ediyorsa, bu metodu değiştirin:
+        // Prefer calling the base class's GetTextViewport method if it has one.
+        // (Directly, not via reflection — the integrator should make it protected internal.)
+        // Using DisplayRectangle for now. If the base class exposes it, change this
+        // method to:
         //   return base.GetTextViewport();
         return base.DisplayRectangle;
     }
 
     private float GetVerticalScrollSafe()
     {
-        // v5.2: base class'taki _vScrollBar.DisplayValue oku.
-        // Mevcut TextBox kodu:
+        // v5.2: read the base class's _vScrollBar.DisplayValue.
+        // Existing TextBox code:
         //   private float GetVerticalScrollOffset()
         //   {
         //       return _vScrollBar?.Visible == true ? _vScrollBar.DisplayValue : 0f;
         //   }
         //
-        // Eğer _vScrollBar protected internal ise, şu satırı açın:
+        // If _vScrollBar is protected internal, uncomment this line:
         //   return _vScrollBar?.Visible == true ? _vScrollBar.DisplayValue : 0f;
         //
-        // Eğer GetVerticalScrollOffset() metodu protected internal ise:
+        // If the GetVerticalScrollOffset() method is protected internal:
         //   return base.GetVerticalScrollOffset();
         //
-        // Şimdilik 0 döner — INTEGRATION.md'e göre expose edilmeli.
+        // Returns 0 for now — needs to be exposed per INTEGRATION.md.
         return 0f;
     }
 
     private float GetHorizontalScrollSafe()
     {
-        // Aynı şekilde _hScrollBar.DisplayValue.
-        // Şimdilik 0.
+        // Same idea for _hScrollBar.DisplayValue.
+        // 0 for now.
         return 0f;
     }
 

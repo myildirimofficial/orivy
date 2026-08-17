@@ -83,11 +83,14 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     private SKFont? _defaultTextRenderFontSource;
     private float _defaultTextRenderFontScale;
 
+    [Browsable(false)]
     public int LayoutSuspendCount { get => _layoutSuspendCount; set => _layoutSuspendCount = value; }
 
     private ElementBase _parent;
 
     public bool IsHandleCreated;
+
+    [Browsable(false)]
     public bool CanFocus => Enabled && Visible && Selectable;
 
     public ElementBase()
@@ -176,6 +179,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
+    [Browsable(false)]
     public bool Disposing { get; set; }
 
     protected ScrollBar? _vScrollBar;
@@ -238,6 +242,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     protected bool IsPerformingLayout { get; private set; }
 
+    [Browsable(false)]
     public WindowBase? ParentWindow
     {
         get
@@ -257,6 +262,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     [Browsable(false)]
     public ElementCollection Controls { get; }
 
+    [Browsable(false)]
     public bool HasParent => _parent != null;
     public object Tag { get; set; }
 
@@ -467,6 +473,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         return this;
     }
 
+    [Browsable(false)]
     public ElementBase Parent
     {
         get => _parent;
@@ -497,6 +504,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     /// Represents the thickness of the border. This field is initialized to zero thickness by default.
     /// </summary>
     public Thickness _border = new(0);
+    [Category("Layout")]
     public virtual Thickness Border
     {
         get => _border;
@@ -534,6 +542,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     /// Represents the thickness of the border. This field is initialized to zero thickness by default.
     /// </summary>
     public Radius _radius = new(0);
+    [Category("Appearance")]
     public Radius Radius
     {
         get => _radius;
@@ -814,6 +823,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     private SKPoint _renderLocationOverride;
     private bool _hasRenderLocationOverride;
 
+    [Category("Layout")]
     public virtual SKPoint Location
     {
         get => _location;
@@ -926,6 +936,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private SKSize _size = new(100, 23);
 
+    [Category("Layout")]
     public virtual SKSize Size
     {
         get => _size;
@@ -951,6 +962,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
+    [Browsable(false)]
     public virtual SKRect Bounds
     {
         get => SKRect.Create(Location, Size);
@@ -966,17 +978,20 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     ///  Retrieves our internal property storage object. If you have a property
     ///  whose value is not always set, you should store it in here to save space.
     /// </summary>
+    [Browsable(false)]
     public PropertyStore Properties { get; }
 
     /// <summary>
     /// Gets the rectangle that defines the client area of the control in device-independent pixels.
     /// </summary>
+    [Browsable(false)]
     public virtual SKRect ClientRectangle => SKRect.Create(0, 0, Size.Width, Size.Height);
 
     /// <summary>
     ///     Gets the rectangle that represents the display area of the control (client area minus padding).
     ///     This is where child controls are positioned.
     /// </summary>
+    [Browsable(false)]
     public virtual SKRect DisplayRectangle
     {
         get
@@ -1029,6 +1044,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private bool _visible = true;
 
+    [Category("Behavior")]
     public virtual bool Visible
     {
         get => _visible;
@@ -1045,6 +1061,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private bool _enabled = true;
 
+    [Category("Behavior")]
     public virtual bool Enabled
     {
         get => _enabled;
@@ -1061,6 +1078,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private SKColor _backColor = SKColors.Transparent;
 
+    [Category("Appearance")]
     public virtual SKColor BackColor
     {
         get => _backColor;
@@ -1080,6 +1098,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
     private SKColor _foreColor = SKColors.Transparent;
+    [Category("Appearance")]
     public virtual SKColor ForeColor
     {
         get => _foreColor == SKColors.Transparent ? ColorScheme.ForeColor : _foreColor;
@@ -1099,6 +1118,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
     private SKFont? _font;
+    [Category("Appearance")]
     public virtual SKFont Font
     {
         get => _font ?? Application.SharedDefaultFont;
@@ -1175,6 +1195,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private string _text = string.Empty;
 
+    [Category("Appearance")]
     public virtual string Text
     {
         get => _text;
@@ -1197,6 +1218,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private Thickness _padding;
 
+    [Category("Layout")]
     public virtual Thickness Padding
     {
         get => _padding;
@@ -1215,6 +1237,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private Thickness _margin;
 
+    [Category("Layout")]
     public virtual Thickness Margin
     {
         get => _margin;
@@ -1236,6 +1259,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private bool _tabStop = false;
 
+    [Category("Behavior")]
     public virtual bool TabStop
     {
         get => _tabStop;
@@ -1252,6 +1276,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private int _tabIndex;
 
+    [Category("Behavior")]
     public virtual int TabIndex
     {
         get => _tabIndex;
@@ -1271,6 +1296,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     private AnchorStyles _anchor = AnchorStyles.Top | AnchorStyles.Left;
     internal Layout.AnchorInfo? _anchorInfo;
 
+    [Category("Layout")]
     public virtual AnchorStyles Anchor
     {
         get => DefaultLayout.GetAnchor(this);
@@ -1292,6 +1318,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private DockStyle _dock = DockStyle.None;
 
+    [Category("Layout")]
     public virtual DockStyle Dock
     {
         get => DefaultLayout.GetDock(this);
@@ -1311,6 +1338,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private bool _autoSize;
 
+    [Category("Layout")]
     public virtual bool AutoSize
     {
         get => CommonProperties.GetAutoSize(this);
@@ -1333,6 +1361,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private AutoSizeMode _autoSizeMode = AutoSizeMode.GrowAndShrink;
 
+    [Category("Layout")]
     public virtual AutoSizeMode AutoSizeMode
     {
         get => CommonProperties.GetAutoSizeMode(this);
@@ -1374,8 +1403,10 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     private int _zOrder;
 
     /// <summary>
-    /// Gets or sets the width component of the size.
+    /// Gets or sets the width component of the size. Hidden from the property grid — redundant
+    /// with <see cref="Size"/>, which now has its own "120, 40" inline text shortcut.
     /// </summary>
+    [Browsable(false)]
     public int Width
     {
         get => (int)Size.Width;
@@ -1383,8 +1414,10 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
     /// <summary>
-    /// Gets or sets the height component of the size.
+    /// Gets or sets the height component of the size. Hidden from the property grid — redundant
+    /// with <see cref="Size"/>, which now has its own "120, 40" inline text shortcut.
     /// </summary>
+    [Browsable(false)]
     public int Height
     {
         get => (int)Size.Height;
@@ -1580,12 +1613,14 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     [DllImport("user32.dll")]
     private static extern short GetKeyState(int nVirtKey);
 
+    [Browsable(false)]
     public bool IsDisposed { get; private set; }
 
     private ElementBase _focusedElement;
     private ElementBase _lastHoveredElement;
 
 
+    [Browsable(false)]
     public ElementBase FocusedElement
     {
         get => _focusedElement;
@@ -1612,6 +1647,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
+    [Browsable(false)]
     public ElementBase LastHoveredElement
     {
         get => _lastHoveredElement;
@@ -1696,6 +1732,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     [Browsable(false)]
     public bool HasValidationError => !IsValid;
 
+    [Browsable(false)]
     public bool NeedsRedraw { get; set; } = true;
 
     /// <summary>
@@ -2259,13 +2296,40 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     protected static MouseEventArgs CreateChildMouseEvent(MouseEventArgs source, ElementBase element)
     {
         var elementWindowRect = GetWindowRelativeBounds(element);
+        var scale = GetCumulativeAncestorRenderScale(element);
+        var localX = (source.X - elementWindowRect.Location.X) / scale;
+        var localY = (source.Y - elementWindowRect.Location.Y) / scale;
         return new MouseEventArgs(
             source.Button,
             source.Clicks,
-            source.X - (int)elementWindowRect.Location.X,
-            source.Y - (int)elementWindowRect.Location.Y,
+            (int)localX,
+            (int)localY,
             source.Delta,
             source.IsHorizontalWheel);
+    }
+
+    /// <summary>
+    /// Product of every ancestor's <see cref="ChildRenderScale"/> above <paramref name="element"/>
+    /// (e.g. a zoomed design-canvas viewport). <see cref="GetWindowRelativeBounds"/> returns a
+    /// position in real screen/rendered pixels, but a captured mouse event must be translated into
+    /// the element's own logical coordinate space — the same space regular (non-captured) hit-tested
+    /// events already arrive in via <see cref="GetInputCandidatePoint"/>. Skipping this division is
+    /// invisible at 1:1 scale (the everyday case) but corrupts every drag delta once any ancestor is
+    /// zoomed in or out.
+    /// </summary>
+    private static float GetCumulativeAncestorRenderScale(ElementBase element)
+    {
+        var scale = 1f;
+        var current = element.Parent as ElementBase;
+        while (current != null)
+        {
+            var childScale = current.ChildRenderScale;
+            if (Math.Abs(childScale - 1f) > 0.0001f)
+                scale *= childScale;
+            current = current.Parent as ElementBase;
+        }
+
+        return scale <= 0.0001f ? 1f : scale;
     }
 
     protected static SKRect GetWindowRelativeBounds(ElementBase element)
@@ -3293,6 +3357,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         Parent.Invalidate();
     }
 
+    [Browsable(false)]
     public bool IsAncestorSiteInDesignMode { get; internal set; }
 
     public virtual void  AdjustSize()

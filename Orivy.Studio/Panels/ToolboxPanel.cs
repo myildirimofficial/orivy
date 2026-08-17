@@ -25,8 +25,8 @@ public sealed class ToolboxPanel : Element
         _search = new TextBox
         {
             Dock = DockStyle.Top,
-            Height = 36,
-            Margin = new Thickness(0, 0, 0, 8),
+            Height = 32,
+            Margin = new Thickness(0, 0, 0, 6),
             PlaceholderText = "Search controls…",
         };
         _search.TextChanged += (_, _) => _list.Filter(_search.Text);

@@ -156,7 +156,7 @@ public class Application
             MessageLoop = true;
             window.Show();
 
-            while (true)
+            while (!ExitRequested)
 			{
                 // Raise Idle right before the loop would block on an empty queue (WinForms semantics).
                 if (Idle != null && !PeekMessage(out _, IntPtr.Zero, 0, 0, 0 /* PM_NOREMOVE */))
@@ -327,11 +327,24 @@ public class Application
     public static string LocalUserAppDataPath => BuildAppDataPath(Environment.SpecialFolder.LocalApplicationData);
 
     /// <summary>
+    /// <summary>
+    /// True once <see cref="Exit"/> has been called. A modal <c>ShowDialog()</c> runs its own nested
+    /// GetMessage loop that only watches for its own Close() — it has no way to know an Exit() posted
+    /// WM_QUIT elsewhere, and Win32 delivers a posted WM_QUIT to whichever GetMessage call happens to
+    /// dequeue it, not necessarily the outermost Run() loop. Every loop in the framework should check
+    /// this flag cooperatively so a dialog left open during Exit() doesn't strand the process running
+    /// with no visible window.
+    /// </summary>
+    internal static bool ExitRequested { get; private set; }
+
+    /// <summary>
     /// Informs all message pumps that they must terminate, then closes all open forms after the
     /// messages have been processed. Ends the <see cref="Run(WindowBase)"/> message loop.
     /// </summary>
     public static void Exit()
     {
+        ExitRequested = true;
+
         // Close every open form first (fires FormClosing/FormClosed). Iterate a snapshot because
         // closing mutates _openForms.
         foreach (var form in _openForms.ToArray())
@@ -342,7 +355,11 @@ public class Application
 
         RaiseApplicationExit();
 
-        // Post WM_QUIT so the Run() / ShowDialog() GetMessage loop returns 0 and unwinds.
+        // Post WM_QUIT so the Run() / ShowDialog() GetMessage loop returns 0 and unwinds. Belt and
+        // suspenders alongside ExitRequested above — WM_QUIT still handles the common case cleanly
+        // (and is what makes e.g. GetMessage return promptly instead of blocking), but ExitRequested
+        // is what guarantees a nested ShowDialog() loop actually stops even if it dequeues messages
+        // other than the WM_QUIT itself first.
         PostQuitMessage(0);
     }
 

@@ -11,7 +11,7 @@ public class RegexValidationRule : ValidationRule
     {
         if (!Regex.IsMatch(element.Text, Pattern))
         {
-            errorMessage = ErrorMessage ?? "Geçersiz format.";
+            errorMessage = ErrorMessage ?? "Invalid format.";
             return false;
         }
 

@@ -104,8 +104,16 @@ internal sealed class OpenGLRenderer : IWindowRenderer
 
         if (_glContext != IntPtr.Zero && _deviceContext != IntPtr.Zero)
         {
-            WglNativeMethods.wglMakeCurrent(_deviceContext, _glContext);
-            WglNativeMethods.glViewport(0, 0, width, height);
+            // wglMakeCurrent is a per-THREAD global, not per-renderer: in a multi-window app another
+            // window's OpenGLRenderer may have left a different (or no) context current on this
+            // thread. Calling glViewport without successfully making OUR context current first is
+            // exactly the kind of native call that can hard-crash the process with an
+            // AccessViolationException instead of a catchable managed exception — so, like Render(),
+            // skip the GL call entirely if the context switch fails.
+            if (!WglNativeMethods.wglMakeCurrent(_deviceContext, _glContext))
+                System.Diagnostics.Debug.WriteLine("[OpenGLRenderer] Resize: wglMakeCurrent failed, skipping glViewport");
+            else
+                WglNativeMethods.glViewport(0, 0, width, height);
         }
 
         _surface?.Dispose();
@@ -196,8 +204,18 @@ internal sealed class OpenGLRenderer : IWindowRenderer
         if (_disposed || _grContext == null)
             return;
 
+        // Same reasoning as Resize(): PurgeResources() issues native GL calls, and this thread's
+        // "current" context may belong to a different window's renderer right now. Without making
+        // ours current first, those calls can land on the wrong (or no) context.
+        if (_deviceContext == IntPtr.Zero || _glContext == IntPtr.Zero ||
+            !WglNativeMethods.wglMakeCurrent(_deviceContext, _glContext))
+        {
+            System.Diagnostics.Debug.WriteLine("[OpenGLRenderer] TrimCaches: wglMakeCurrent failed, skipping purge");
+            return;
+        }
+
         _grContext.PurgeResources();
-        
+
         _surface?.Dispose();
         _surface = null;
     }
