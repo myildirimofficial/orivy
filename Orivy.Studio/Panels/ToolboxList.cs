@@ -49,7 +49,7 @@ public sealed class ToolboxList : Element
 
         // Reactive tint (re-evaluated on every theme change) instead of a frozen BackColor snapshot.
         ConfigureVisualStyles(styles => styles.Base(b => b
-            .Background(ColorScheme.Surface)
+            .Background(ColorScheme.Surface.WithAlpha(178))
             .BorderColor(ColorScheme.Outline.WithAlpha(60))));
     }
 

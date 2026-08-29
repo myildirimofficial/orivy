@@ -10,6 +10,32 @@ namespace Orivy.Studio.Toolbox;
 /// </summary>
 internal static class ToolbarIcons
 {
+    /// <summary>
+    /// Rasterizes a glyph into a standalone <see cref="SKImage"/> at <paramref name="pixelSize"/> —
+    /// for hosts that need a bitmap rather than a live paint callback (e.g. <c>TabView</c> page icons,
+    /// which read <c>ElementBase.Image</c> instead of calling back into application paint code).
+    /// </summary>
+    public static SKImage CreateImage(string name, float pixelSize, SKColor color, float strokeWidth = 1.6f)
+    {
+        var size = Math.Max(1, (int)MathF.Ceiling(pixelSize));
+        using var surface = SKSurface.Create(new SKImageInfo(size, size, SKColorType.Rgba8888, SKAlphaType.Premul));
+        var canvas = surface.Canvas;
+        canvas.Clear(SKColors.Transparent);
+
+        using var paint = new SKPaint
+        {
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeCap = SKStrokeCap.Round,
+            StrokeJoin = SKStrokeJoin.Round,
+            StrokeWidth = strokeWidth,
+            Color = color,
+        };
+        Draw(canvas, name, new SKRect(0, 0, size, size), paint);
+        canvas.Flush();
+        return surface.Snapshot();
+    }
+
     public static void Draw(SKCanvas canvas, string name, SKRect bounds, SKPaint paint)
     {
         var size = Math.Min(bounds.Width, bounds.Height);
@@ -47,6 +73,12 @@ internal static class ToolbarIcons
             case "send-back": SendBack(canvas, paint); break;
             case "design-view": DesignView(canvas, paint); break;
             case "code-view": CodeView(canvas, paint); break;
+            case "explorer": Explorer(canvas, paint); break;
+            case "folder": Folder(canvas, paint); break;
+            case "file": FileGlyph(canvas, paint); break;
+            case "group": Group(canvas, paint); break;
+            case "eye": Eye(canvas, paint); break;
+            case "lock": Lock(canvas, paint); break;
         }
 
         canvas.RestoreToCount(saved);
@@ -261,6 +293,69 @@ internal static class ToolbarIcons
         using var right = new SKPath();
         right.MoveTo(14.5f, 6); right.LineTo(20, 12); right.LineTo(14.5f, 18);
         c.DrawPath(right, p);
+    }
+
+    /// <summary>A small file tree — the project/solution explorer view.</summary>
+    private static void Explorer(SKCanvas c, SKPaint p)
+    {
+        c.DrawLine(5, 4, 5, 20, p);
+        c.DrawLine(5, 7, 10, 7, p);
+        c.DrawLine(5, 13, 10, 13, p);
+        c.DrawLine(5, 19, 10, 19, p);
+        c.DrawRoundRect(new SKRect(12, 4.5f, 20, 9.5f), 1.5f, 1.5f, p);
+        c.DrawRoundRect(new SKRect(12, 10.5f, 20, 15.5f), 1.5f, 1.5f, p);
+        c.DrawRoundRect(new SKRect(12, 16.5f, 20, 21f), 1.5f, 1.5f, p);
+    }
+
+    private static void Folder(SKCanvas c, SKPaint p)
+    {
+        using var path = new SKPath();
+        path.MoveTo(4, 7); path.LineTo(9.5f, 7); path.LineTo(11, 9); path.LineTo(20, 9);
+        path.LineTo(20, 18); path.LineTo(4, 18); path.Close();
+        c.DrawPath(path, p);
+    }
+
+    private static void FileGlyph(SKCanvas c, SKPaint p)
+    {
+        using var path = new SKPath();
+        path.MoveTo(6, 3.5f); path.LineTo(14, 3.5f); path.LineTo(18, 7.5f); path.LineTo(18, 20.5f);
+        path.LineTo(6, 20.5f); path.Close();
+        c.DrawPath(path, p);
+        c.DrawLine(14, 3.5f, 14, 7.5f, p);
+        c.DrawLine(14, 7.5f, 18, 7.5f, p);
+    }
+
+    /// <summary>An open eye — visibility toggle, matching the Layers panel's visibility column.</summary>
+    private static void Eye(SKCanvas c, SKPaint p)
+    {
+        using var path = new SKPath();
+        path.MoveTo(3, 12);
+        path.CubicTo(new SKPoint(6.5f, 6), new SKPoint(17.5f, 6), new SKPoint(21, 12));
+        path.CubicTo(new SKPoint(17.5f, 18), new SKPoint(6.5f, 18), new SKPoint(3, 12));
+        path.Close();
+        c.DrawPath(path, p);
+        c.DrawCircle(12, 12, 2.6f, p);
+    }
+
+    /// <summary>A padlock — the Layers panel's lock-toggle column and the canvas's locked-control badge.</summary>
+    private static void Lock(SKCanvas c, SKPaint p)
+    {
+        c.DrawRoundRect(new SKRect(5.5f, 11, 18.5f, 20), 2f, 2f, p);
+        using var shackle = new SKPath();
+        shackle.MoveTo(8, 11);
+        shackle.LineTo(8, 8);
+        shackle.ArcTo(new SKPoint(12, 4), new SKPoint(16, 8), 4);
+        shackle.LineTo(16, 11);
+        c.DrawPath(shackle, p);
+    }
+
+    /// <summary>A dashed bounding box around two child shapes — a control group / nesting container.</summary>
+    private static void Group(SKCanvas c, SKPaint p)
+    {
+        using var dashed = new SKPaint { IsAntialias = true, Style = p.Style, StrokeWidth = p.StrokeWidth, StrokeCap = p.StrokeCap, StrokeJoin = p.StrokeJoin, Color = p.Color, PathEffect = SKPathEffect.CreateDash(new[] { 2.5f, 2.5f }, 0f) };
+        c.DrawRoundRect(new SKRect(3.5f, 3.5f, 20.5f, 20.5f), 3f, 3f, dashed);
+        c.DrawRoundRect(new SKRect(7, 7, 13, 13), 1.5f, 1.5f, p);
+        c.DrawRoundRect(new SKRect(13.5f, 13.5f, 19.5f, 19.5f), 1.5f, 1.5f, p);
     }
 
     /// <summary>Two overlapping squares — the frontmost one solid, matching "bring to front".</summary>

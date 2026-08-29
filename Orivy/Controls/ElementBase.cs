@@ -2394,11 +2394,17 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             {
                 var consumesWheelByScrolling = target.HandlesMouseWheelScroll;
                 var targetBounds = GetWindowRelativeBounds(target);
+                // Same reasoning as CreateChildMouseEvent: targetBounds is in real screen/rendered
+                // pixels, but the wheel target's own OnMouseWheel expects its logical coordinate
+                // space (e.g. a zoomed design-canvas viewport). Without dividing by the cumulative
+                // ancestor scale, e.Location handed to a zoomed target (like DesignSurface's
+                // Ctrl+wheel zoom-at-cursor) drifts further off with every zoom step past 1:1.
+                var scale = GetCumulativeAncestorRenderScale(target);
                 var localEvent = new MouseEventArgs(
                     e.Button,
                     e.Clicks,
-                    (int)windowMousePos.X - (int)targetBounds.Left,
-                    (int)windowMousePos.Y - (int)targetBounds.Top,
+                    (int)((windowMousePos.X - targetBounds.Left) / scale),
+                    (int)((windowMousePos.Y - targetBounds.Top) / scale),
                     e.Delta,
                     e.IsHorizontalWheel);
 

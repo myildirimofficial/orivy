@@ -258,12 +258,12 @@ private IntPtr _hWnd;
             _showInTaskbar = value;
             if (IsHandleCreated)
             {
-                var exStyle = GetWindowLong(Handle, -16);
+                var exStyle = GetWindowLong(Handle, (int)WindowLongIndexFlags.GWL_EXSTYLE);
                 if (value)
-                    exStyle &= ~(int)0x00000080;
+                    exStyle &= ~(int)SetWindowLongFlags.WS_EX_TOOLWINDOW;
                 else
-                    exStyle |= 0x00000080;
-                SetWindowLong(Handle, -16, exStyle);
+                    exStyle |= (int)SetWindowLongFlags.WS_EX_TOOLWINDOW;
+                SetWindowLong(Handle, (int)WindowLongIndexFlags.GWL_EXSTYLE, exStyle);
             }
         }
     }
@@ -355,6 +355,12 @@ private IntPtr _hWnd;
             cp.Style = (int)WindowStyles.WS_OVERLAPPEDWINDOW;
             cp.Style &= ~(int)WindowStyles.WS_SYSMENU;
             cp.ExStyle = 0;
+
+            // ShowInTaskbar's setter only reaches SetWindowLong once IsHandleCreated is true, so the
+            // common "set before Show()" pattern needs the bit applied here too, at the window's
+            // initial creation.
+            if (!_showInTaskbar)
+                cp.ExStyle |= (uint)SetWindowLongFlags.WS_EX_TOOLWINDOW;
 
             // Class styles
             if (!_aeroEnabled)

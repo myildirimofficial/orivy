@@ -164,10 +164,17 @@ public abstract partial class ElementBase
         }
     }
 
+    private static readonly SKSamplingOptions SmoothImageSampling = new(SKFilterMode.Linear, SKMipmapMode.Linear);
+
     internal void RenderImageSlot(SKCanvas canvas, SKRect bounds)
     {
+        // The no-sampling-options DrawImage overload defaults to nearest-neighbor, which is fine at
+        // 1:1 but turns blocky/pixelated the moment the image (e.g. a TabView tab icon rasterized at
+        // a specific size) is drawn into a rect even slightly smaller or larger than its native
+        // pixels — exactly the case for icon slots at varying DPI/zoom. Linear + mipmap sampling
+        // keeps it smooth both scaling down and up.
         if (_image != null)
-            canvas.DrawImage(_image, bounds);
+            canvas.DrawImage(_image, bounds, SmoothImageSampling);
 
         if (_imageLoading)
             RenderRemoteImageLoadingSpinner(canvas, bounds);

@@ -46,7 +46,7 @@ public class ComboBox : ElementBase
 {
     private const int DefaultDropDownItemHeight = 36;
     private const int DefaultDropDownVerticalPadding = 8;
-    private const int DefaultHeight = 40;
+    private const int DefaultHeight = 24;
     private const int DefaultMaxDropDownItems = 8;
     private const int DefaultMinWidth = 140;
     private const int DefaultWidth = 200;
@@ -108,7 +108,7 @@ public class ComboBox : ElementBase
         CanSelect = true;
         MinimumSize = new SKSize(DefaultMinWidth, DefaultHeight);
         Padding = new Thickness(14, 0, 48, 0);
-        Radius = new Radius(12);
+        Radius = new Radius(8);
         Size = new SKSize(DefaultWidth, DefaultHeight);
         TabStop = true;
         TextAlign = ContentAlignment.MiddleLeft;
@@ -415,9 +415,11 @@ public class ComboBox : ElementBase
         var measuredText = ResolvePreferredMeasurementText();
         font.MeasureText(measuredText, out var textBounds);
 
+        // Padding.Right already reserves room for the chevron (see the constructor's asymmetric
+        // Padding), so adding GetChevronSlotWidth() here again was double-counting roughly 40px of
+        // width on every ComboBox — the actual reason the default box always measured much wider than
+        // its text needed.
         var width = textBounds.Width + Padding.Left + Padding.Right + Border.Left + Border.Right;
-        if (ShowDropDownArrow)
-            width += GetChevronSlotWidth();
         if (ShowSelectionIndicator && HasSelection)
             width += 10f * ScaleFactor;
         if (ShowItemColorPreview)
@@ -779,7 +781,7 @@ public class ComboBox : ElementBase
                     .Foreground(ColorScheme.ForeColor)
                     .Border(1)
                     .BorderColor(ColorScheme.Outline.WithAlpha(118))
-                    .Radius(12)
+                    .Radius(8)
                     .Shadow(BoxShadow.None))
                 .OnHover(rule => rule
                     .Background(ColorScheme.SurfaceContainer)

@@ -39,6 +39,17 @@ public sealed class DesignSurface : Element
     /// <summary>Controls excluded from hit-testing and dragging (still rendered).</summary>
     public HashSet<ElementBase> Locked { get; } = new();
 
+    /// <summary>
+    /// Top-level designed controls that act as control groups: a container other controls have been
+    /// nested into via <see cref="GroupSelection"/> or a toolbox drop while hovering it (see
+    /// <see cref="DesignOverlay"/>'s drag-highlight). A group's own children are real nested
+    /// <see cref="ElementBase.Controls"/> — they render, save/load and code-gen for free through
+    /// normal parent/child composition — but are NOT part of <see cref="DesignedControls"/>: the
+    /// canvas selects/moves/resizes a group as one unit rather than exposing per-child grips, so
+    /// hit-testing, marquee selection and alignment don't need to become nesting-aware.
+    /// </summary>
+    public HashSet<ElementBase> Groups { get; } = new();
+
     public event Action? StructureChanged;
     public event Action? SelectionBoundsChanged;
     public event Action? ZoomChanged;
@@ -62,7 +73,7 @@ public sealed class DesignSurface : Element
             Padding = new Thickness(0),
         };
         _root.ConfigureVisualStyles(styles => styles.Base(b => b
-            .Background(ColorScheme.Surface)
+            .Background(ColorScheme.Surface.WithAlpha(140))
             .BorderColor(ColorScheme.Outline.WithAlpha(140))));
 
         _overlay = new DesignOverlay(this)
@@ -196,7 +207,14 @@ public sealed class DesignSurface : Element
 
     // ── Editing operations (all undoable) ────────────────────────────────────
 
-    public ElementBase AddControl(ControlEntry entry, SKPoint? location = null)
+    public ElementBase AddControl(ControlEntry entry, SKPoint? location = null) => AddControl(entry, location, null);
+
+    /// <summary>
+    /// Adds a new control. When <paramref name="group"/> is set, the control nests as that group's
+    /// child instead of the root's — <paramref name="location"/> is then interpreted relative to the
+    /// group, matching where it will actually render.
+    /// </summary>
+    public ElementBase AddControl(ControlEntry entry, SKPoint? location, ElementBase? group)
     {
         var control = entry.CreateInstance();
         PrepareForDesign(control);
@@ -208,36 +226,50 @@ public sealed class DesignSurface : Element
         var at = location ?? new SKPoint(cascade, cascade);
         control.Location = new SKPoint(Snap(at.X), Snap(at.Y));
 
+        var parentControls = group != null ? group.Controls : _root.Controls;
         Commands.Execute(new DelegateCommand(
-            $"Add {entry.DisplayName}",
-            () => { _root.Controls.Add(control); AfterStructureChange(); Selection.SelectOnly(control); },
-            () => { Selection.Remove(control); _root.Controls.Remove(control); Locked.Remove(control); AfterStructureChange(); }));
+            group != null ? $"Add {entry.DisplayName} to {group.Name}" : $"Add {entry.DisplayName}",
+            () => { parentControls.Add(control); AfterStructureChange(); Selection.SelectOnly(group ?? control); },
+            () => { Selection.Remove(control); parentControls.Remove(control); Locked.Remove(control); AfterStructureChange(); }));
 
         return control;
     }
 
-    /// <summary>Drops a toolbox entry at a point given in this surface's client (screen-derived) space.</summary>
+    /// <summary>Drops a toolbox entry at a point given in this surface's client (screen-derived) space.
+    /// Nests into whatever existing control is hovered (see <see cref="PreviewDrop"/>), if any — any
+    /// designed control can host children, not just an explicit <see cref="Groups"/> shell.</summary>
     public ElementBase DropAt(ControlEntry entry, SKPoint clientPoint)
     {
         var size = entry.CreateInstance().Size; // default size to center the drop under the cursor
-        var target = DropTargetLocation(clientPoint, size);
+        var logical = ToLogical(clientPoint);
+        var target = FindNestingTargetAt(logical);
+        var location = DropTargetLocation(logical, size, target);
         ClearDropPreview();
-        return AddControl(entry, target);
+        return AddControl(entry, location, target);
     }
 
     private ControlEntry? _previewEntry;
     private SKRect _previewRect;
+    private ElementBase? _previewGroup;
+
+    /// <summary>The control a toolbox drag is currently hovering, if any — drawn as a highlighted
+    /// nesting target by <see cref="DesignOverlay"/> and used by <see cref="DropAt"/> on release.</summary>
+    internal ElementBase? PreviewGroup => _previewGroup;
 
     /// <summary>
     /// Shows a live ghost of where <paramref name="entry"/> would land if dropped at
     /// <paramref name="clientPoint"/> right now — called continuously while a toolbox drag hovers
-    /// over the canvas, so the user sees the snapped placement before releasing.
+    /// over the canvas, so the user sees the snapped placement before releasing. Also detects and
+    /// highlights whatever existing control is under the cursor as a nesting target.
     /// </summary>
     public void PreviewDrop(ControlEntry entry, SKPoint clientPoint)
     {
         var size = ControlCatalog.DefaultSizeFor(entry);
-        var location = DropTargetLocation(clientPoint, size);
+        var logical = ToLogical(clientPoint);
+        var target = FindNestingTargetAt(logical);
+        var location = DropTargetLocation(logical, size, target);
         _previewEntry = entry;
+        _previewGroup = target;
         _previewRect = SKRect.Create(location, size);
         Invalidate();
     }
@@ -245,19 +277,269 @@ public sealed class DesignSurface : Element
     /// <summary>Hides the drop ghost (drag left the canvas, was dropped, or was cancelled).</summary>
     public void ClearDropPreview()
     {
-        if (_previewEntry == null)
+        if (_previewEntry == null && _previewGroup == null)
             return;
         _previewEntry = null;
+        _previewGroup = null;
         Invalidate();
     }
 
-    /// <summary>Snapped, root-relative top-left for a <paramref name="size"/>d control centered under a client-space point.</summary>
-    private SKPoint DropTargetLocation(SKPoint clientPoint, SKSize size)
+    /// <summary>Client (screen-derived) point → this surface's logical (pan/zoom-undone) space.</summary>
+    private SKPoint ToLogical(SKPoint clientPoint) => new(clientPoint.X / _zoom, clientPoint.Y / _zoom);
+
+    /// <summary>Sets (or clears, with null) the nesting target highlighted while dragging an existing
+    /// control over the canvas — shares the toolbox-drop preview's paint code and field.</summary>
+    internal void SetHoverNestingTarget(ElementBase? target)
     {
-        // Convert client → logical child space (undo pan + zoom), then to root-relative.
-        var logical = new SKPoint(clientPoint.X / _zoom, clientPoint.Y / _zoom);
-        var rootRel = new SKPoint(logical.X - _root.Location.X, logical.Y - _root.Location.Y);
+        if (ReferenceEquals(_previewGroup, target))
+            return;
+        _previewGroup = target;
+        Invalidate();
+    }
+
+    /// <summary>
+    /// The deepest designed control — at any nesting depth, root included implicitly via a null
+    /// result — whose bounds contain a point already in this surface's logical space. This is the
+    /// single nesting-target rule shared by toolbox drops (<see cref="PreviewDrop"/>/<see cref="DropAt"/>)
+    /// and dragging an already-placed control onto another (<see cref="TryReparentOnDrop"/>): any
+    /// designed control can host children, matching the "everything can become another's container"
+    /// behavior a real designer offers, rather than requiring an explicit group shell first.
+    /// </summary>
+    internal ElementBase? FindNestingTargetAt(SKPoint logicalPoint, ElementBase? excluding = null)
+    {
+        var rootRel = new SKPoint(logicalPoint.X - _root.Location.X, logicalPoint.Y - _root.Location.Y);
+        return FindNestingTargetRecursive(DesignedControls, rootRel, excluding);
+    }
+
+    private ElementBase? FindNestingTargetRecursive(IEnumerable<ElementBase> candidates, SKPoint parentRel, ElementBase? excluding)
+    {
+        ElementBase? best = null;
+        var bestZ = int.MinValue;
+        foreach (var child in candidates)
+        {
+            if (!child.Visible || Locked.Contains(child))
+                continue;
+            if (excluding != null && (ReferenceEquals(child, excluding) || IsDescendantOf(child, excluding)))
+                continue;
+            if (!SKRect.Create(child.Location, child.Size).Contains(parentRel))
+                continue;
+            if (child.ZOrder >= bestZ)
+            {
+                best = child;
+                bestZ = child.ZOrder;
+            }
+        }
+
+        if (best == null)
+            return null;
+
+        var childRel = new SKPoint(parentRel.X - best.Location.X, parentRel.Y - best.Location.Y);
+        var nested = FindNestingTargetRecursive(NestedDesignedChildrenOf(best), childRel, excluding);
+        return nested ?? best;
+    }
+
+    private static IEnumerable<ElementBase> NestedDesignedChildrenOf(ElementBase control)
+    {
+        foreach (var c in control.Controls)
+            if (c is ElementBase child and not ScrollBar)
+                yield return child;
+    }
+
+    /// <summary>Is <paramref name="ancestorCandidate"/> an ancestor of <paramref name="control"/>?
+    /// Used to keep a dragged control from being dropped into one of its own descendants.</summary>
+    private static bool IsDescendantOf(ElementBase control, ElementBase ancestorCandidate)
+    {
+        var current = control.Parent;
+        while (current != null)
+        {
+            if (ReferenceEquals(current, ancestorCandidate))
+                return true;
+            current = current.Parent;
+        }
+
+        return false;
+    }
+
+    /// <summary>Root-relative position of a designed control at any nesting depth — walks up through
+    /// container parents, accumulating their locations, until reaching the design root.</summary>
+    internal SKPoint GetDesignSpaceLocation(ElementBase control)
+    {
+        var x = control.Location.X;
+        var y = control.Location.Y;
+        var current = control.Parent;
+        while (current != null && !ReferenceEquals(current, _root))
+        {
+            x += current.Location.X;
+            y += current.Location.Y;
+            current = current.Parent;
+        }
+
+        return new SKPoint(x, y);
+    }
+
+    /// <summary>Snapped top-left for a <paramref name="size"/>d control centered under a logical-space
+    /// point — relative to <paramref name="parent"/> when given, otherwise root-relative.</summary>
+    private SKPoint DropTargetLocation(SKPoint logicalPoint, SKSize size, ElementBase? parent = null)
+    {
+        var rootRel = new SKPoint(logicalPoint.X - _root.Location.X, logicalPoint.Y - _root.Location.Y);
+        if (parent != null)
+        {
+            var parentAbsolute = GetDesignSpaceLocation(parent);
+            rootRel = new SKPoint(rootRel.X - parentAbsolute.X, rootRel.Y - parentAbsolute.Y);
+        }
+
         return new SKPoint(Snap(rootRel.X - size.Width / 2f), Snap(rootRel.Y - size.Height / 2f));
+    }
+
+    /// <summary>
+    /// Called when a single-selection move drag ends: if the drop point now lands over a different
+    /// existing control than the one it started in, reparents it there (or back to the root, if
+    /// dropped in empty canvas space), rewriting its Location to stay relative to the new parent
+    /// while preserving where it visually ended up. Returns false (no-op) when the parent didn't
+    /// change, so the caller can fall back to a plain <see cref="CommitBoundsChange"/>. One undo step
+    /// covers the whole gesture — move and reparent together — rather than two.
+    /// </summary>
+    internal bool TryReparentOnDrop(ElementBase control, SKPoint logicalDropPoint, SKRect preDragRect)
+    {
+        if (Locked.Contains(control))
+            return false;
+
+        var newParent = FindNestingTargetAt(logicalDropPoint, excluding: control) ?? _root;
+        var currentParent = control.Parent ?? _root;
+        if (ReferenceEquals(newParent, currentParent))
+            return false;
+
+        // Preserve the control's current on-screen (root-relative) position across the reparent —
+        // it was already dragged to this spot live; only its parent (and thus what Location is
+        // relative to) is changing now.
+        var absolute = GetDesignSpaceLocation(control);
+        var newParentAbsolute = ReferenceEquals(newParent, _root) ? SKPoint.Empty : GetDesignSpaceLocation(newParent);
+        var newLocation = new SKPoint(absolute.X - newParentAbsolute.X, absolute.Y - newParentAbsolute.Y);
+        var newSize = control.Size;
+
+        Commands.Execute(new DelegateCommand(
+            ReferenceEquals(newParent, _root) ? $"Move {control.Name} to canvas" : $"Move {control.Name} into {newParent.Name}",
+            () =>
+            {
+                currentParent.Controls.Remove(control);
+                control.Location = newLocation;
+                control.Size = newSize;
+                newParent.Controls.Add(control);
+                AfterStructureChange();
+                Selection.SelectOnly(control);
+            },
+            () =>
+            {
+                newParent.Controls.Remove(control);
+                control.Location = preDragRect.Location;
+                control.Size = preDragRect.Size;
+                currentParent.Controls.Add(control);
+                AfterStructureChange();
+                Selection.SelectOnly(control);
+            }));
+
+        return true;
+    }
+
+    /// <summary>Groups the current multi-selection into a new container control, nesting the
+    /// selected controls as its children with locations rebased relative to it. Undoable.</summary>
+    public void GroupSelection()
+    {
+        var items = Selection.Items.Where(c => !Locked.Contains(c) && !Groups.Contains(c)).ToList();
+        if (items.Count < 2)
+            return;
+
+        var bounds = items[0].Bounds;
+        for (var i = 1; i < items.Count; i++)
+            bounds = SKRect.Union(bounds, items[i].Bounds);
+        bounds.Inflate(12f, 12f);
+
+        var group = new Element
+        {
+            Name = MakeUniqueName("group"),
+            Location = new SKPoint(Snap(bounds.Left), Snap(bounds.Top)),
+            Size = new SKSize(Snap(bounds.Width), Snap(bounds.Height)),
+            Radius = new Radius(6),
+            Border = new Thickness(1),
+        };
+        group.ConfigureVisualStyles(styles => styles.Base(b => b
+            .Background(SKColors.Transparent)
+            .BorderColor(ColorScheme.Outline.WithAlpha(70))));
+
+        var originalLocations = items.ToDictionary(c => c, c => c.Location);
+        var originalParents = items.ToDictionary(c => c, c => c.Parent ?? _root);
+
+        Commands.Execute(new DelegateCommand(
+            "Group Selection",
+            () =>
+            {
+                _root.Controls.Add(group);
+                Groups.Add(group);
+                foreach (var item in items)
+                {
+                    var loc = originalLocations[item];
+                    originalParents[item].Controls.Remove(item);
+                    item.Location = new SKPoint(loc.X - group.Location.X, loc.Y - group.Location.Y);
+                    group.Controls.Add(item);
+                }
+                AfterStructureChange();
+                Selection.SelectOnly(group);
+            },
+            () =>
+            {
+                foreach (var item in items)
+                {
+                    group.Controls.Remove(item);
+                    item.Location = originalLocations[item];
+                    originalParents[item].Controls.Add(item);
+                }
+                Groups.Remove(group);
+                _root.Controls.Remove(group);
+                AfterStructureChange();
+                Selection.SetMany(items);
+            }));
+    }
+
+    /// <summary>Dissolves a group, reparenting its children back to the root at their absolute
+    /// positions and removing the now-empty group shell. Undoable.</summary>
+    public void Ungroup(ElementBase group)
+    {
+        if (!Groups.Contains(group))
+            return;
+
+        var children = group.Controls.OfType<ElementBase>().ToList();
+        var relativeLocations = children.ToDictionary(c => c, c => c.Location);
+        var groupLocation = group.Location;
+
+        Commands.Execute(new DelegateCommand(
+            "Ungroup",
+            () =>
+            {
+                foreach (var child in children)
+                {
+                    group.Controls.Remove(child);
+                    var rel = relativeLocations[child];
+                    child.Location = new SKPoint(rel.X + groupLocation.X, rel.Y + groupLocation.Y);
+                    _root.Controls.Add(child);
+                }
+                Groups.Remove(group);
+                _root.Controls.Remove(group);
+                AfterStructureChange();
+                Selection.SetMany(children);
+            },
+            () =>
+            {
+                foreach (var child in children)
+                {
+                    _root.Controls.Remove(child);
+                    child.Location = relativeLocations[child];
+                    group.Controls.Add(child);
+                }
+                _root.Controls.Add(group);
+                Groups.Add(group);
+                AfterStructureChange();
+                Selection.SelectOnly(group);
+            }));
     }
 
     /// <summary>
@@ -275,9 +557,13 @@ public sealed class DesignSurface : Element
 
     public void DeleteSelection()
     {
-        var doomed = Selection.Items.ToList();
+        // A locked control is meant to be protected from exactly this kind of destructive edit —
+        // matches the same exclusion NudgeSelection/BeginBoundsDrag/GroupSelection already apply.
+        var doomed = Selection.Items.Where(c => !Locked.Contains(c)).ToList();
         if (doomed.Count == 0)
             return;
+
+        var wasGroup = doomed.Where(Groups.Contains).ToList();
 
         Commands.Execute(new DelegateCommand(
             doomed.Count == 1 ? $"Delete {doomed[0].Name}" : $"Delete {doomed.Count} controls",
@@ -287,13 +573,18 @@ public sealed class DesignSurface : Element
                 {
                     Selection.Remove(control);
                     _root.Controls.Remove(control);
+                    Groups.Remove(control);
                 }
                 AfterStructureChange();
             },
             () =>
             {
                 foreach (var control in doomed)
+                {
                     _root.Controls.Add(control);
+                    if (wasGroup.Contains(control))
+                        Groups.Add(control);
+                }
                 Selection.SetMany(doomed);
                 AfterStructureChange();
             }));
@@ -308,8 +599,19 @@ public sealed class DesignSurface : Element
         var clones = new List<ElementBase>();
         foreach (var source in sources)
         {
-            if (Activator.CreateInstance(source.GetType()) is not ElementBase clone)
+            ElementBase clone;
+            try
+            {
+                if (Activator.CreateInstance(source.GetType()) is not ElementBase created)
+                    continue;
+                clone = created;
+            }
+            catch
+            {
+                // A control without a working parameterless constructor just can't be duplicated —
+                // skip it rather than taking the whole operation down with an uncaught exception.
                 continue;
+            }
 
             ControlCatalog.ApplyDesignDefaults(clone);
             PrepareForDesign(clone);
@@ -338,10 +640,36 @@ public sealed class DesignSurface : Element
         if (all.Count == 0)
             return;
 
+        // Locked/Groups membership must round-trip through undo symmetrically with the controls
+        // themselves, or undoing a clear silently strips lock/group state that was never touched.
+        var lockedBefore = all.Where(Locked.Contains).ToList();
+        var groupsBefore = all.Where(Groups.Contains).ToList();
+
         Commands.Execute(new DelegateCommand(
             "New document",
-            () => { Selection.Clear(); foreach (var c in all) _root.Controls.Remove(c); Locked.Clear(); AfterStructureChange(); },
-            () => { foreach (var c in all) _root.Controls.Add(c); AfterStructureChange(); }));
+            () =>
+            {
+                Selection.Clear();
+                foreach (var c in all)
+                {
+                    _root.Controls.Remove(c);
+                    Locked.Remove(c);
+                    Groups.Remove(c);
+                }
+                AfterStructureChange();
+            },
+            () =>
+            {
+                foreach (var c in all)
+                {
+                    _root.Controls.Add(c);
+                    if (lockedBefore.Contains(c))
+                        Locked.Add(c);
+                    if (groupsBefore.Contains(c))
+                        Groups.Add(c);
+                }
+                AfterStructureChange();
+            }));
     }
 
     /// <summary>Records an already-applied bounds change (drag/resize) so it can be undone.</summary>
@@ -492,6 +820,20 @@ public sealed class DesignSurface : Element
     internal float Snap(float value) =>
         SnapToGrid ? MathF.Round(value / GridStep) * GridStep : MathF.Round(value);
 
+    /// <summary>Disposing a container never cascades to its children in this framework — without this
+    /// override, closing a document tab would leak the root canvas's and overlay's native Skia paints
+    /// (<see cref="DesignRootCanvas"/>, <see cref="DesignOverlay"/>) every time.</summary>
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _root.Dispose();
+            _overlay.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+
     private string MakeUniqueName(string baseName)
     {
         _nameCounter++;
@@ -586,11 +928,54 @@ public sealed class DesignSurface : Element
         {
             base.OnPaint(canvas);
 
+            // Highlight the control group under the cursor while a toolbox drag hovers it — the
+            // visual cue that releasing here nests the new control instead of dropping onto the root.
+            if (_s._previewGroup is { } hoveredGroup)
+            {
+                var groupRect = SKRect.Create(
+                    Root.Location.X + hoveredGroup.Location.X,
+                    Root.Location.Y + hoveredGroup.Location.Y,
+                    hoveredGroup.Width, hoveredGroup.Height);
+
+                _fill.Color = ColorScheme.Primary.WithAlpha(24);
+                canvas.DrawRoundRect(groupRect, 6f, 6f, _fill);
+                _stroke.Color = ColorScheme.Primary;
+                _stroke.StrokeWidth = 2f;
+                canvas.DrawRoundRect(groupRect, 6f, 6f, _stroke);
+                _stroke.StrokeWidth = 1.4f;
+            }
+
+            // Locked-control affordance: a subtle dashed outline + lock glyph even when unselected, so
+            // a control that has stopped responding to clicks doesn't just look broken. Selected
+            // locked controls skip this — the selection outline (with no resize grips) already tells
+            // that story — to avoid drawing two competing outlines on the same control.
+            foreach (var locked in _s.Locked)
+            {
+                if (locked.Parent == null || !locked.Visible || _s.Selection.Contains(locked))
+                    continue;
+
+                var lockedRect = ToOverlay(locked);
+                _stroke.Color = ColorScheme.ForeColor.WithAlpha(90);
+                _stroke.PathEffect = _previewDash;
+                canvas.DrawRect(lockedRect, _stroke);
+                _stroke.PathEffect = null;
+
+                var badge = SKRect.Create(lockedRect.Right - 16f, lockedRect.Top - 8f, 16f, 16f);
+                _fill.Color = ColorScheme.SurfaceContainerHigh;
+                canvas.DrawOval(badge, _fill);
+                _stroke.Color = ColorScheme.ForeColor.WithAlpha(170);
+                ToolbarIcons.Draw(canvas, "lock", SKRect.Inflate(badge, -3.5f, -3.5f), _stroke);
+            }
+
             // Live drop ghost — where a toolbox entry would land if released right now.
             if (_s._previewEntry is { } previewEntry)
             {
                 var pr = _s._previewRect;
-                var overlayRect = SKRect.Create(Root.Location.X + pr.Left, Root.Location.Y + pr.Top, pr.Width, pr.Height);
+                var groupOffset = _s._previewGroup?.Location ?? SKPoint.Empty;
+                var overlayRect = SKRect.Create(
+                    Root.Location.X + groupOffset.X + pr.Left,
+                    Root.Location.Y + groupOffset.Y + pr.Top,
+                    pr.Width, pr.Height);
 
                 _fill.Color = ColorScheme.Primary.WithAlpha(38);
                 canvas.DrawRoundRect(overlayRect, 6f, 6f, _fill);
@@ -758,8 +1143,20 @@ public sealed class DesignSurface : Element
                     return;
                 default:
                     _activeGuides.Clear();
+                    _s.SetHoverNestingTarget(null);
                     if (_dragBefore != null)
-                        _s.CommitBoundsChange(_mode == Grip.Body ? "Move" : "Resize", _dragBefore);
+                    {
+                        // A single-item move that ends over a different control reparents into it
+                        // instead of just repositioning — the reparent's own undo command already
+                        // captures the full before/after (parent + position), so it replaces rather
+                        // than stacks with the normal bounds-change commit.
+                        var reparented = _mode == Grip.Body
+                            && _s.Selection.Count == 1
+                            && _s.TryReparentOnDrop(_s.Selection.Items[0], e.Location, _dragBefore[_s.Selection.Items[0]]);
+
+                        if (!reparented)
+                            _s.CommitBoundsChange(_mode == Grip.Body ? "Move" : "Resize", _dragBefore);
+                    }
                     _dragBefore = null;
                     break;
             }
@@ -816,6 +1213,15 @@ public sealed class DesignSurface : Element
                     _s.Selection.SetMany(_s.DesignedControls);
                     e.Handled = true;
                     break;
+                case Keys.G when e.Control && e.Shift:
+                    if (_s.Selection.Count == 1 && _s.Groups.Contains(_s.Selection.Items[0]))
+                        _s.Ungroup(_s.Selection.Items[0]);
+                    e.Handled = true;
+                    break;
+                case Keys.G when e.Control:
+                    _s.GroupSelection();
+                    e.Handled = true;
+                    break;
                 case Keys.Left: NudgeSelection(-step, 0); e.Handled = true; break;
                 case Keys.Right: NudgeSelection(step, 0); e.Handled = true; break;
                 case Keys.Up: NudgeSelection(0, -step); e.Handled = true; break;
@@ -857,6 +1263,13 @@ public sealed class DesignSurface : Element
 
                 foreach (var (control, before) in _dragBefore)
                     control.Location = new SKPoint(before.Left + fx, before.Top + fy);
+
+                // Live nesting-target highlight while dragging an existing control, mirroring the
+                // toolbox-drop preview — only meaningful for a single selected item, since a
+                // multi-item drag has no single "the dragged control" to reparent on drop.
+                _s.SetHoverNestingTarget(_s.Selection.Count == 1
+                    ? _s.FindNestingTargetAt(mouse, excluding: primary)
+                    : null);
             }
             else
             {
@@ -947,7 +1360,7 @@ public sealed class DesignSurface : Element
                 _marquee.Right - Root.Location.X, _marquee.Bottom - Root.Location.Y);
 
             var hits = _s.DesignedControls
-                .Where(c => c.Visible && rootRel.IntersectsWith(SKRect.Create(c.Location, c.Size)))
+                .Where(c => c.Visible && !_s.Locked.Contains(c) && rootRel.IntersectsWith(SKRect.Create(c.Location, c.Size)))
                 .ToList();
 
             if ((ModifierKeys & Keys.Control) == Keys.Control)
@@ -975,25 +1388,36 @@ public sealed class DesignSurface : Element
                 {
                     menu.AddItem(new MenuItem("Bring to front", (_, _) => _s.BringToFront(single)));
                     menu.AddItem(new MenuItem("Send to back", (_, _) => _s.SendToBack(single)));
-                    var locked = _s.Locked.Contains(single);
-                    menu.AddItem(new MenuItem(locked ? "Unlock" : "Lock", (_, _) =>
-                    {
-                        if (!_s.Locked.Remove(single)) _s.Locked.Add(single);
-                        _s.StructureChanged?.Invoke();
-                        Invalidate();
-                    }));
                 }
+                // Operates over the whole selection (not just a single item) like Duplicate/Delete/
+                // Group above — "Unlock" only when every selected item is already locked, otherwise
+                // "Lock" locks the rest too, matching the common multi-select toggle convention.
+                var selectionItems = _s.Selection.Items;
+                var allLocked = selectionItems.All(_s.Locked.Contains);
+                menu.AddItem(new MenuItem(allLocked ? "Unlock" : "Lock", (_, _) =>
+                {
+                    foreach (var item in selectionItems)
+                    {
+                        if (allLocked) _s.Locked.Remove(item);
+                        else _s.Locked.Add(item);
+                    }
+                    _s.StructureChanged?.Invoke();
+                    Invalidate();
+                }));
                 if (_s.Selection.Count >= 2)
                 {
                     menu.AddItem(new MenuItem("Align left", (_, _) => _s.Align(AlignKind.Left)));
                     menu.AddItem(new MenuItem("Align top", (_, _) => _s.Align(AlignKind.Top)));
                     menu.AddItem(new MenuItem("Align centers", (_, _) => { _s.Align(AlignKind.CenterH); _s.Align(AlignKind.CenterV); }));
+                    menu.AddItem(new MenuItem("Group Selection", (_, _) => _s.GroupSelection()) { ShortcutKeys = Keys.Control | Keys.G });
                 }
                 if (_s.Selection.Count >= 3)
                 {
                     menu.AddItem(new MenuItem("Distribute horizontally", (_, _) => _s.Distribute(true)));
                     menu.AddItem(new MenuItem("Distribute vertically", (_, _) => _s.Distribute(false)));
                 }
+                if (single != null && _s.Groups.Contains(single))
+                    menu.AddItem(new MenuItem("Ungroup", (_, _) => _s.Ungroup(single)) { ShortcutKeys = Keys.Control | Keys.Shift | Keys.G });
             }
             else
             {
@@ -1007,32 +1431,18 @@ public sealed class DesignSurface : Element
 
         // ── Hit testing (overlay space == logical child space of the surface) ──
 
-        private SKRect ToOverlay(ElementBase designed) =>
-            SKRect.Create(
-                Root.Location.X + designed.Location.X,
-                Root.Location.Y + designed.Location.Y,
-                designed.Width, designed.Height);
-
-        private ElementBase? HitControl(SKPoint p)
+        /// <summary>Root-relative bounds of a designed control at any nesting depth.</summary>
+        private SKRect ToOverlay(ElementBase designed)
         {
-            var rel = new SKPoint(p.X - Root.Location.X, p.Y - Root.Location.Y);
-            ElementBase? best = null;
-            var bestZ = int.MinValue;
-            foreach (var child in _s.DesignedControls)
-            {
-                if (!child.Visible || _s.Locked.Contains(child))
-                    continue;
-                if (!SKRect.Create(child.Location, child.Size).Contains(rel))
-                    continue;
-                if (child.ZOrder >= bestZ)
-                {
-                    best = child;
-                    bestZ = child.ZOrder;
-                }
-            }
-
-            return best;
+            var loc = _s.GetDesignSpaceLocation(designed);
+            return SKRect.Create(Root.Location.X + loc.X, Root.Location.Y + loc.Y, designed.Width, designed.Height);
         }
+
+        /// <summary>The deepest designed control under a point, at any nesting depth — clicking into
+        /// an already-nested control selects it directly rather than only its top-level container.
+        /// Shares <see cref="DesignSurface.FindNestingTargetAt"/>, the same "any control can host
+        /// children" rule used for drag/drop nesting.</summary>
+        private ElementBase? HitControl(SKPoint p) => _s.FindNestingTargetAt(p);
 
         private void UpdateHoverCursor(SKPoint p)
         {

@@ -148,6 +148,16 @@ public class Button : ElementBase
 
         if (OpenDropDownOnClick && !UseSplitDropDownHitTest)
             ShowDropDown();
+
+        // A DialogResult-bearing button (the standard OK/Cancel pattern) must close an owning modal
+        // ShowDialog() regardless of how the click was triggered — mouse click, Space/Enter key, or
+        // an explicit PerformClick() call. This used to only happen via PerformClick(), which the
+        // mouse-click path (ElementBase.OnMouseClick) never calls, so clicking such a button with the
+        // mouse fired its Click handler but silently left the dialog open. It also only checked the
+        // immediate Parent, which is almost never the window itself once the button sits inside any
+        // layout container — walk the full ancestor chain instead.
+        if (DialogResult != DialogResult.None && GetParentWindow() is { IsHandleCreated: true } window)
+            window.CloseDialog(DialogResult);
     }
 
     public virtual void  OnCheckedChanged(EventArgs e)
@@ -300,14 +310,6 @@ public class Button : ElementBase
     public override void PerformClick()
     {
         OnClick(EventArgs.Empty);
-
-        if (Parent is WindowBase window && window.IsHandleCreated)
-        {
-            if (DialogResult != DialogResult.None)
-            {
-                window.CloseDialog(DialogResult);
-            }
-        }
     }
 
     protected override void Dispose(bool disposing)

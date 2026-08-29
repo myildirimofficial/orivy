@@ -10,10 +10,10 @@ namespace Orivy.Controls;
 public class TextBox : ElementBase
 {
     private const int DefaultWidth = 220;
-    private const int DefaultHeight = 38;
+    private const int DefaultHeight = 30;
     private const int DefaultMultilineHeight = 120;
     private const int DefaultMinWidth = 120;
-    private const int DefaultMinHeight = 36;
+    private const int DefaultMinHeight = 28;
     private const float DefaultTextZoomFactor = 1f;
     private const float DefaultTextZoomStep = 0.1f;
     private const float MinimumTextZoomFactor = 0.5f;
@@ -74,7 +74,7 @@ public class TextBox : ElementBase
         AutoScroll = true;
         CanSelect = true;
         Cursor = Cursors.IBeam;
-        Padding = new Thickness(14, 10, 14, 10);
+        Padding = new Thickness(10, 6, 10, 6);
         Radius = new Radius(9);
         Border = new Thickness(1);
         BorderColor = ColorScheme.Outline.WithAlpha(104);
@@ -95,19 +95,18 @@ public class TextBox : ElementBase
                     .Border(1)
                     .BorderColor(ColorScheme.Outline.WithAlpha(104))
                     .Radius(9)
-                    .Shadow(new BoxShadow(0f, 4f, 14f, 0, ColorScheme.ShadowColor.WithAlpha(14))))
+                    .Shadow(BoxShadow.None))
                 .OnHover(rule => rule
                     .Background(ColorScheme.Surface.Brightness(0.014f))
-                    .BorderColor(ColorScheme.Primary.WithAlpha(108))
-                    .Shadow(new BoxShadow(0f, 8f, 20f, 0, ColorScheme.ShadowColor.WithAlpha(22))))
+                    .BorderColor(ColorScheme.Primary.WithAlpha(108)))
                 .OnFocused(rule => rule
                     .Background(ColorScheme.Surface.Brightness(0.02f))
                     .Border(2)
                     .BorderColor(ColorScheme.Primary.WithAlpha(232))
-                    .Shadow(new BoxShadow(0f, 10f, 24f, 0, ColorScheme.Primary.WithAlpha(28))))
+                    .Shadow(new BoxShadow(0f, 0f, 0f, 3, ColorScheme.Primary.WithAlpha(46))))
                 .OnInvalid(rule => rule
                     .BorderColor(SKColors.IndianRed.WithAlpha(210))
-                    .Shadow(new BoxShadow(0f, 10f, 20f, 0, SKColors.IndianRed.WithAlpha(18))))
+                    .Shadow(new BoxShadow(0f, 0f, 0f, 3, SKColors.IndianRed.WithAlpha(38))))
                 .OnDisabled(rule => rule
                     .Background(ColorScheme.SurfaceVariant.WithAlpha(220))
                     .Foreground(ColorScheme.ForeColor.WithAlpha(138))

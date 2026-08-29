@@ -22,11 +22,16 @@ namespace Orivy.Studio;
 public sealed class StudioWindow : Window
 {
     private readonly TabView _documents = new() { Dock = DockStyle.Fill };
+    private readonly TabView _sidebar = new() { Dock = DockStyle.Fill };
+    private readonly Container _toolboxPage = new() { Dock = DockStyle.Fill, Border = new Thickness(0), Radius = new Radius(0) };
+    private readonly Container _explorerPage = new() { Dock = DockStyle.Fill, Border = new Thickness(0), Radius = new Radius(0) };
     private readonly ToolboxPanel _toolbox = new() { Dock = DockStyle.Fill };
+    private readonly ProjectExplorerList _explorer = new() { Dock = DockStyle.Fill };
     private readonly LayersPanel _layers;
     private readonly PropertyGrid _inspector = new() { Dock = DockStyle.Fill, PropertySort = PropertySort.Categorized };
     private readonly LayoutHelperBar _layoutBar;
     private readonly DragLayer _dragLayer = new();
+    private readonly StartScreen _startScreen = new();
 
     private readonly ToolbarButton _undoButton = new("undo", "Undo (Ctrl+Z)");
     private readonly ToolbarButton _redoButton = new("redo", "Redo (Ctrl+Y)");
@@ -37,6 +42,19 @@ public sealed class StudioWindow : Window
     private DesignSurface _active = null!;
     private int _documentCounter;
     private bool _suppressInspectorCommit;
+
+    /// <summary>
+    /// The Visual-Studio-style "preview" tab: browsing files in the Explorer reuses this single tab
+    /// instead of stacking a new permanent one per file clicked, so navigating around a folder
+    /// doesn't leave a trail of tabs behind. It stops being reusable — is "promoted" to a normal,
+    /// permanent tab — the moment the user actually edits it (see <see cref="WireDirtyPromotion"/>),
+    /// or is left alone entirely by explicit actions (File ▸ Open, New Project, Recent) which always
+    /// open a real tab of their own, matching how Visual Studio's own preview tab behaves. Untyped as
+    /// <see cref="IStudioDocument"/> rather than <see cref="DesignDocument"/> specifically — a
+    /// <c>.orivy.json</c> and a plain text file both use the same single preview slot, just never at
+    /// the same time (see <see cref="OpenPath"/>).
+    /// </summary>
+    private IStudioDocument? _previewDocument;
 
     public StudioWindow()
     {
@@ -85,6 +103,9 @@ public sealed class StudioWindow : Window
 
         if (Environment.GetEnvironmentVariable("ORIVY_STUDIO_SEED") == "1")
             SeedDemoLayout();
+
+        if (Environment.GetEnvironmentVariable("ORIVY_STUDIO_TEST_FOLDER") is { Length: > 0 } testFolder)
+            _explorer.RootFolder = testFolder;
     }
 
     // ── Layout ───────────────────────────────────────────────────────────────
@@ -93,13 +114,14 @@ public sealed class StudioWindow : Window
     {
         var toolbar = Panel(DockStyle.Top, height: 48);
         toolbar.Padding = new Thickness(12, 8, 12, 8);
+        toolbar.Margin = new Thickness(0);
         toolbar.Border = new Thickness(0, 0, 0, 1);
-        Tint(toolbar, background: () => ColorScheme.SurfaceContainerHigh, border: () => ColorScheme.Outline.WithAlpha(50));
+        Tint(toolbar, background: () => ColorScheme.SurfaceContainerHigh.WithAlpha(178), border: () => ColorScheme.Outline.WithAlpha(50));
 
         var newDocButton = new ToolbarButton("new-doc", "New document");
         var newButton = new ToolbarButton("new", "New (clear canvas)");
-        var openButton = new ToolbarButton("open", "Open project…");
-        var saveButton = new ToolbarButton("save", "Save project (Ctrl+S)");
+        var openButton = new ToolbarButton("open", "Open folder…");
+        var saveButton = new ToolbarButton("save", "Save (Ctrl+S)");
         var exportButton = new ToolbarButton("export", "Export designer code");
         var zoomOut = new ToolbarButton("zoom-out", "Zoom out", 28f);
         var zoomIn = new ToolbarButton("zoom-in", "Zoom in", 28f);
@@ -177,8 +199,8 @@ public sealed class StudioWindow : Window
         };
         _documents.TabCloseButtonClick += (_, index) =>
         {
-            if (_documents.Controls[index] is DesignDocument doc)
-                CloseDocument(doc);
+            if (_documents.Controls[index] is ElementBase tab)
+                TryCloseDocument(tab);
         };
 
         // Resizable three-column layout via nested SplitContainers: [ left | center | right ].
@@ -196,8 +218,28 @@ public sealed class StudioWindow : Window
         StylePanel(outerSplit.Panel1, () => ColorScheme.SurfaceContainerLow);
         StylePanel(innerSplit.Panel2);
 
-        outerSplit.Panel1.Controls.Add(_toolbox);
-        outerSplit.Panel1.Controls.Add(Header("toolbox", "Toolbox"));
+        // Solution-Explorer-style sidebar: the Toolbox and the project file browser share one
+        // embedded TabView (icon-only, top-aligned) instead of the Toolbox getting a static Header
+        // and the Explorer inventing its own switcher — one tab-strip implementation, reused.
+        _sidebar.TabMode = TabViewMode.Embedded;
+        _sidebar.TabDesignMode = TabViewDesignMode.Minimal;
+        _sidebar.TabAlignment = TabViewAlignment.Start;
+        _sidebar.TabLayoutMode = TabViewLayoutMode.Top;
+        _sidebar.TabStripHeight = 38f;
+        _sidebar.DrawTabIcons = true;
+        _sidebar.EnableTransitions = true;
+        _sidebar.TransitionEffect = TabViewTransitionEffect.Fade;
+        _sidebar.Border = new Thickness(0);
+        _sidebar.Radius = new Radius(0);
+        _sidebar.BackColor = SKColors.Transparent;
+        _toolboxPage.Controls.Add(_toolbox);
+        _explorerPage.Controls.Add(_explorer);
+        _sidebar.Controls.Add(_toolboxPage);
+        _sidebar.Controls.Add(_explorerPage);
+        RefreshSidebarIcons();
+        ColorScheme.ThemeChanged += (_, _) => RefreshSidebarIcons();
+
+        outerSplit.Panel1.Controls.Add(_sidebar);
 
         innerSplit.Panel1.Controls.Add(_documents);
 
@@ -225,11 +267,13 @@ public sealed class StudioWindow : Window
         Controls.Add(toolbar);
         Controls.Add(_statusHost);
         Controls.Add(_dragLayer); // topmost; hidden until a drag begins
+        if (Environment.GetEnvironmentVariable("ORIVY_STUDIO_SKIP_START") != "1")
+            Controls.Add(_startScreen); // above everything, including the drag layer, until dismissed
 
         newDocButton.Click += (_, _) => { var d = NewDocument(); _documents.SelectedTab = d; SwitchActive(d.Surface); };
         newButton.Click += (_, _) => _active.ClearAll();
-        openButton.Click += (_, _) => OpenProject();
-        saveButton.Click += (_, _) => SaveProject();
+        openButton.Click += (_, _) => OpenFolder();
+        saveButton.Click += (_, _) => SaveActiveDocument();
         exportButton.Click += (_, _) => ExportCode();
         _undoButton.Click += (_, _) => _active.Commands.Undo();
         _redoButton.Click += (_, _) => _active.Commands.Redo();
@@ -257,12 +301,13 @@ public sealed class StudioWindow : Window
         var file = menu.AddMenuItem("File");
         file.AddMenuItem("New Document", (_, _) => { var d = NewDocument(); _documents.SelectedTab = d; SwitchActive(d.Surface); }, Keys.Control | Keys.N);
         file.AddMenuItem("New (Clear Canvas)", (_, _) => _active.ClearAll());
-        file.AddMenuItem("Open Project…", (_, _) => OpenProject(), Keys.Control | Keys.O);
-        file.AddMenuItem("Save Project", (_, _) => SaveProject(), Keys.Control | Keys.S);
+        file.AddMenuItem("Open Folder…", (_, _) => OpenFolder(), Keys.Control | Keys.O);
+        file.AddMenuItem("Save", (_, _) => SaveActiveDocument(), Keys.Control | Keys.S);
         file.AddSeparator();
         file.AddMenuItem("Export Designer Code…", (_, _) => ExportCode(), Keys.Control | Keys.E);
+        file.AddMenuItem("Import Designer Code…", (_, _) => ImportCode(), Keys.Control | Keys.I);
         file.AddSeparator();
-        file.AddMenuItem("Close Tab", (_, _) => { if (_documents.SelectedTab is DesignDocument d) CloseDocument(d); }, Keys.Control | Keys.W);
+        file.AddMenuItem("Close Tab", (_, _) => { if (_documents.SelectedTab is ElementBase t) TryCloseDocument(t); }, Keys.Control | Keys.W);
 
         var edit = menu.AddMenuItem("Edit");
         edit.AddMenuItem("Undo", (_, _) => _active.Commands.Undo(), Keys.Control | Keys.Z);
@@ -311,8 +356,23 @@ public sealed class StudioWindow : Window
 
         _documents.SelectedIndexChanged += (_, _) =>
         {
-            if (_documents.SelectedTab is DesignDocument doc)
-                SwitchActive(doc.Surface);
+            if (_documents.SelectedTab is DesignDocument dd)
+                SwitchActive(dd.Surface);
+            if (_documents.SelectedTab is IStudioDocument doc)
+                _explorer.SetActiveFile(doc.FilePath);
+        };
+
+        _explorer.FileOpenRequested += path => OpenPath(path, asPreview: true);
+
+        _startScreen.NewRequested += () => Controls.Remove(_startScreen);
+        _startScreen.OpenFolderRequested += () => { Controls.Remove(_startScreen); OpenFolder(); };
+        _startScreen.RecentSelected += (path, isFolder) =>
+        {
+            Controls.Remove(_startScreen);
+            if (isFolder)
+                _explorer.RootFolder = path;
+            else
+                OpenPath(path);
         };
 
         _inspector.PropertyValueChanged += (_, e) =>
@@ -327,15 +387,18 @@ public sealed class StudioWindow : Window
 
         KeyDown += (_, e) =>
         {
-            if (e.Handled || !e.Control)
+            // Ctrl+S/Z/Y/W would otherwise reach the default blank document sitting behind the Start
+            // Screen — undoing/saving/closing a document the user hasn't actually chosen to work on
+            // yet — while the screen forcing that choice is still up.
+            if (e.Handled || !e.Control || _startScreen.Parent != null)
                 return;
             switch (e.KeyCode)
             {
                 case Keys.Z: _active.Commands.Undo(); e.Handled = true; break;
                 case Keys.Y: _active.Commands.Redo(); e.Handled = true; break;
-                case Keys.S: SaveProject(); e.Handled = true; break;
+                case Keys.S: SaveActiveDocument(); e.Handled = true; break;
                 case Keys.W:
-                    if (_documents.SelectedTab is DesignDocument activeDoc) CloseDocument(activeDoc);
+                    if (_documents.SelectedTab is ElementBase activeTab) TryCloseDocument(activeTab);
                     e.Handled = true;
                     break;
             }
@@ -349,32 +412,84 @@ public sealed class StudioWindow : Window
         _documentCounter++;
         var doc = new DesignDocument($"Window{_documentCounter}");
         _documents.Controls.Add(doc);
+        WireDirtyPromotion(doc);
         return doc;
     }
 
-    /// <summary>Closes a document tab (native title-bar close button or Ctrl+W). Closing the last
-    /// remaining document resets it to a blank canvas instead — there's always at least one tab.</summary>
-    private void CloseDocument(DesignDocument doc)
+    /// <summary>The moment any document (design or text) is actually edited, it can no longer be the
+    /// reusable preview tab — it becomes a normal, permanent one, matching Visual Studio.</summary>
+    private void WireDirtyPromotion(IStudioDocument doc)
     {
-        if (_documents.Controls.Count <= 1)
+        doc.DirtyChanged += () =>
         {
-            doc.Surface.ClearAll();
+            if (doc.IsDirty && ReferenceEquals(_previewDocument, doc))
+                _previewDocument = null;
+        };
+    }
+
+    /// <summary>Activates a tab: selects it, and — depending on its concrete kind — switches the
+    /// design-specific side panels to its surface and/or syncs the Explorer's highlighted file.</summary>
+    private void ActivateTab(ElementBase tab)
+    {
+        _documents.SelectedTab = tab;
+        if (tab is DesignDocument dd)
+            SwitchActive(dd.Surface);
+        if (tab is IStudioDocument doc)
+            _explorer.SetActiveFile(doc.FilePath);
+    }
+
+    /// <summary>Closes a tab (native title-bar close button, Ctrl+W, or the File menu), after
+    /// confirming with the user first if it has unsaved changes. Closing the last remaining tab resets
+    /// it to a blank design instead of leaving the shell with none — the side panels all assume an
+    /// active <see cref="DesignSurface"/> exists.</summary>
+    private void TryCloseDocument(ElementBase tab)
+    {
+        if (tab is not IStudioDocument doc)
+            return;
+
+        if (doc.IsDirty)
+        {
+            var result = MessageBox.Show(this,
+                $"\"{doc.DocumentName}\" has unsaved changes. Save before closing?",
+                "Unsaved changes", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
+
+            if (result == DialogResult.Cancel)
+                return;
+            if (result == DialogResult.Yes && !SaveDocument(doc))
+                return; // user backed out of the save-as prompt — don't close after all
+        }
+
+        if (ReferenceEquals(_previewDocument, doc))
+            _previewDocument = null;
+
+        if (tab is DesignDocument lastDesign && _documents.Controls.Count <= 1)
+        {
+            lastDesign.Surface.ClearAll();
+            lastDesign.FilePath = null;
+            lastDesign.DocumentName = "Window1";
+            lastDesign.MarkClean();
             return;
         }
 
-        var wasActive = ReferenceEquals(_active, doc.Surface);
-        var index = _documents.Controls.IndexOf(doc);
-        _documents.Controls.Remove(doc);
+        var wasActive = ReferenceEquals(_documents.SelectedTab, tab);
+        var index = _documents.Controls.IndexOf(tab);
+        _documents.Controls.Remove(tab);
 
-        if (!wasActive)
-            return;
-
-        var nextIndex = Math.Min(index, _documents.Controls.Count - 1);
-        if (_documents.Controls[nextIndex] is DesignDocument next)
+        if (_documents.Controls.Count == 0)
         {
-            _documents.SelectedTab = next;
-            SwitchActive(next.Surface);
+            // Never end up with zero tabs — create a fresh blank design instead.
+            ActivateTab(NewDocument());
         }
+        else if (wasActive)
+        {
+            var nextIndex = Math.Min(index, _documents.Controls.Count - 1);
+            if (_documents.Controls[nextIndex] is ElementBase next)
+                ActivateTab(next);
+        }
+
+        // Only reached once the closing tab is no longer referenced by _active/_documents — switching
+        // to the next tab above (if it was active) already detached this surface's event handlers.
+        tab.Dispose();
     }
 
     private void SwitchActive(DesignSurface surface)
@@ -476,53 +591,177 @@ public sealed class StudioWindow : Window
 
     // ── File / export ────────────────────────────────────────────────────────
 
-    private void SaveProject()
+    private void SaveActiveDocument()
     {
-        var doc = _documents.SelectedTab as DesignDocument;
-        if (doc == null)
-            return;
+        if (_documents.SelectedTab is IStudioDocument doc)
+            SaveDocument(doc);
+    }
 
+    /// <summary>Saves a document, prompting for a path first if it's never been saved. Returns false
+    /// if the user backed out of that prompt (so a close-with-unsaved-changes flow knows not to
+    /// proceed with closing).</summary>
+    private bool SaveDocument(IStudioDocument doc)
+    {
         if (doc.FilePath == null)
         {
+            var isDesign = doc is DesignDocument;
             var dialog = new SaveFileDialog
             {
-                Title = "Save Orivy Studio project",
-                FileName = $"{doc.Text}.orivy.json",
-                Filter = "Orivy Studio project (*.orivy.json)|*.orivy.json|JSON (*.json)|*.json|All files (*.*)|*.*",
+                Title = "Save",
+                FileName = isDesign ? $"{doc.DocumentName}.orivy.json" : doc.DocumentName,
+                Filter = isDesign
+                    ? "Orivy Studio project (*.orivy.json)|*.orivy.json|All files (*.*)|*.*"
+                    : "All files (*.*)|*.*",
             };
             var path = dialog.ShowDialog(this);
             if (string.IsNullOrWhiteSpace(path))
-                return;
+                return false;
             doc.FilePath = path;
         }
 
-        System.IO.File.WriteAllText(doc.FilePath, DesignSerializer.Save(_active));
+        doc.Save();
         _statusHost.Text = $"Saved → {doc.FilePath}";
+
+        // The saved file's folder becomes the browsed root, unless one is already open — a
+        // zero-friction "workspace follows your files" model instead of requiring an explicit
+        // project file format up front.
+        _explorer.RootFolder ??= System.IO.Path.GetDirectoryName(doc.FilePath);
+        _explorer.SetActiveFile(doc.FilePath);
+        RecentProjects.Add(doc.FilePath, isFolder: false);
+        return true;
     }
 
-    private void OpenProject()
+    private void OpenFolder()
     {
-        var dialog = new FileSelectionDialog
-        {
-            Title = "Open Orivy Studio project",
-            Filter = "Orivy Studio project (*.orivy.json;*.json)|*.orivy.json;*.json|All files (*.*)|*.*",
-        };
+        // No native folder-picker dialog exists yet in Orivy — reuse the file picker and take the
+        // chosen file's directory, which is the same trick most lightweight editors offer as a
+        // fallback. Pick any file inside the folder you want to browse.
+        var dialog = new FileSelectionDialog { Title = "Choose any file inside the folder" };
         var files = dialog.ShowDialog(this);
         if (files.Length == 0)
             return;
 
+        var folder = System.IO.Path.GetDirectoryName(files[0]);
+        _explorer.RootFolder = folder;
+        if (folder != null)
+            RecentProjects.Add(folder, isFolder: true);
+    }
+
+    /// <summary>
+    /// Opens <paramref name="path"/> as a document tab — reused by the File ▸ Open dialog, the
+    /// recent-projects list, and clicking a file in the Explorer sidebar. A <c>.orivy.json</c> opens
+    /// in the visual designer; anything else (a hand-written or Orivy-generated <c>Designer.cs</c>,
+    /// or any other text file) opens as plain text — no project system, no format requirement, just
+    /// whatever's actually in the browsed folder.
+    /// </summary>
+    /// <param name="asPreview">
+    /// True for Explorer navigation: reuses the single preview tab (<see cref="_previewDocument"/>)
+    /// instead of opening a new permanent one, matching Visual Studio's Solution Explorer — clicking
+    /// through files to look at them doesn't leave a trail of tabs behind. False (File ▸ Open, a
+    /// recent-projects entry, or any other explicit "open this" action) always opens a real,
+    /// permanent tab, exactly like Visual Studio's own File ▸ Open does.
+    /// </param>
+    private void OpenPath(string path, bool asPreview = false)
+    {
+        // Already open in some tab (preview or permanent)? Focus that tab instead of opening a
+        // second copy of the same file.
+        foreach (var control in _documents.Controls)
+        {
+            if (control is IStudioDocument existing && string.Equals(existing.FilePath, path, StringComparison.OrdinalIgnoreCase))
+            {
+                ActivateTab((ElementBase)existing);
+                return;
+            }
+        }
+
+        var isDesignFile = path.EndsWith(".orivy.json", StringComparison.OrdinalIgnoreCase);
+        if (isDesignFile)
+            OpenDesignFile(path, asPreview);
+        else
+            OpenTextFile(path, asPreview);
+    }
+
+    private void OpenDesignFile(string path, bool asPreview)
+    {
+        // The preview tab can only ever hold one kind of document — if it's currently a text
+        // file and we need a design tab (or vice versa, in OpenTextFile below), drop it and
+        // start a fresh preview rather than trying to convert it in place.
+        if (asPreview && _previewDocument is { } stale and not DesignDocument)
+        {
+            _documents.Controls.Remove((ElementBase)stale);
+            stale.Dispose();
+            _previewDocument = null;
+        }
+
+        var reusingPreview = asPreview && _previewDocument is DesignDocument;
+        var target = reusingPreview ? (DesignDocument)_previewDocument! : NewDocument();
+
         try
         {
-            var target = NewDocument();
-            var skipped = DesignSerializer.Load(target.Surface, System.IO.File.ReadAllText(files[0]));
-            target.FilePath = files[0];
-            target.Text = System.IO.Path.GetFileNameWithoutExtension(files[0]);
-            _documents.SelectedTab = target;
-            SwitchActive(target.Surface);
+            var skipped = DesignSerializer.Load(target.Surface, System.IO.File.ReadAllText(path));
+            target.FilePath = path;
+            target.DocumentName = System.IO.Path.GetFileNameWithoutExtension(System.IO.Path.GetFileNameWithoutExtension(path));
+            target.MarkClean();
+            ActivateTab(target);
             target.Surface.NotifyStructureChanged();
+            _explorer.RootFolder ??= System.IO.Path.GetDirectoryName(path);
+            RecentProjects.Add(path, isFolder: false);
             _statusHost.Text = skipped.Count == 0
-                ? $"Opened {target.FilePath}"
+                ? $"Opened {path}"
                 : $"Opened; {skipped.Count} unknown type(s) skipped: {string.Join(", ", skipped)}";
+
+            if (asPreview)
+                _previewDocument = target;
+        }
+        catch (Exception ex)
+        {
+            // Don't leave an empty orphaned tab behind when a freshly-created target failed to load —
+            // a reused preview tab is left in place instead, since it may already hold prior content.
+            if (!reusingPreview)
+            {
+                _documents.Controls.Remove(target);
+                target.Dispose();
+            }
+            MessageBox.Show(ex.Message, "Open failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void OpenTextFile(string path, bool asPreview)
+    {
+        try
+        {
+            var content = System.IO.File.ReadAllText(path);
+
+            if (asPreview && _previewDocument is { } stale and not TextFileDocument)
+            {
+                _documents.Controls.Remove((ElementBase)stale);
+                stale.Dispose();
+                _previewDocument = null;
+            }
+
+            TextFileDocument target;
+            if (asPreview && _previewDocument is TextFileDocument reusable)
+            {
+                target = reusable;
+                target.Rename(System.IO.Path.GetFileName(path));
+            }
+            else
+            {
+                target = new TextFileDocument(System.IO.Path.GetFileName(path));
+                _documents.Controls.Add(target);
+                WireDirtyPromotion(target);
+            }
+
+            target.Content = content;
+            target.FilePath = path;
+            target.MarkClean();
+            ActivateTab(target);
+            _explorer.RootFolder ??= System.IO.Path.GetDirectoryName(path);
+            RecentProjects.Add(path, isFolder: false);
+            _statusHost.Text = $"Opened {path}";
+
+            if (asPreview)
+                _previewDocument = target;
         }
         catch (Exception ex)
         {
@@ -530,10 +769,24 @@ public sealed class StudioWindow : Window
         }
     }
 
+    private void RefreshSidebarIcons()
+    {
+        var color = ColorScheme.ForeColor.WithAlpha(215);
+        var oldToolboxImage = _toolboxPage.Image;
+        var oldExplorerImage = _explorerPage.Image;
+        // TabView draws embedded-mode tab icons at 24 (logical) px — rasterize at that size (×2 for a
+        // crisp render at any pixel-snapping) instead of an arbitrary smaller size that then has to
+        // be stretched up and blurs.
+        _toolboxPage.Image = ToolbarIcons.CreateImage("toolbox", 24f * ScaleFactor * 2f, color);
+        _explorerPage.Image = ToolbarIcons.CreateImage("explorer", 24f * ScaleFactor * 2f, color);
+        oldToolboxImage?.Dispose();
+        oldExplorerImage?.Dispose();
+    }
+
     private void ExportCode()
     {
         var code = CodeGenerator.Generate(_active,
-            (_documents.SelectedTab as DesignDocument)?.Text ?? "MyWindow");
+            (_documents.SelectedTab as DesignDocument)?.DocumentName ?? "MyWindow");
 
         var preview = new Window
         {
@@ -564,6 +817,74 @@ public sealed class StudioWindow : Window
         preview.Controls.Add(box);
         preview.Controls.Add(bar);
         preview.ShowDialog();
+    }
+
+    /// <summary>
+    /// The reverse of <see cref="ExportCode"/>: reads Designer code (pasted, or loaded from a
+    /// <c>.cs</c> file) back through <see cref="CodeImporter"/> into a new document tab — the round
+    /// trip the export-only flow was missing.
+    /// </summary>
+    private void ImportCode()
+    {
+        var dialog = new Window
+        {
+            Text = "Import Designer Code",
+            ClientSize = new SKSize(760, 580),
+            StartPosition = FormStartPosition.CenterScreen,
+            MinimizeBox = false, MaximizeBox = false,
+        };
+
+        var bar = new Element { Dock = DockStyle.Bottom, Height = 52, Padding = new Thickness(12, 10, 12, 10), BackColor = SKColors.Transparent, Border = new Thickness(0), Radius = new Radius(0) };
+        var cancel = new Button { Text = "Cancel", Dock = DockStyle.Right, Width = 96, DialogResult = DialogResult.Cancel };
+        var import = new Button { Text = "Import", Dock = DockStyle.Right, Width = 100, Margin = new Thickness(0, 0, 8, 0) };
+        var load = new Button { Text = "Load .cs…", Dock = DockStyle.Left, Width = 116 };
+        bar.Controls.Add(cancel);
+        bar.Controls.Add(import);
+        bar.Controls.Add(load);
+
+        var box = new RichTextBox
+        {
+            Dock = DockStyle.Fill, Multiline = true, ReadOnly = false, Margin = new Thickness(12),
+            Font = new SKFont(SKTypeface.FromFamilyName("Consolas") ?? SKTypeface.Default, 10.5f),
+        };
+
+        load.Click += (_, _) =>
+        {
+            var fileDialog = new FileSelectionDialog { Title = "Load Designer code", Filter = "C# source (*.cs)|*.cs|All files (*.*)|*.*" };
+            var files = fileDialog.ShowDialog(dialog);
+            if (files.Length > 0)
+                box.Text = System.IO.File.ReadAllText(files[0]);
+        };
+
+        import.Click += (_, _) =>
+        {
+            if (string.IsNullOrWhiteSpace(box.Text))
+                return;
+
+            var target = NewDocument();
+            try
+            {
+                var skipped = CodeImporter.Import(target.Surface, box.Text);
+                target.DocumentName = CodeImporter.TryGetClassName(box.Text) ?? target.DocumentName;
+                target.MarkClean();
+                ActivateTab(target);
+                _statusHost.Text = skipped.Count == 0
+                    ? "Imported designer code."
+                    : $"Imported; {skipped.Count} unknown type(s) skipped: {string.Join(", ", skipped)}";
+                dialog.Close(DialogResult.OK);
+            }
+            catch (Exception ex)
+            {
+                // Don't leave an empty orphaned tab behind when the pasted code failed to import.
+                _documents.Controls.Remove(target);
+                target.Dispose();
+                MessageBox.Show(ex.Message, "Import failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        };
+
+        dialog.Controls.Add(box);
+        dialog.Controls.Add(bar);
+        dialog.ShowDialog();
     }
 
     private void SeedDemoLayout()

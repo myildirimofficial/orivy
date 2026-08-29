@@ -90,7 +90,7 @@ public static class ControlCatalog
     private static readonly Dictionary<string, SKSize> DefaultSizes = new(StringComparer.Ordinal)
     {
         [nameof(Button)] = new(120, 40),
-        [nameof(TextBox)] = new(200, 38),
+        [nameof(TextBox)] = new(200, 30),
         [nameof(Element)] = new(200, 120),
         [nameof(Card)] = new(240, 150),
         [nameof(ListBox)] = new(190, 170),

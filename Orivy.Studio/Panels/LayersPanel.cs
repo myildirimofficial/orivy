@@ -1,5 +1,6 @@
 using Orivy;
 using Orivy.Controls;
+using Orivy.Studio.Toolbox;
 using SkiaSharp;
 using System;
 using System.Collections.Generic;
@@ -15,6 +16,8 @@ public sealed class LayersPanel : Element
 {
     private DesignSurface _surface;
     private readonly GridList _list;
+    private readonly GridListColumn _eyeColumn;
+    private readonly GridListColumn _lockColumn;
     private readonly List<ElementBase> _rows = new();
     private bool _syncing;
 
@@ -44,7 +47,11 @@ public sealed class LayersPanel : Element
         _list = new GridList
         {
             Dock = DockStyle.Fill,
-            HeaderVisible = false,
+            // The eye/lock columns are icon-only with no room for a text label anywhere except the
+            // header — without it, showing/hiding a control has no on-screen explanation of which
+            // checkbox does which.
+            HeaderVisible = true,
+            HeaderHeight = 26f,
             GroupingEnabled = false,
             ShowGridLines = false,
             MultiSelect = true,
@@ -53,12 +60,18 @@ public sealed class LayersPanel : Element
             Radius = new Radius(10),
             Border = new Thickness(1),
         };
+        _list.ConfigureVisualStyles(styles => styles.Base(b => b.Background(ColorScheme.Surface.WithAlpha(178))));
         _list.Columns.Add(new GridListColumn { Name = "name", Text = "Layer", SizeMode = GridListColumnSizeMode.Fill, Sortable = false });
-        _list.Columns.Add(new GridListColumn { Name = "eye", Text = "👁", Width = 40f, MinWidth = 36f, ShowCheckBox = true, Sortable = false, CellTextAlign = ContentAlignment.MiddleCenter });
-        _list.Columns.Add(new GridListColumn { Name = "lock", Text = "🔒", Width = 40f, MinWidth = 36f, ShowCheckBox = true, Sortable = false, CellTextAlign = ContentAlignment.MiddleCenter });
+        _eyeColumn = new GridListColumn { Name = "eye", Width = 40f, MinWidth = 36f, ShowCheckBox = true, Sortable = false, CellTextAlign = ContentAlignment.MiddleCenter, TextAlign = ContentAlignment.MiddleCenter };
+        _lockColumn = new GridListColumn { Name = "lock", Width = 40f, MinWidth = 36f, ShowCheckBox = true, Sortable = false, CellTextAlign = ContentAlignment.MiddleCenter, TextAlign = ContentAlignment.MiddleCenter };
+        _list.Columns.Add(_eyeColumn);
+        _list.Columns.Add(_lockColumn);
 
         Controls.Add(_list);
         Controls.Add(buttons);
+
+        RefreshColumnIcons();
+        ColorScheme.ThemeChanged += (_, _) => RefreshColumnIcons();
 
         _list.SelectionChanged += (_, _) =>
         {
@@ -154,5 +167,22 @@ public sealed class LayersPanel : Element
         {
             _syncing = false;
         }
+    }
+
+    /// <summary>Renders the eye/lock column headers as the app's own themed vector glyphs instead of
+    /// raw emoji text — matches every other icon in the shell and follows dark/light toggles.</summary>
+    private void RefreshColumnIcons()
+    {
+        // GridList draws a HeaderIcon into a fixed 16-logical-unit rect (GridList.IconSize) — baking
+        // at a different logical size (14) here meant the source bitmap's own "already crisp at 14"
+        // resolution got a second, mismatched stretch to fill the actual 16-unit slot, softening it.
+        var color = ColorScheme.ForeColor.WithAlpha(190);
+        var oldEye = _eyeColumn.HeaderIcon;
+        var oldLock = _lockColumn.HeaderIcon;
+        _eyeColumn.HeaderIcon = ToolbarIcons.CreateImage("eye", 16f * ScaleFactor * 2f, color);
+        _lockColumn.HeaderIcon = ToolbarIcons.CreateImage("lock", 16f * ScaleFactor * 2f, color);
+        oldEye?.Dispose();
+        oldLock?.Dispose();
+        Invalidate();
     }
 }

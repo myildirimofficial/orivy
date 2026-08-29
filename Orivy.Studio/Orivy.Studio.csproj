@@ -11,4 +11,10 @@
     <ProjectReference Include="..\Orivy\Orivy.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Parses re-imported Designer code (see CodeImporter) using real C# syntax analysis instead of
+         a fragile hand-rolled regex/text scanner. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+  </ItemGroup>
+
 </Project>

@@ -8,7 +8,9 @@ namespace Orivy.Studio;
 
 /// <summary>
 /// Generates WinForms-style Designer code (fields + InitializeComponent) from the design surface,
-/// ready to paste into an Orivy <c>Window</c> partial class.
+/// ready to paste into an Orivy <c>Window</c> partial class. Walks each top-level designed control's
+/// own <see cref="ElementBase.Controls"/> recursively, so control groups (see
+/// <see cref="DesignSurface.Groups"/>) emit their nested children too, not just the group shell.
 /// </summary>
 public static class CodeGenerator
 {
@@ -29,7 +31,7 @@ public static class CodeGenerator
         var controls = surface.DesignedControls;
 
         foreach (var control in controls)
-            sb.AppendLine($"    private {control.GetType().Name} {control.Name} = null!;");
+            AppendFieldDeclaration(sb, control);
 
         sb.AppendLine();
         sb.AppendLine("    private void InitializeComponent()");
@@ -40,28 +42,60 @@ public static class CodeGenerator
         sb.AppendLine();
 
         foreach (var control in controls)
-        {
-            sb.AppendLine($"        {control.Name} = new {control.GetType().Name}");
-            sb.AppendLine("        {");
-            sb.AppendLine($"            Name = \"{Escape(control.Name)}\",");
-            if (!string.IsNullOrEmpty(control.Text))
-                sb.AppendLine($"            Text = \"{Escape(control.Text)}\",");
-            sb.AppendLine(string.Format(inv,
-                "            Location = new SKPoint({0}, {1}),",
-                (int)control.Location.X, (int)control.Location.Y));
-            sb.AppendLine(string.Format(inv,
-                "            Size = new SKSize({0}, {1}),",
-                (int)control.Width, (int)control.Height));
-            sb.AppendLine("        };");
-        }
+            AppendInitializer(sb, control, inv);
 
         sb.AppendLine();
         foreach (var control in controls)
-            sb.AppendLine($"        Controls.Add({control.Name});");
+            AppendAddCalls(sb, control, "Controls");
 
         sb.AppendLine("    }");
         sb.AppendLine("}");
         return sb.ToString();
+    }
+
+    private static void AppendFieldDeclaration(StringBuilder sb, ElementBase control)
+    {
+        sb.AppendLine($"    private {control.GetType().Name} {control.Name} = null!;");
+        foreach (var child in NestedDesignedChildren(control))
+            AppendFieldDeclaration(sb, child);
+    }
+
+    private static void AppendInitializer(StringBuilder sb, ElementBase control, IFormatProvider inv)
+    {
+        sb.AppendLine($"        {control.Name} = new {control.GetType().Name}");
+        sb.AppendLine("        {");
+        sb.AppendLine($"            Name = \"{Escape(control.Name)}\",");
+        if (!string.IsNullOrEmpty(control.Text))
+            sb.AppendLine($"            Text = \"{Escape(control.Text)}\",");
+        sb.AppendLine(string.Format(inv,
+            "            Location = new SKPoint({0}, {1}),",
+            (int)control.Location.X, (int)control.Location.Y));
+        sb.AppendLine(string.Format(inv,
+            "            Size = new SKSize({0}, {1}),",
+            (int)control.Width, (int)control.Height));
+        sb.AppendLine("        };");
+
+        foreach (var child in NestedDesignedChildren(control))
+            AppendInitializer(sb, child, inv);
+    }
+
+    private static void AppendAddCalls(StringBuilder sb, ElementBase control, string parentControlsExpression)
+    {
+        sb.AppendLine($"        {parentControlsExpression}.Add({control.Name});");
+
+        var childControlsExpression = $"{control.Name}.Controls";
+        foreach (var child in NestedDesignedChildren(control))
+            AppendAddCalls(sb, child, childControlsExpression);
+    }
+
+    /// <summary>A designed control's own children (e.g. a group container's members) — everything
+    /// except internal scaffolding like auto-added scroll bars, mirroring the root-level filter in
+    /// <see cref="DesignSurface"/>.</summary>
+    private static System.Collections.Generic.IEnumerable<ElementBase> NestedDesignedChildren(ElementBase control)
+    {
+        foreach (var c in control.Controls)
+            if (c is ElementBase child and not ScrollBar)
+                yield return child;
     }
 
     private static string Escape(string value) =>

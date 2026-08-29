@@ -179,8 +179,14 @@ public class PropertyGrid : GridList
         {
             _chevronRight?.Dispose();
             _chevronDown?.Dispose();
-            _chevronRight = CreateChevronImage(expanded: false, color);
-            _chevronDown = CreateChevronImage(expanded: true, color);
+            // GridList draws this into a fixed 16-logical-unit cell rect (IconSize) regardless of the
+            // source bitmap's own pixel size — baking at a flat 16 raster pixels meant every row's
+            // chevron got stretched (and visibly blurred) on any display above 100% scaling, since
+            // Skia had to upscale a 16px source to fill a 16-logical-unit rect the canvas transform
+            // then scales again by ScaleFactor. Baking at the actual device resolution (plus the same
+            // 2x supersample margin used for every other icon in this codebase) keeps it crisp at any DPI.
+            _chevronRight = CreateChevronImage(expanded: false, color, ScaleFactor);
+            _chevronDown = CreateChevronImage(expanded: true, color, ScaleFactor);
             _chevronDpi = dpi;
             _chevronColor = color;
         }
@@ -188,9 +194,9 @@ public class PropertyGrid : GridList
         return expanded ? _chevronDown! : _chevronRight!;
     }
 
-    private static SKImage CreateChevronImage(bool expanded, SKColor color)
+    private static SKImage CreateChevronImage(bool expanded, SKColor color, float scale)
     {
-        const int size = 16;
+        var size = Math.Max(1, (int)MathF.Ceiling(16f * scale * 2f));
         using var surface = SKSurface.Create(new SKImageInfo(size, size, SKColorType.Bgra8888, SKAlphaType.Premul));
         var canvas = surface.Canvas;
         canvas.Clear(SKColors.Transparent);
@@ -199,7 +205,7 @@ public class PropertyGrid : GridList
         {
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
-            StrokeWidth = 1.7f,
+            StrokeWidth = 1.7f * size / 16f,
             StrokeCap = SKStrokeCap.Round,
             StrokeJoin = SKStrokeJoin.Round,
             Color = color
@@ -235,8 +241,8 @@ public class PropertyGrid : GridList
         {
             _toggleOn?.Dispose();
             _toggleOff?.Dispose();
-            _toggleOn = CreateToggleImage(true, accent);
-            _toggleOff = CreateToggleImage(false, accent);
+            _toggleOn = CreateToggleImage(true, accent, ScaleFactor);
+            _toggleOff = CreateToggleImage(false, accent, ScaleFactor);
             _toggleDpi = dpi;
             _toggleAccent = accent;
         }
@@ -244,34 +250,52 @@ public class PropertyGrid : GridList
         return on ? _toggleOn! : _toggleOff!;
     }
 
-    // GridList always draws a cell Icon into a fixed 16×16 destination rect (see GridList.cs's
-    // paint code) regardless of the source bitmap's own size — so the bitmap itself MUST be 16×16,
-    // or it gets stretched to whatever aspect ratio the destination forces. A wider-than-tall
-    // source (the original 30×16 pill) got squashed into a near-square, which is what made the
-    // switch look distorted/low-quality.
+    // GridList always draws a cell Icon into a fixed 16×16 LOGICAL destination rect (see GridList.cs's
+    // paint code) regardless of the source bitmap's own pixel size — so the bitmap's ASPECT RATIO must
+    // stay 1:1, or it gets stretched to whatever aspect ratio the destination forces (a wider-than-tall
+    // source, the original 30×16 pill, got squashed into a near-square). Its actual pixel resolution,
+    // though, must scale with ScaleFactor (like every other baked icon in this codebase) — baking a
+    // flat, DPI-oblivious 16px source meant it visibly blurred on any display above 100% scaling, since
+    // that 16px source still had to be upscaled to fill the 16-logical-unit rect once the canvas's own
+    // DPI transform scaled the draw.
     private const float IconBitmapSize = 16f;
 
-    private static SKImage CreateToggleImage(bool on, SKColor accent)
+    private static SKImage CreateToggleImage(bool on, SKColor accent, float scale)
     {
-        using var surface = SKSurface.Create(new SKImageInfo((int)IconBitmapSize, (int)IconBitmapSize, SKColorType.Bgra8888, SKAlphaType.Premul));
+        var size = Math.Max(1f, IconBitmapSize * scale * 2f);
+        using var surface = SKSurface.Create(new SKImageInfo((int)MathF.Ceiling(size), (int)MathF.Ceiling(size), SKColorType.Bgra8888, SKAlphaType.Premul));
         var canvas = surface.Canvas;
         canvas.Clear(SKColors.Transparent);
 
-        const float trackHeight = 9f;
-        var track = SKRect.Create(0, (IconBitmapSize - trackHeight) / 2f, IconBitmapSize, trackHeight);
+        var trackHeight = 9f * size / IconBitmapSize;
+        var track = SKRect.Create(0, (size - trackHeight) / 2f, size, trackHeight);
         using var trackPaint = new SKPaint { IsAntialias = true, Color = on ? accent : ColorScheme.Outline.WithAlpha(130) };
         canvas.DrawRoundRect(track, trackHeight / 2f, trackHeight / 2f, trackPaint);
 
-        var knobRadius = trackHeight / 2f - 1.3f;
+        var knobRadius = trackHeight / 2f - 1.3f * size / IconBitmapSize;
         var knobX = on ? track.Right - trackHeight / 2f : track.Left + trackHeight / 2f;
         using var knobPaint = new SKPaint { IsAntialias = true, Color = SKColors.White };
-        canvas.DrawCircle(knobX, IconBitmapSize / 2f, knobRadius, knobPaint);
+        canvas.DrawCircle(knobX, size / 2f, knobRadius, knobPaint);
 
         return surface.Snapshot();
     }
 
+    private int _swatchDpi;
+
     private SKImage GetSwatchIcon(SKColor color)
     {
+        var dpi = DeviceDpi;
+        if (_swatchDpi != dpi)
+        {
+            // Cache entries are baked at a fixed pixel resolution — a DPI/monitor change makes every
+            // existing entry the wrong resolution for the new scale, so the whole cache is stale, not
+            // just the entry being looked up.
+            foreach (var image in _swatchCache.Values)
+                image.Dispose();
+            _swatchCache.Clear();
+            _swatchDpi = dpi;
+        }
+
         var key = ((uint)color.Alpha << 24) | ((uint)color.Red << 16) | ((uint)color.Green << 8) | color.Blue;
         if (_swatchCache.TryGetValue(key, out var cached))
             return cached;
@@ -285,24 +309,28 @@ public class PropertyGrid : GridList
             _swatchCache.Clear();
         }
 
-        var created = CreateSwatchImage(color);
+        var created = CreateSwatchImage(color, ScaleFactor);
         _swatchCache[key] = created;
         return created;
     }
 
-    private static SKImage CreateSwatchImage(SKColor color)
+    private static SKImage CreateSwatchImage(SKColor color, float scale)
     {
-        using var surface = SKSurface.Create(new SKImageInfo((int)IconBitmapSize, (int)IconBitmapSize, SKColorType.Bgra8888, SKAlphaType.Premul));
+        var size = Math.Max(1f, IconBitmapSize * scale * 2f);
+        using var surface = SKSurface.Create(new SKImageInfo((int)MathF.Ceiling(size), (int)MathF.Ceiling(size), SKColorType.Bgra8888, SKAlphaType.Premul));
         var canvas = surface.Canvas;
         canvas.Clear(SKColors.Transparent);
 
-        // A 1px margin keeps the border stroke from getting clipped at the bitmap edge.
-        var rect = SKRect.Create(1, 1, IconBitmapSize - 2, IconBitmapSize - 2);
+        // A margin (scaled with everything else) keeps the border stroke from getting clipped at the
+        // bitmap edge.
+        var margin = 1f * size / IconBitmapSize;
+        var radius = 3f * size / IconBitmapSize;
+        var rect = SKRect.Create(margin, margin, size - margin * 2f, size - margin * 2f);
         using var fill = new SKPaint { IsAntialias = true, Color = color };
-        canvas.DrawRoundRect(rect, 3f, 3f, fill);
+        canvas.DrawRoundRect(rect, radius, radius, fill);
 
-        using var border = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1f, Color = ColorScheme.Outline.WithAlpha(150) };
-        canvas.DrawRoundRect(rect, 3f, 3f, border);
+        using var border = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1f * size / IconBitmapSize, Color = ColorScheme.Outline.WithAlpha(150) };
+        canvas.DrawRoundRect(rect, radius, radius, border);
 
         return surface.Snapshot();
     }

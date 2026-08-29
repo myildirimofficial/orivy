@@ -555,6 +555,16 @@ public class ContextMenuStrip : MenuStrip
         var minY = client.Top + verticalTopInset;
         var maxY = client.Bottom - verticalBottomInset;
         var maxPopupHeight = Math.Max(1f, maxY - minY);
+        // The owner-window-bounds cap above is a hard ceiling, but a caller's own explicit
+        // MaxPopupHeight (e.g. ComboBox.ApplyDropDownMetrics deriving it from MaxDropDownItems) is a
+        // deliberately tighter one — e.g. "show at most 8 rows, even though the window has room for
+        // 30". Without this, MaxPopupHeight was silently ignored whenever the window was tall enough
+        // to fit the full unclamped content, so the dropdown always rendered every item instead of
+        // capping and scrolling: no overflow ever meant the vertical scrollbar (and therefore mouse
+        // wheel scrolling, which only engages once UpdateScrollState sees content taller than the
+        // popup's own Height) never appeared at all.
+        if (_maxPopupHeight > 0f)
+            maxPopupHeight = Math.Min(maxPopupHeight, _maxPopupHeight);
         var desiredHeight = Math.Min(size.Height, maxPopupHeight);
 
         var targetX = anchorClientLocation.X;

@@ -1197,15 +1197,12 @@ public partial class Window : WindowBase
                 OnFormMenuClick?.Invoke(this, EventArgs.Empty);
         }
 
-        if (UsesTitleBarTabs && _tabView.IsPointOverTitleBarCloseButton(e.Location, CreateTitleBarLayoutContext()))
-        {
-            _tabView.RaiseTabCloseButtonClick(_tabView.SelectedIndex);
-        }
-
-        if (UsesTitleBarTabs && _tabView.IsPointOverTitleBarNewTabButton(e.Location, CreateTitleBarLayoutContext()))
-        {
-            _tabView.RaiseNewTabButtonClick();
-        }
+        // Left-button close/new-tab clicks are already raised by ProcessTitleBarMouseDown (new-tab,
+        // fired immediately on press) and ProcessTitleBarMouseUp (close button, deliberately deferred
+        // to release — see its "Handle in mouse up" comment) further up this same gesture. Raising
+        // them a second time here — OnMouseClick fires unconditionally after every OnMouseUp, per
+        // WindowBase's WM_LBUTTONUP handling — closed/opened a second tab per click, since by the time
+        // this ran, SelectedIndex could already refer to a different tab than the one just acted on.
 
         if (_formMoveMouseDown && !CursorScreenPosition.Equals(_mouseOffset))
             return;
