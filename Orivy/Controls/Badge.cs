@@ -27,6 +27,13 @@ public class Badge : ElementBase
         Radius = new Radius(999);
         Border = new Thickness(0);
         TextAlign = ContentAlignment.MiddleCenter;
+        // Every other short single-line auto-sized label control (Button, CheckBox, RadioButton,
+        // SwitchButton, Breadcrumb) sets this too — without it, ElementBase's default WordWrap
+        // measures against this control's own tight content height (padding leaves barely more
+        // room than one line's raw ascent+descent) and its line-fits-in-maxHeight check compares
+        // against the fuller line-ADVANCE (which includes spacing) instead, concluding zero lines
+        // fit and silently rendering no text at all.
+        WrapMode = TextWrap.None;
         Text = "Badge";
         Variant = BadgeVariant.Primary;
         ColorScheme.ThemeChanged += HandleThemeChanged;

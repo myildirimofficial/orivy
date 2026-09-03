@@ -5,12 +5,12 @@ namespace Orivy.Studio;
 
 /// <summary>
 /// Normalizes a control's <c>Name</c> when it comes from outside the interactive canvas — a
-/// hand-edited <c>.orivy.json</c> (<see cref="Persistence.DesignSerializer"/>) or a pasted/hand-edited
-/// Designer-code file (<see cref="CodeImporter"/>) — into something both a legal C# identifier and
-/// unique within the document being built. Interactive placement never needs this: <see cref="DesignSurface.AddControl"/>
-/// already generates a valid, unique name itself. External data has no such guarantee, and
-/// <see cref="CodeGenerator"/> emits <c>Name</c> directly as a field identifier — an invalid or
-/// duplicate name would only surface as a C# compile error at Export time, far from its actual cause.
+/// pasted or hand-edited Designer-code file (<see cref="CodeImporter"/>) — into something both a
+/// legal C# identifier and unique within the document being built. Interactive placement never needs
+/// this: <see cref="DesignSurface.AddControl"/> already generates a valid, unique name itself.
+/// External data has no such guarantee, and <see cref="CodeGenerator"/> emits <c>Name</c> directly as
+/// a field identifier — an invalid or duplicate name would only surface as a C# compile error at
+/// Export time, far from its actual cause.
 /// </summary>
 internal static class DesignNameValidator
 {

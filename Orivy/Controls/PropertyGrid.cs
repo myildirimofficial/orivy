@@ -796,7 +796,7 @@ public class PropertyGrid : GridList
     private static bool IsSimple(Type t)
         => t.IsPrimitive || t.IsEnum || t == typeof(string) || t == typeof(decimal)
            || t == typeof(DateTime) || t == typeof(TimeSpan) || t == typeof(Guid) || t == typeof(SKColor)
-           || t == typeof(SKImage) || IsCompactStruct(t);
+           || t == typeof(SKImage) || t == typeof(SKFont) || IsCompactStruct(t);
 
     /// <summary>
     /// Small geometry structs that read/write better as one compact "a, b" text shortcut (matching
@@ -930,6 +930,18 @@ public class PropertyGrid : GridList
         if (value is SKImage image)
             return $"{image.Width} × {image.Height} image";
 
+        if (value is SKFont font)
+        {
+            var style = font.Typeface switch
+            {
+                { FontWeight: >= 600, IsItalic: true } => " Bold Italic",
+                { FontWeight: >= 600 } => " Bold",
+                { IsItalic: true } => " Italic",
+                _ => string.Empty,
+            };
+            return $"{font.Typeface?.FamilyName ?? "Default"}, {font.Size:0.#}pt{style}";
+        }
+
         if (node.Descriptor?.Converter is { } conv && conv.CanConvertTo(typeof(string)))
         {
             try { return conv.ConvertToString(value) ?? value.ToString() ?? string.Empty; }
@@ -999,7 +1011,7 @@ public class PropertyGrid : GridList
         var t = Nullable.GetUnderlyingType(type) ?? type;
         if (t == typeof(bool) || t.IsEnum || IsNumeric(t) || t == typeof(string)
             || t == typeof(DateTime) || t == typeof(SKColor) || t == typeof(System.Drawing.Color)
-            || IsCompactStruct(t) || t == typeof(SKImage))
+            || IsCompactStruct(t) || t == typeof(SKImage) || t == typeof(SKFont))
             return true;
 
         var converter = TypeDescriptor.GetConverter(t);
@@ -1071,6 +1083,16 @@ public class PropertyGrid : GridList
             return;
         }
 
+        // Fonts open the same family/size/bold/italic dialog a WinForms FontDialog would — there's no
+        // sensible way to type "Segoe UI, 10pt Bold" into a text box and parse it back reliably enough
+        // to bother, and drilling into SKFont's own properties one row at a time (its previous fallback
+        // as an "expandable" object) has no family picker at all.
+        if (t == typeof(SKFont))
+        {
+            PickFont(node);
+            return;
+        }
+
         var bounds = GetCellBounds(itemIndex, ValueColumn);
         if (bounds.IsEmpty)
             return;
@@ -1124,6 +1146,27 @@ public class PropertyGrid : GridList
 
         var oldValue = node.GetValue();
         try { node.Setter(image); }
+        catch { return; }
+        RaiseValueChanged(node, oldValue);
+    }
+
+    /// <summary>Opens <see cref="FontDialog"/> pre-filled with the current font and applies the result
+    /// on OK. Modal, like <see cref="PickImage"/>'s file picker — a font pick is a deliberate, one-shot
+    /// action rather than something that benefits from the inline editors' live-as-you-type feedback.</summary>
+    private void PickFont(PropNode node)
+    {
+        if (node.Setter == null)
+            return;
+
+        var host = GetParentWindow();
+        var dialog = new FontDialog { Font = node.GetValue() as SKFont };
+
+        var result = host != null ? dialog.ShowDialog(host) : dialog.ShowDialog();
+        if (result != DialogResult.OK || dialog.Font == null)
+            return;
+
+        var oldValue = node.GetValue();
+        try { node.Setter(dialog.Font); }
         catch { return; }
         RaiseValueChanged(node, oldValue);
     }

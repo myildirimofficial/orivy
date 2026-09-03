@@ -79,6 +79,7 @@ internal static class ToolbarIcons
             case "group": Group(canvas, paint); break;
             case "eye": Eye(canvas, paint); break;
             case "lock": Lock(canvas, paint); break;
+            case "shuffle": Shuffle(canvas, paint); break;
         }
 
         canvas.RestoreToCount(saved);
@@ -347,6 +348,31 @@ internal static class ToolbarIcons
         shackle.ArcTo(new SKPoint(12, 4), new SKPoint(16, 8), 4);
         shackle.LineTo(16, 11);
         c.DrawPath(shackle, p);
+    }
+
+    /// <summary>Two crossing diagonal paths with arrowheads — the standard media-player "shuffle"
+    /// glyph, reused here for "randomize".</summary>
+    private static void Shuffle(SKCanvas c, SKPaint p)
+    {
+        using var top = new SKPath();
+        top.MoveTo(3.5f, 7f);
+        top.LineTo(20.5f, 17f);
+        c.DrawPath(top, p);
+        using var topArrow = new SKPath();
+        topArrow.MoveTo(15.5f, 17f);
+        topArrow.LineTo(20.5f, 17f);
+        topArrow.LineTo(20.5f, 12.5f);
+        c.DrawPath(topArrow, p);
+
+        using var bottom = new SKPath();
+        bottom.MoveTo(3.5f, 17f);
+        bottom.LineTo(20.5f, 7f);
+        c.DrawPath(bottom, p);
+        using var bottomArrow = new SKPath();
+        bottomArrow.MoveTo(15.5f, 7f);
+        bottomArrow.LineTo(20.5f, 7f);
+        bottomArrow.LineTo(20.5f, 11.5f);
+        c.DrawPath(bottomArrow, p);
     }
 
     /// <summary>A dashed bounding box around two child shapes — a control group / nesting container.</summary>

@@ -4,11 +4,11 @@ namespace Orivy.Studio.Documents;
 
 /// <summary>
 /// A tab that represents an editable file on disk — implemented by both the visual
-/// <see cref="DesignDocument"/> (a <c>.orivy.json</c> design) and the plain-text
-/// <see cref="TextFileDocument"/> (everything else, including a hand-written or Orivy-generated
-/// <c>Designer.cs</c>). The shell's tab management — open/close/save, and warning about unsaved
-/// changes before closing — is written against this interface once instead of duplicating it per
-/// document kind.
+/// <see cref="DesignDocument"/> (which saves/loads as plain Designer C# code, the exact same format
+/// <c>Export</c>/<c>Import Designer Code…</c> use — no separate project format of its own) and the
+/// plain-text <see cref="TextFileDocument"/> (everything else). The shell's tab management —
+/// open/close/save, and warning about unsaved changes before closing — is written against this
+/// interface once instead of duplicating it per document kind.
 /// </summary>
 public interface IStudioDocument : IDisposable
 {

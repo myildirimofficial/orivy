@@ -2,6 +2,7 @@ using Orivy.Animation;
 using Orivy.Helpers;
 using SkiaSharp;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 
@@ -20,7 +21,13 @@ public class TreeView : ElementBase
         };
     }
 
-    private readonly Dictionary<TreeNode, NodeState> _states = new();
+    // The shared animation timer (see AnimationManager) ticks on a background thread and calls
+    // straight back into GetState/UpdateTreeScrollMetrics from there — a plain Dictionary being
+    // written concurrently from that thread while the UI thread reads/writes it during layout or
+    // paint (e.g. right after a folder with many nodes populates the tree) corrupts its internal
+    // state and throws. A ConcurrentDictionary tolerates that; GetState below also switched to
+    // GetOrAdd so node-state creation itself is atomic, not just individual reads/writes.
+    private readonly ConcurrentDictionary<TreeNode, NodeState> _states = new();
     private readonly List<VisibleNode> _visibleNodes = new();
     private readonly SKPaint _rowPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _textPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
@@ -328,23 +335,25 @@ public class TreeView : ElementBase
 
     private NodeState GetState(TreeNode node)
     {
-        if (_states.TryGetValue(node, out var state))
+        // GetOrAdd rather than the old check-then-add so two threads racing to create the same
+        // node's state (the UI thread during layout, the background animation-timer thread during a
+        // tick) can't both "win" and end up with two live NodeStates for one node.
+        return _states.GetOrAdd(node, n =>
+        {
+            var state = new NodeState();
+            state.Animation.SetProgress(n.Expanded ? 1d : 0d);
+            state.Animation.OnAnimationProgress += _ =>
+            {
+                UpdateTreeScrollMetrics();
+                Invalidate();
+            };
+            state.Animation.OnAnimationFinished += _ =>
+            {
+                UpdateTreeScrollMetrics();
+                Invalidate();
+            };
             return state;
-
-        state = new NodeState();
-        state.Animation.SetProgress(node.Expanded ? 1d : 0d);
-        state.Animation.OnAnimationProgress += _ =>
-        {
-            UpdateTreeScrollMetrics();
-            Invalidate();
-        };
-        state.Animation.OnAnimationFinished += _ =>
-        {
-            UpdateTreeScrollMetrics();
-            Invalidate();
-        };
-        _states[node] = state;
-        return state;
+        });
     }
 
     private void BuildVisibleNodeHitList()

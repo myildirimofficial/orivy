@@ -38,18 +38,17 @@ public class FontDialog : Window
     public FontDialog()
     {
         Text = "Font";
-        ClientSize = new SKSize(420, 380);
+        ClientSize = new SKSize(420, 430);
         StartPosition = FormStartPosition.CenterScreen;
         MaximizeBox = false;
         MinimizeBox = false;
         ShowIcon = false;
-        Padding = new Thickness(Padding.Left + 14, Padding.Top + 12, Padding.Right + 14, 12);
+        Padding = new Thickness(Padding.Left + 16, Padding.Top + 16, Padding.Right + 16, 16);
 
         var buttonRow = new Element
         {
             Dock = DockStyle.Bottom,
-            Height = 48,
-            Padding = new Thickness(0, 8, 0, 0),
+            Height = 36,
             BackColor = SKColors.Transparent,
             Border = new Thickness(0),
             Radius = new Radius(0)
@@ -62,30 +61,89 @@ public class FontDialog : Window
         _preview = new Element
         {
             Dock = DockStyle.Bottom,
-            Height = 84,
-            Margin = new Thickness(0, 12, 0, 0),
-            Padding = new Thickness(12),
-            Text = "The quick brown fox 0123",
+            Height = 72,
+            Margin = new Thickness(0, 4, 0, 20),
+            Padding = new Thickness(14),
+            Text = "AaBbYyZz 123",
             BackColor = ColorScheme.SurfaceContainerLow,
             ForeColor = ColorScheme.ForeColor,
             Border = new Thickness(1),
             BorderColor = ColorScheme.Outline.WithAlpha(96),
-            Radius = new Radius(12),
-            TextAlign = ContentAlignment.MiddleCenter
+            Radius = new Radius(10),
+            TextAlign = ContentAlignment.MiddleCenter,
+            AutoEllipsis = true,
         };
+        var previewLabel = FieldLabel("Preview", DockStyle.Bottom, new Thickness(0, 0, 0, 6));
 
-        _family = new ComboBox { Dock = DockStyle.Top, Margin = new Thickness(0, 0, 0, 10), PlaceholderText = "Font family" };
+        // Family + Size share one row — family gets the room, size only needs a few digits —
+        // instead of each field claiming a full-width row of its own the way a single lonely
+        // field would, which is what made the old layout feel so sparse and disconnected.
+        var fieldsRow = new Element
+        {
+            Dock = DockStyle.Top,
+            Height = 80,
+            Margin = new Thickness(0, 0, 0, 18),
+            BackColor = SKColors.Transparent,
+            Border = new Thickness(0),
+            Radius = new Radius(0),
+        };
+        var sizeColumn = new Element
+        {
+            Dock = DockStyle.Left,
+            Width = 88,
+            Margin = new Thickness(0, 0, 12, 0),
+            BackColor = SKColors.Transparent,
+            Border = new Thickness(0),
+            Radius = new Radius(0),
+        };
+        _size = new NumericUpDown { Dock = DockStyle.Bottom, Height = 36, Minimum = 6, Maximum = 96, Value = 10 };
+        sizeColumn.Controls.Add(FieldLabel("Size", DockStyle.Bottom, new Thickness(0, 0, 0, 6)));
+        sizeColumn.Controls.Add(_size);
+
+        var familyColumn = new Element
+        {
+            Dock = DockStyle.Fill,
+            BackColor = SKColors.Transparent,
+            Border = new Thickness(0),
+            Radius = new Radius(0),
+        };
+        _family = new ComboBox { Dock = DockStyle.Bottom, Height = 36, PlaceholderText = "Font family" };
         foreach (var name in SKFontManager.Default.FontFamilies)
             _family.Items.Add(name);
+        familyColumn.Controls.Add(FieldLabel("Family", DockStyle.Bottom, new Thickness(0, 0, 0, 6)));
+        familyColumn.Controls.Add(_family);
 
-        _size = new NumericUpDown { Dock = DockStyle.Top, Margin = new Thickness(0, 0, 0, 10), Minimum = 6, Maximum = 96, Value = 10 };
-        _bold = new CheckBox { Text = "Bold", Dock = DockStyle.Top, Height = 32, Margin = new Thickness(0, 0, 0, 4) };
-        _italic = new CheckBox { Text = "Italic", Dock = DockStyle.Top, Height = 32 };
+        fieldsRow.Controls.Add(familyColumn);
+        fieldsRow.Controls.Add(sizeColumn);
 
-        Controls.Add(_italic);
-        Controls.Add(_bold);
-        Controls.Add(_size);
-        Controls.Add(_family);
+        // Style row — Bold/Italic side by side under one shared label, instead of each stacked
+        // as its own full-width row (which read as two unrelated options rather than one group).
+        var styleRow = new Element
+        {
+            Dock = DockStyle.Top,
+            Height = 60,
+            BackColor = SKColors.Transparent,
+            Border = new Thickness(0),
+            Radius = new Radius(0),
+        };
+        _bold = new CheckBox { Text = "Bold", Dock = DockStyle.Left, Width = 90, Height = 32, Margin = new Thickness(0, 0, 0, 0) };
+        _italic = new CheckBox { Text = "Italic", Dock = DockStyle.Left, Width = 90, Height = 32 };
+        var checkboxRow = new Element
+        {
+            Dock = DockStyle.Bottom,
+            Height = 32,
+            BackColor = SKColors.Transparent,
+            Border = new Thickness(0),
+            Radius = new Radius(0),
+        };
+        checkboxRow.Controls.Add(_italic);
+        checkboxRow.Controls.Add(_bold);
+        styleRow.Controls.Add(FieldLabel("Style", DockStyle.Bottom, new Thickness(0, 0, 0, 6)));
+        styleRow.Controls.Add(checkboxRow);
+
+        Controls.Add(styleRow);
+        Controls.Add(fieldsRow);
+        Controls.Add(previewLabel);
         Controls.Add(_preview);
         Controls.Add(buttonRow);
 
@@ -101,6 +159,28 @@ public class FontDialog : Window
             Close(DialogResult.OK);
         };
     }
+
+    /// <summary>A small muted caption above a field — the previous layout had no field labels at
+    /// all (just a ComboBox whose only hint was a placeholder that disappears the moment something's
+    /// selected), so there was nothing on screen saying which control was "family" vs "size".</summary>
+    private Element FieldLabel(string text, DockStyle dock, Thickness margin) => new()
+    {
+        Text = text,
+        Dock = dock,
+        Height = 16,
+        Margin = margin,
+        BackColor = SKColors.Transparent,
+        ForeColor = ColorScheme.ForeColor.WithAlpha(150),
+        Font = new SKFont(SKTypeface.FromFamilyName(Application.DefaultFont.Typeface?.FamilyName) ?? SKTypeface.Default, 9f),
+        // ElementBase defaults to WordWrap — fine for most controls, but this label's own Height
+        // (16) is barely under the font's single-line advance-with-spacing, so the wrap-measurer
+        // (see TextRenderer.MeasureWrappedText) concludes zero lines fit and renders nothing at
+        // all (the exact bug Badge had for the same reason — see Badge's own WrapMode comment).
+        WrapMode = TextWrap.None,
+        Border = new Thickness(0),
+        Radius = new Radius(0),
+        TextAlign = ContentAlignment.BottomLeft,
+    };
 
     private void SelectFamily(string familyName)
     {

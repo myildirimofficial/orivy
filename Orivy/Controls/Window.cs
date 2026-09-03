@@ -330,6 +330,15 @@ public partial class Window : WindowBase
 
     [DefaultValue(null)] public ContextMenuStrip FormMenu { get; set; }
 
+    /// <summary><see cref="ExtendMenu"/> and <see cref="FormMenu"/> are shown ad hoc via <c>.Show(...)</c>
+    /// from a title-bar button click rather than living in <see cref="WindowBase.Controls"/> the way an
+    /// ordinary <c>MenuStrip</c> does (see <see cref="TitleBarMenuStrip"/>, which adds itself there) —
+    /// so the base class's <c>Controls</c>-tree shortcut scan can never see their items' <c>ShortcutKeys</c>
+    /// without this hook, leaving them decorative labels that never actually fire.</summary>
+    protected override bool TryHandleAdditionalMenuShortcut(Keys keyData) =>
+        (_extendMenu?.TryHandleGlobalShortcut(keyData) ?? false) ||
+        (FormMenu?.TryHandleGlobalShortcut(keyData) ?? false);
+
     [DefaultValue(null)]
     public MenuStrip? TitleBarMenuStrip
     {
@@ -1341,8 +1350,7 @@ public partial class Window : WindowBase
         if (_mouseCapturedElement != null)
         {
             var captured = _mouseCapturedElement;
-            var bounds = GetWindowRelativeBounds(captured);
-            var localEvent = new MouseEventArgs(e.Button, e.Clicks, (int)(e.X - bounds.Left), (int)(e.Y - bounds.Top), e.Delta, e.IsHorizontalWheel);
+            var localEvent = CreateChildMouseEvent(e, captured);
             captured.OnMouseUp(localEvent);
             if (e.Button == MouseButtons.Left) ReleaseMouseCapture(captured);
         }
@@ -1430,10 +1438,13 @@ public partial class Window : WindowBase
         if (!_formMoveMouseDown && _mouseCapturedElement != null)
         {
             // Forward all mouse move events to the captured element so dragging
-            // continues even when the cursor leaves its bounds.
+            // continues even when the cursor leaves its bounds. Must go through
+            // CreateChildMouseEvent (not a raw bounds subtraction) so the delta is divided by any
+            // zoomed ancestor's ChildRenderScale (e.g. DesignSurface) — skipping that division is
+            // invisible at 100% zoom but makes every dragged control drift away from the cursor at
+            // any other zoom level.
             var captured = _mouseCapturedElement;
-            var bounds = GetWindowRelativeBounds(captured);
-            var localEvent = new MouseEventArgs(e.Button, e.Clicks, (int)(e.X - bounds.Left), (int)(e.Y - bounds.Top), e.Delta, e.IsHorizontalWheel);
+            var localEvent = CreateChildMouseEvent(e, captured);
             captured.OnMouseMove(localEvent);
             return;
         }

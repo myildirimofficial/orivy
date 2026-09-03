@@ -54,11 +54,11 @@ public class Button : ElementBase
                     .Border(1)
                     .BorderColor(ColorScheme.Primary.Brightness(-0.18f))
                     .Radius(12)
-                    .Shadow(new BoxShadow(0f, 6f, 14f, 0, ColorScheme.ShadowColor.WithAlpha(26))))
+                    .Shadow(new BoxShadow(0f, 2f, 4f, 0, ColorScheme.ShadowColor.WithAlpha(26))))
                 .OnHover(rule => rule
                     .Background(ColorScheme.Primary.Brightness(0.06f))
                     .BorderColor(ColorScheme.Primary.Brightness(-0.08f))
-                    .Shadow(new BoxShadow(0f, 10f, 20f, 0, ColorScheme.Primary.WithAlpha(34))))
+                    .Shadow(new BoxShadow(0f, 4f, 8f, 0, ColorScheme.Primary.WithAlpha(34))))
                 .OnPressed(rule => rule
                     .Background(ColorScheme.Primary.Brightness(-0.08f))
                     .BorderColor(ColorScheme.Primary.Brightness(-0.24f))

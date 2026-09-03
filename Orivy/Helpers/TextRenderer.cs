@@ -538,6 +538,7 @@ public static class TextRenderer
         var lines = TextWrapper.WrapText(text, font, options.MaxWidth, options.Wrap);
         var lineAdvance = GetLineAdvance(font, options.LineSpacing);
         var currentY = y;
+        var lineIndex = 0;
 
         foreach (var line in lines)
         {
@@ -546,20 +547,25 @@ public static class TextRenderer
             // that reserves height using its own formula and compensates with LineSpacing < 1
             // (e.g. NotificationToast sizing its message area) would otherwise have even the FIRST
             // line rejected as "too tall" whenever the font's natural line height exceeds that
-            // formula's estimate, silently dropping the entire message.
+            // formula's estimate, silently dropping the entire message. The lineIndex > 0 guard is
+            // what actually prevents that: a box only a hair shorter than one line's full advance
+            // (e.g. a tight single-line label) must still draw that first line — every real text
+            // renderer shows at least something rather than nothing. Only the second-and-later
+            // lines are dropped once height genuinely runs out.
             var renderedHeight = (currentY - y) + lineAdvance;
-            if (renderedHeight > options.MaxHeight)
+            if (lineIndex > 0 && renderedHeight > options.MaxHeight)
                 break;
 
             DrawTextWithFallback(canvas, line, x, currentY, alignment, font, paint);
-            
+
             if (options.Decoration != TextDecoration.None)
             {
-                TextDecorator.DrawDecorations(canvas, line, x, currentY, font, paint, 
+                TextDecorator.DrawDecorations(canvas, line, x, currentY, font, paint,
                     options.Decoration, options.DecorationThickness, options.DecorationColor);
             }
 
             currentY += lineAdvance;
+            lineIndex++;
         }
     }
 
@@ -845,9 +851,15 @@ public static class TextRenderer
         foreach (var line in lines)
         {
             // See DrawWrappedText for why this checks against lineAdvance (the caller's intended
-            // per-line height) rather than the font's raw, uncompressed baseLineHeight.
+            // per-line height) rather than the font's raw, uncompressed baseLineHeight. The
+            // lineCount > 0 guard matters just as much here: a container whose available height
+            // is a hair under one line's advance (a snug single-line label, say) must still measure
+            // as "fits" — rejecting even the first line means every caller sees a (0,0) result and
+            // acts as if there's no content at all, when in every real text layout there's still one
+            // (maybe very slightly clipped) line to show. Only a second-and-later line is dropped
+            // for genuinely running out of vertical room.
             var nextHeight = (lineCount + 1) * lineAdvance;
-            if (nextHeight > maxHeight)
+            if (lineCount > 0 && nextHeight > maxHeight)
                 break;
 
             font.MeasureText(line, out var lineBounds);

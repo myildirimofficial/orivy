@@ -1169,6 +1169,12 @@ public class ContextMenuStrip : MenuStrip
         }
     }
 
+    /// <summary>Matches a global key combo against this menu's items and invokes it if found — unlike
+    /// <see cref="OnOwnerKeyDown"/> (which only listens while the popup is already open), this works
+    /// whether or not the menu has ever been shown, so a title-bar-hosted app menu's <c>ShortcutKeys</c>
+    /// (e.g. Ctrl+W on a "Close Tab" item) can be wired into a window's global key handling.</summary>
+    internal bool TryHandleGlobalShortcut(Keys keyData) => TryHandleShortcut(Items, NormalizeShortcutKeyData(keyData));
+
     private bool TryHandleShortcut(IReadOnlyList<MenuItem> items, Keys keyData)
     {
         for (var i = 0; i < items.Count; i++)

@@ -7,10 +7,9 @@ using System.IO;
 namespace Orivy.Studio.Documents;
 
 /// <summary>
-/// A plain-text/code editor tab. Any file that isn't a <c>.orivy.json</c> design — a hand-written or
-/// Orivy-generated <c>Designer.cs</c>, or really any other text file in the browsed folder — opens
-/// here for direct editing and saving, with no attempt to parse or understand it (that's what
-/// <c>File ▸ Import Designer Code…</c> is for, as a separate, explicit action).
+/// A plain-text/code editor tab. Any file that isn't recognizable Designer code (see
+/// <see cref="CodeImporter"/>) — a hand-written class, a README, any other text file in the browsed
+/// folder — opens here for direct editing and saving, with no attempt to parse or understand it.
 /// </summary>
 public sealed class TextFileDocument : Container, IStudioDocument
 {

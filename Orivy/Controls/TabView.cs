@@ -3144,6 +3144,14 @@ public partial class TabView : ElementBase
             return false;
 
         UpdateTitleBarLayout(context);
+        // UpdateTitleBarLayout only maintains the tab rects themselves (and short-circuits entirely
+        // when the layout hasn't changed) — _titleBarCloseButtonRect/_titleBarNewTabButtonRect are a
+        // separate cache this method never touches. IsPointOverTitleBarCloseButton/NewTabButton (used
+        // by NCHITTEST and by the click-completion path in OnMouseUp) both refresh it before reading
+        // it; skipping that refresh here meant a real click on either button could still read a stale
+        // or still-empty rect, miss both hit tests, and fall through to "start a tab selection/drag"
+        // instead — silently swallowing the click with no visible reaction.
+        UpdateTitleBarAuxiliaryRects();
 
         // Chevron click handling for title bar scroll mode.
         if (e.Button == MouseButtons.Left && IsTitleBarScrollOverflowActive)
@@ -3890,29 +3898,30 @@ public partial class TabView : ElementBase
         }
     }
 
+    // Deliberately mirrors DrawTabCloseButton/DrawNewTabButton (the embedded/"normal" TabView's own
+    // close and new-tab buttons) pixel-for-pixel instead of a title-bar-specific design — the native
+    // title bar and an embedded tab strip are still both just "a TabView", and having the close/new-tab
+    // buttons look and feel different between them (a bordered square vs. a plain circle, different
+    // idle-state visibility, different glyph sizes) read as a bug, not an intentional variation.
+
     private void DrawTitleBarCloseButton(SKCanvas canvas, SKRect rect, bool isHovered, SKColor foreColor, SKColor hoverColor)
     {
         var sf = ScaleFactor;
-        var progress = Math.Clamp((float)_titleBarTabCloseHoverAnimation.GetProgress(), 0f, 1f);
-        _tabBackgroundPaint.Color = hoverColor.WithAlpha((byte)(28 + progress * 52));
-
         var midX = MathF.Round(rect.MidX);
         var midY = MathF.Round(rect.MidY);
-        var width = MathF.Round(rect.Width / 2f);
+        var circleR = MathF.Round(rect.Width * 0.44f);
 
-        canvas.DrawCircle(midX, midY, width, _tabBackgroundPaint);
-
-        if (progress > 0f)
+        if (isHovered)
         {
-            _tabBorderPaint.Color = ColorScheme.Outline.WithAlpha((byte)(72 + progress * 70));
-            _tabBorderPaint.StrokeWidth = MathF.Max(1f, MathF.Round(sf));
-            canvas.DrawCircle(midX, midY, Math.Max(0f, width - _tabBorderPaint.StrokeWidth * 0.5f), _tabBorderPaint);
+            _tabBackgroundPaint.Color = foreColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)28 : (byte)22);
+            canvas.DrawCircle(midX, midY, circleR, _tabBackgroundPaint);
         }
 
-        var stroke = MathF.Max(1f, MathF.Round(sf));
-        var linePaint = PrepareTabGlyphPaint(foreColor.WithAlpha(isHovered ? (byte)255 : (byte)222), stroke, isAntialias: true);
-
-        var size = MathF.Round(3.5f * sf);
+        var linePaint = PrepareTabGlyphPaint(
+            foreColor.WithAlpha(isHovered ? (byte)220 : (byte)150),
+            MathF.Max(1f, MathF.Round(1.5f * sf)),
+            isAntialias: true);
+        var size = MathF.Round(3f * sf);
         canvas.DrawLine(midX - size, midY - size, midX + size, midY + size, linePaint);
         canvas.DrawLine(midX - size, midY + size, midX + size, midY - size, linePaint);
     }
@@ -3920,30 +3929,22 @@ public partial class TabView : ElementBase
     private void DrawTitleBarNewTabButton(SKCanvas canvas, SKRect rect, bool isHovered, SKColor foreColor, SKColor hoverColor)
     {
         var sf = ScaleFactor;
-        var progress = Math.Clamp((float)_titleBarNewTabHoverAnimation.GetProgress(), 0f, 1f);
-        var baseFill = ColorScheme.SurfaceContainerHigh.WithAlpha(ColorScheme.IsDarkMode ? (byte)56 : (byte)72);
-        var hoverFill = ColorScheme.SurfaceVariant.InterpolateColor(hoverColor, 0.16f).WithAlpha(ColorScheme.IsDarkMode ? (byte)132 : (byte)118);
+        var midX = MathF.Round(rect.MidX);
+        var midY = MathF.Round(rect.MidY);
+        var circleR = MathF.Round(rect.Width * 0.48f);
 
-        _tabBackgroundPaint.Color = baseFill.InterpolateColor(hoverFill, progress);
-        _tabBorderPaint.Color = ColorScheme.Outline.WithAlpha((byte)(96 + progress * 44));
-        _tabBorderPaint.StrokeWidth = MathF.Max(1f, MathF.Round(sf));
+        _tabBackgroundPaint.Color = isHovered
+            ? foreColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)22 : (byte)16)
+            : foreColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)10 : (byte)7);
+        canvas.DrawCircle(midX, midY, circleR, _tabBackgroundPaint);
 
-        var roundedRect = new SKRect(MathF.Round(rect.Left), MathF.Round(rect.Top), MathF.Round(rect.Right), MathF.Round(rect.Bottom));
-        var rad = MathF.Round(6f * sf);
-
-        canvas.DrawRoundRect(roundedRect, rad, rad, _tabBackgroundPaint);
-        canvas.DrawRoundRect(roundedRect, rad, rad, _tabBorderPaint);
-
-        var stroke = MathF.Max(1.1f, MathF.Round(sf * 1.5f));
-        var crispOffset = (stroke % 2 != 0) ? 0.5f : 0f;
-        var linePaint = PrepareTabGlyphPaint(foreColor.WithAlpha(isHovered ? (byte)255 : (byte)228), stroke, isAntialias: false);
-
-        var size = MathF.Round(5f * sf);
-        var midX = MathF.Round(roundedRect.MidX) + crispOffset;
-        var midY = MathF.Round(roundedRect.MidY) + crispOffset;
-
-        canvas.DrawLine(midX - size, midY, midX + size, midY, linePaint);
-        canvas.DrawLine(midX, midY - size, midX, midY + size, linePaint);
+        var plusPaint = PrepareTabGlyphPaint(
+            foreColor.WithAlpha(isHovered ? (byte)210 : (byte)140),
+            MathF.Max(1f, MathF.Round(1.5f * sf)),
+            isAntialias: true);
+        var size = MathF.Round(4f * sf);
+        canvas.DrawLine(midX - size, midY, midX + size, midY, plusPaint);
+        canvas.DrawLine(midX, midY - size, midX, midY + size, plusPaint);
     }
 
     private SKPaint PrepareTabGlyphPaint(SKColor color, float strokeWidth, bool isAntialias)

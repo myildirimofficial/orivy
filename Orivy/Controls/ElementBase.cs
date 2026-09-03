@@ -3225,7 +3225,17 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
         var displayRectangle = DisplayRectangle;
         if (displayRectangle.Width <= 0f || displayRectangle.Height <= 0f)
-            return;
+        {
+            // Padding alone can consume the whole box once a nested Dock/Anchor child gets
+            // squeezed small enough (e.g. Size.Width <= Padding.Left + Padding.Right) — the
+            // padded DisplayRectangle then has literally no room, and text used to vanish
+            // completely instead of just overflowing its tiny box, the same failure mode fixed
+            // for wrapping in TextWrapper.WrapText. Fall back to the raw (unpadded) bounds so
+            // there's still something to draw.
+            displayRectangle = new SKRect(0f, 0f, Width, Height);
+            if (displayRectangle.Width <= 0f || displayRectangle.Height <= 0f)
+                return;
+        }
 
         TextRenderer.DrawText(canvas, _text, displayRectangle, paint, GetDefaultTextRenderFont(), TextAlign, AutoEllipsis, UseMnemonic, WrapMode);
     }

@@ -78,7 +78,15 @@ public sealed class DesignSurface : Element
 
         _overlay = new DesignOverlay(this)
         {
-            Dock = DockStyle.Fill,
+            // Not Dock=Fill: Fill sizes against this surface's raw (physical, unzoomed) client
+            // rect, but the overlay renders through the same ChildRenderScale transform as _root
+            // (see SyncOverlayBounds). A Fill-sized overlay would only cover a zoom-sized fraction
+            // of the real viewport — shrinking at zoom<100%, overflowing it at zoom>100% — which is
+            // exactly the "the control itself is trying to zoom" effect (its own painted bounds,
+            // selection adorners and focus ring visibly scale with zoom) plus swallowed clicks
+            // anywhere the shrunk hit-test rect no longer reaches. SyncOverlayBounds keeps its
+            // logical size at Width/zoom × Height/zoom instead, so after the shared scale it always
+            // covers exactly the true, constant physical viewport.
             BackColor = SKColors.Transparent,
             Border = new Thickness(0),
             Radius = new Radius(0),
@@ -89,6 +97,7 @@ public sealed class DesignSurface : Element
 
         Controls.Add(_root);
         Controls.Add(_overlay);
+        SyncOverlayBounds();
 
         Selection.Changed += () => { Invalidate(); };
     }
@@ -96,6 +105,25 @@ public sealed class DesignSurface : Element
     // ── Viewport ─────────────────────────────────────────────────────────────
 
     protected override float ChildRenderScale => _zoom;
+
+    public override void OnSizeChanged(EventArgs e)
+    {
+        base.OnSizeChanged(e);
+        SyncOverlayBounds();
+    }
+
+    /// <summary>Keeps the overlay's logical size equal to the physical viewport divided by zoom, so
+    /// that after the shared <see cref="ChildRenderScale"/> paint/input transform it always covers
+    /// exactly this surface's real, constant on-screen bounds — see the constructor's remark on why
+    /// Dock=Fill can't do this on its own.</summary>
+    private void SyncOverlayBounds()
+    {
+        if (_zoom <= 0f)
+            return;
+
+        _overlay.Location = SKPoint.Empty;
+        _overlay.Size = new SKSize(Width / _zoom, Height / _zoom);
+    }
 
     public float Zoom
     {
@@ -107,6 +135,7 @@ public sealed class DesignSurface : Element
                 return;
 
             _zoom = clamped;
+            SyncOverlayBounds();
             ZoomChanged?.Invoke();
             Invalidate();
         }
@@ -133,9 +162,42 @@ public sealed class DesignSurface : Element
         Zoom = newZoom;
     }
 
+    /// <summary>Bounds wheel/middle-drag panning the way an ordinary scrollable view always does:
+    /// when the form is smaller than the viewport on an axis, that axis can't scroll at all — the
+    /// form is already fully visible, so there's nothing to scroll *to* — and when it's larger, the
+    /// pan range only ever covers the form's own edges, the same as scrolling a document never lets
+    /// you go past its first or last line. Before this, the only limit was "keep a 64px sliver
+    /// visible", which allowed scrolling through a great deal of pointless empty space even for a
+    /// form that already fit entirely on screen. A small fixed overscroll margin is still allowed
+    /// past each edge — just enough to nudge into view a control that was dragged slightly outside
+    /// the form (see the off-canvas ghost outline in the overlay's paint) without reopening the door
+    /// to scrolling away indefinitely.</summary>
+    private void ClampRootIntoView()
+    {
+        if (Width <= 0 || Height <= 0 || _zoom <= 0f)
+            return;
+
+        const float overscroll = 80f;
+        var viewW = Width / _zoom;
+        var viewH = Height / _zoom;
+
+        var minVisibleX = Math.Min(_root.Width, viewW) - overscroll;
+        var minVisibleY = Math.Min(_root.Height, viewH) - overscroll;
+
+        var minX = minVisibleX - _root.Width;
+        var maxX = viewW - minVisibleX;
+        var minY = minVisibleY - _root.Height;
+        var maxY = viewH - minVisibleY;
+
+        var x = minX <= maxX ? Math.Clamp(_root.Location.X, minX, maxX) : _root.Location.X;
+        var y = minY <= maxY ? Math.Clamp(_root.Location.Y, minY, maxY) : _root.Location.Y;
+        _root.Location = new SKPoint(x, y);
+    }
+
     public void Pan(float dx, float dy)
     {
         _root.Location = new SKPoint(_root.Location.X + dx, _root.Location.Y + dy);
+        ClampRootIntoView();
         Invalidate();
     }
 
@@ -148,6 +210,7 @@ public sealed class DesignSurface : Element
         var zx = (Width - margin * 2f) / Math.Max(1f, _root.Width);
         var zy = (Height - margin * 2f) / Math.Max(1f, _root.Height);
         _zoom = Math.Clamp(MathF.Min(zx, zy), MinZoom, MaxZoom);
+        SyncOverlayBounds();
 
         var logicalW = Width / _zoom;
         var logicalH = Height / _zoom;
@@ -169,6 +232,39 @@ public sealed class DesignSurface : Element
     {
         get => _showGrid;
         set { _showGrid = value; Invalidate(); }
+    }
+
+    private bool _showRandomBackgrounds;
+    private readonly Dictionary<ElementBase, SKColor> _randomBackgroundColors = new();
+
+    /// <summary>
+    /// Debug/visualization aid: tints every control's bounds with a random, low-alpha color so
+    /// overlapping or visually-similar regions are easy to tell apart, without hiding the control's
+    /// own real appearance underneath — useful because many Orivy controls (Button, TextBox,
+    /// ComboBox…) render their own theme-driven background rather than literally painting
+    /// <see cref="ElementBase.BackColor"/>, so setting that property has no visible effect on them;
+    /// drawing the tint in the overlay instead works uniformly for every control type. Colors are
+    /// assigned once per control when turned on and kept stable (not re-rolled every repaint) until
+    /// turned off again. Purely a paint-time overlay — it never touches hit-testing, so drag, resize
+    /// and selection all keep working exactly as normal while it's on.
+    /// </summary>
+    public bool ShowRandomBackgrounds
+    {
+        get => _showRandomBackgrounds;
+        set
+        {
+            if (_showRandomBackgrounds == value)
+                return;
+            _showRandomBackgrounds = value;
+            _randomBackgroundColors.Clear();
+            if (value)
+            {
+                var random = new Random();
+                foreach (var control in AllDesignedControls)
+                    _randomBackgroundColors[control] = new SKColor((byte)random.Next(256), (byte)random.Next(256), (byte)random.Next(256));
+            }
+            Invalidate();
+        }
     }
 
     private bool _previewMode;
@@ -204,6 +300,33 @@ public sealed class DesignSurface : Element
     }
 
     private static bool IsDesignedControl(ElementBase child) => child is not ScrollBar;
+
+    /// <summary>Every designed control at any nesting depth — top-level plus every descendant inside
+    /// a group, recursively. Unlike <see cref="DesignedControls"/> (top-level only, what selection/
+    /// marquee/alignment operate over), this is for operations that legitimately want to touch the
+    /// whole tree at once, e.g. a bulk visual toggle across every control regardless of nesting.</summary>
+    public IEnumerable<ElementBase> AllDesignedControls
+    {
+        get
+        {
+            foreach (var control in DesignedControls)
+            {
+                yield return control;
+                foreach (var nested in AllNestedDesignedControls(control))
+                    yield return nested;
+            }
+        }
+    }
+
+    private static IEnumerable<ElementBase> AllNestedDesignedControls(ElementBase control)
+    {
+        foreach (var child in NestedDesignedChildrenOf(control))
+        {
+            yield return child;
+            foreach (var nested in AllNestedDesignedControls(child))
+                yield return nested;
+        }
+    }
 
     // ── Editing operations (all undoable) ────────────────────────────────────
 
@@ -264,7 +387,13 @@ public sealed class DesignSurface : Element
     /// </summary>
     public void PreviewDrop(ControlEntry entry, SKPoint clientPoint)
     {
-        var size = ControlCatalog.DefaultSizeFor(entry);
+        // Must match DropAt's own size source exactly — DefaultSizeFor used to be a static
+        // per-type lookup table (falling back to a generic 160×40 for anything not explicitly
+        // listed), while DropAt/AddControl size a control from a real freshly-constructed instance
+        // instead. For any AutoSize control not in that table (e.g. Badge, whose real content-fit
+        // size is nowhere near 160×40), the ghost shown while dragging was a different size than
+        // what actually landed on release.
+        var size = entry.CreateInstance().Size;
         var logical = ToLogical(clientPoint);
         var target = FindNestingTargetAt(logical);
         var location = DropTargetLocation(logical, size, target);
@@ -868,22 +997,38 @@ public sealed class DesignSurface : Element
             if (!_s.ShowGrid)
                 return;
 
+            // A HatchBrush's tiled shader is a fixed, small raster pattern — repeating it under the
+            // canvas's own zoom transform means every zoom level that isn't a clean multiple of the
+            // tile size resamples that raster at a fractional scale, which is exactly what produces
+            // moire/beating artifacts (the "sometimes glitches" look). Drawing plain lines is immune to
+            // that (it's geometry, not a resampled bitmap) — the only thing that actually needed fixing
+            // was the *drift* in the original line-drawing loop, which came from accumulating `x += step`
+            // over hundreds of additions on a wide root. Computing each line's position as `i * step`
+            // instead (independent per line, no running total) removes that drift with no need for a
+            // tiled brush at all.
             var r = new SKRect(0, 0, Width, Height);
-            var minor = GridStep;
+            var step = GridStep;
+            var columns = (int)(r.Width / step);
+            var rows = (int)(r.Height / step);
 
-            _grid.StrokeWidth = 1f;
-            _grid.Color = ColorScheme.Outline.WithAlpha(34);
-            for (var x = r.Left + minor; x < r.Right; x += minor)
+            // StrokeWidth is in this canvas's own logical (pre-zoom) units, but the canvas already
+            // has the surface's zoom baked into its transform — a flat "1" here means an actual 1
+            // *screen* pixel line only exactly at 100% zoom. Below that (e.g. 50%) it rasterizes at
+            // under a device pixel, and with antialiasing off that's exactly what breaks up into the
+            // patchy/dithered "hatch" look rather than a clean thin line. Dividing by zoom keeps the
+            // on-screen thickness pinned to a real, consistent 1 device pixel at any zoom level.
+            _grid.StrokeWidth = 1f / _s.Zoom;
+            _grid.Color = ColorScheme.Outline.WithAlpha(40);
+            for (var i = 1; i <= columns; i++)
+            {
+                var x = r.Left + i * step;
                 canvas.DrawLine(x, r.Top, x, r.Bottom, _grid);
-            for (var y = r.Top + minor; y < r.Bottom; y += minor)
+            }
+            for (var i = 1; i <= rows; i++)
+            {
+                var y = r.Top + i * step;
                 canvas.DrawLine(r.Left, y, r.Right, y, _grid);
-
-            // Major lines every 5 cells for readability.
-            _grid.Color = ColorScheme.Outline.WithAlpha(70);
-            for (var x = r.Left + minor * 5; x < r.Right; x += minor * 5)
-                canvas.DrawLine(x, r.Top, x, r.Bottom, _grid);
-            for (var y = r.Top + minor * 5; y < r.Bottom; y += minor * 5)
-                canvas.DrawLine(r.Left, y, r.Right, y, _grid);
+            }
         }
 
         protected override void Dispose(bool disposing)
@@ -910,6 +1055,8 @@ public sealed class DesignSurface : Element
         private SKPoint _dragStart;
         private SKRect _marquee;
         private Dictionary<ElementBase, SKRect>? _dragBefore;
+        private bool _resizingRoot;
+        private SKRect _rootDragBefore;
         private readonly List<(SKPoint A, SKPoint B)> _activeGuides = new();
 
         private readonly SKPaint _stroke = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.4f };
@@ -917,6 +1064,9 @@ public sealed class DesignSurface : Element
         private readonly SKPaint _guide = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1f };
         private readonly SKPathEffect _previewDash = SKPathEffect.CreateDash(new[] { 5f, 4f }, 0f);
         private readonly SKFont _labelFont = Application.DefaultFont;
+
+        private TextBox? _textEditor;
+        private ElementBase? _textEditTarget;
 
         public DesignOverlay(DesignSurface surface) => _s = surface;
 
@@ -927,6 +1077,40 @@ public sealed class DesignSurface : Element
         public override void OnPaint(SKCanvas canvas)
         {
             base.OnPaint(canvas);
+
+            // "Randomize backgrounds" debug view — painted first so every other adorner (selection,
+            // locked badges, guides) still layers cleanly on top of it. A light tint (not a solid
+            // fill) so it marks each control's footprint without hiding its real appearance or making
+            // it look like the canvas stopped responding to clicks on it.
+            if (_s.ShowRandomBackgrounds)
+            {
+                foreach (var (control, color) in _s._randomBackgroundColors)
+                {
+                    if (!control.Visible)
+                        continue;
+                    _fill.Color = color.WithAlpha(60);
+                    canvas.DrawRect(ToOverlay(control), _fill);
+                }
+            }
+
+            // A control dragged fully or partly outside the form's own bounds otherwise becomes
+            // invisible (or nearly so) wherever it overflows — normal child rendering clips to Root's
+            // rect, same as it would at runtime — leaving no visible affordance to click and drag it
+            // back in. Drawn for every top-level control that pokes outside Root, not just a selected
+            // one, since the point is making an accidentally-stranded control discoverable at all;
+            // hit-testing (FindNestingTargetAt) was never clipped to Root, only the painting was.
+            foreach (var control in _s.DesignedControls)
+            {
+                if (!control.Visible)
+                    continue;
+                var bounds = ToOverlay(control);
+                if (RootOverlayRect.Contains(bounds))
+                    continue;
+                _stroke.Color = ColorScheme.Error.WithAlpha(190);
+                _stroke.PathEffect = _previewDash;
+                canvas.DrawRect(bounds, _stroke);
+                _stroke.PathEffect = null;
+            }
 
             // Highlight the control group under the cursor while a toolbox drag hovers it — the
             // visual cue that releasing here nests the new control instead of dropping onto the root.
@@ -999,8 +1183,13 @@ public sealed class DesignSurface : Element
             if (items.Count > 0)
             {
                 _stroke.Color = ColorScheme.Primary;
+                _stroke.StrokeWidth = 2f;
                 foreach (var c in items)
                     canvas.DrawRect(ToOverlay(c), _stroke);
+                _stroke.StrokeWidth = 1.4f;
+
+                SKRect labelAnchor;
+                string label;
 
                 if (items.Count == 1 && !_s.Locked.Contains(items[0]))
                 {
@@ -1011,15 +1200,44 @@ public sealed class DesignSurface : Element
                         canvas.DrawRect(rect, _fill);
                         canvas.DrawRect(rect, _stroke);
                     }
+                    labelAnchor = bounds;
+                    label = items[0].Name;
+
+                    // Live X/Y (while moving) or W×H (while resizing) readout — with guides on, the
+                    // whole point of dragging precisely is knowing exactly where you've landed, and
+                    // the name chip is the one label that's always there to carry it without adding a
+                    // second overlapping badge.
+                    if (_s.SmartGuides && _mode is not (Grip.None or Grip.Marquee or Grip.PanView))
+                    {
+                        label = _mode == Grip.Body
+                            ? $"{items[0].Name}   {(int)items[0].Location.X}, {(int)items[0].Location.Y}"
+                            : $"{items[0].Name}   {(int)items[0].Width} × {(int)items[0].Height}";
+                    }
                 }
-                else if (items.Count > 1)
+                else
                 {
                     var union = ToOverlay(items[0]);
                     foreach (var c in items.Skip(1))
                         union = SKRect.Union(union, ToOverlay(c));
-                    _stroke.Color = ColorScheme.Primary.WithAlpha(140);
-                    canvas.DrawRect(SKRect.Inflate(union, 3f, 3f), _stroke);
+                    if (items.Count > 1)
+                    {
+                        _stroke.Color = ColorScheme.Primary.WithAlpha(140);
+                        canvas.DrawRect(SKRect.Inflate(union, 3f, 3f), _stroke);
+                    }
+                    labelAnchor = union;
+                    label = items.Count == 1 ? items[0].Name : $"{items.Count} selected";
                 }
+
+                // A thin outline alone can disappear against a control whose own background happens
+                // to be a similar color (e.g. after "Randomize Backgrounds") — a small filled name
+                // chip stays legible regardless of what's underneath it, the same way the toolbox
+                // drop-ghost's chip already does below.
+                var textWidth = _labelFont.MeasureText(label);
+                var chip = SKRect.Create(labelAnchor.Left, labelAnchor.Top - 22f, textWidth + 14f, 18f);
+                _fill.Color = ColorScheme.Primary;
+                canvas.DrawRoundRect(chip, 4f, 4f, _fill);
+                _fill.Color = SKColors.White;
+                TextRenderer.DrawText(canvas, label, chip.Left + 7f, chip.MidY + _labelFont.Size * 0.35f, _labelFont, _fill);
             }
 
             // Marquee.
@@ -1037,6 +1255,19 @@ public sealed class DesignSurface : Element
                 _guide.Color = new SKColor(236, 72, 153); // guide magenta
                 foreach (var (a, b) in _activeGuides)
                     canvas.DrawLine(a, b, _guide);
+            }
+
+            // The design root's own resize grips — a permanent affordance (not tied to selection) for
+            // resizing the form itself, drawn last so it's always reachable on top of everything else.
+            var rootBounds = RootOverlayRect;
+            _stroke.Color = ColorScheme.Outline.WithAlpha(160);
+            _fill.Color = ColorScheme.Surface;
+            foreach (var (grip, rect) in EnumerateGrips(rootBounds))
+            {
+                if (grip is not (Grip.Right or Grip.Bottom or Grip.BottomRight))
+                    continue;
+                canvas.DrawRect(rect, _fill);
+                canvas.DrawRect(rect, _stroke);
             }
         }
 
@@ -1068,6 +1299,17 @@ public sealed class DesignSurface : Element
                 return;
 
             var ctrl = (ModifierKeys & Keys.Control) == Keys.Control;
+
+            // The design root itself ("the form") has its own resize grips on the right/bottom edges
+            // and corner — growing only away from its fixed top-left origin, matching how resizing a
+            // real WinForms designer's form always works. Checked before per-control grips since it's
+            // a distinct, always-present affordance rather than something that competes with them.
+            var rootGrip = HitRootGrip(RootOverlayRect, e.Location);
+            if (rootGrip != Grip.None)
+            {
+                BeginRootResizeDrag(rootGrip, e.Location);
+                return;
+            }
 
             // Resize grips (single selection only).
             if (_s.Selection.Items.Count == 1 && !_s.Locked.Contains(_s.Selection.Items[0]))
@@ -1103,6 +1345,93 @@ public sealed class DesignSurface : Element
 
             if (_s.Selection.Contains(hit) && !_s.Locked.Contains(hit))
                 BeginBoundsDrag(Grip.Body, e.Location);
+        }
+
+        /// <summary>Double-clicking a plain label-like control (<see cref="Element"/>, <see cref="Badge"/>,
+        /// <see cref="Button"/>) edits its Text in place — a real inline TextBox positioned right over
+        /// the control, rather than requiring a trip to the Properties panel for the single most common
+        /// edit there is. Deliberately scoped to these few "just shows some text" types rather than
+        /// every control: something like a GridList or TreeView has its own idea of what "Text" even
+        /// means (if anything), and double-click already means something else for several control types
+        /// (e.g. entering a group).</summary>
+        public override void OnMouseDoubleClick(MouseEventArgs e)
+        {
+            base.OnMouseDoubleClick(e);
+
+            if (e.Button != MouseButtons.Left)
+                return;
+
+            var hit = HitControl(e.Location);
+            if (hit == null || _s.Locked.Contains(hit))
+                return;
+
+            if (hit.GetType() != typeof(Element) && hit.GetType() != typeof(Badge) && hit.GetType() != typeof(Button))
+                return;
+
+            BeginTextEdit(hit);
+        }
+
+        private void BeginTextEdit(ElementBase target)
+        {
+            var editor = EnsureTextEditControl();
+            _textEditTarget = target;
+
+            var bounds = ToOverlay(target);
+            editor.Location = bounds.Location;
+            editor.Size = bounds.Size;
+            editor.Text = target.Text;
+            editor.Visible = true;
+            editor.BringToFront();
+            editor.Focus();
+            editor.SelectAll();
+        }
+
+        private TextBox EnsureTextEditControl()
+        {
+            if (_textEditor != null)
+                return _textEditor;
+
+            _textEditor = new TextBox { Visible = false, TextAlign = ContentAlignment.MiddleCenter };
+            _textEditor.KeyDown += (_, e) =>
+            {
+                if (e.KeyCode == Keys.Enter) { e.Handled = true; CommitTextEdit(); Focus(); }
+                else if (e.KeyCode == Keys.Escape) { e.Handled = true; CancelTextEdit(); Focus(); }
+            };
+            _textEditor.LostFocus += (_, _) => CommitTextEdit();
+            Controls.Add(_textEditor);
+            return _textEditor;
+        }
+
+        private void CommitTextEdit()
+        {
+            if (_textEditTarget is not { } target || _textEditor == null)
+                return;
+
+            _textEditTarget = null;
+            var editor = _textEditor;
+            editor.Visible = false;
+
+            var newText = editor.Text ?? string.Empty;
+            if (newText == target.Text)
+                return;
+
+            // Reuses the exact same undo path the Properties panel commits through (see
+            // StudioWindow's PropertyGrid.PropertyValueChanged handler) so an inline text edit undoes
+            // and redoes identically to editing the same property there.
+            var descriptor = System.ComponentModel.TypeDescriptor.GetProperties(target)["Text"];
+            if (descriptor == null)
+                return;
+
+            var oldValue = target.Text;
+            target.Text = newText;
+            _s.CommitPropertyEdit(descriptor, target, oldValue);
+        }
+
+        private void CancelTextEdit()
+        {
+            _textEditTarget = null;
+            if (_textEditor != null)
+                _textEditor.Visible = false;
         }
 
         public override void OnMouseMove(MouseEventArgs e)
@@ -1144,7 +1473,11 @@ public sealed class DesignSurface : Element
                 default:
                     _activeGuides.Clear();
                     _s.SetHoverNestingTarget(null);
-                    if (_dragBefore != null)
+                    if (_resizingRoot)
+                    {
+                        _s.CommitBoundsChange("Resize form", new Dictionary<ElementBase, SKRect> { [Root] = _rootDragBefore });
+                    }
+                    else if (_dragBefore != null)
                     {
                         // A single-item move that ends over a different control reparents into it
                         // instead of just repositioning — the reparent's own undo command already
@@ -1158,6 +1491,7 @@ public sealed class DesignSurface : Element
                             _s.CommitBoundsChange(_mode == Grip.Body ? "Move" : "Resize", _dragBefore);
                     }
                     _dragBefore = null;
+                    _resizingRoot = false;
                     break;
             }
 
@@ -1178,8 +1512,22 @@ public sealed class DesignSurface : Element
         {
             if ((ModifierKeys & Keys.Control) == Keys.Control)
             {
+                // Anchored at the cursor, zooming keeps whatever's under the pointer stationary —
+                // correct in isolation, but the cursor is rarely dead-center over the form, so each
+                // Ctrl+wheel notch also *shifts* the view by some amount that depends on exactly
+                // where the mouse happened to be. That reads as the canvas scrolling around on its
+                // own (see the "kaydırma" reports), since nothing about zooming itself should move
+                // the view. Anchoring at the viewport's own center instead makes zoom perfectly
+                // stationary — the same fixed point stays fixed on screen through any zoom change,
+                // matching Ctrl+wheel's actual intent (change scale) without the side effect of also
+                // panning based on incidental cursor position.
                 var factor = e.Delta > 0 ? 1.1f : 1f / 1.1f;
-                _s.ZoomAt(_s.Zoom * factor, e.Location);
+                // _s (the surface), not this overlay: the overlay's own Width/Height are now kept at
+                // _s.Width/zoom (see SyncOverlayBounds) so they cancel out the shared render scale,
+                // not a plain reflection of the physical viewport size — using them here would anchor
+                // the zoom at the wrong point once zoom != 1.
+                var viewportCenter = new SKPoint(_s.Width / 2f / _s.Zoom, _s.Height / 2f / _s.Zoom);
+                _s.ZoomAt(_s.Zoom * factor, viewportCenter);
                 e.Handled = true;
                 return;
             }
@@ -1241,8 +1589,35 @@ public sealed class DesignSurface : Element
             Capture();
         }
 
+        private void BeginRootResizeDrag(Grip grip, SKPoint mouse)
+        {
+            _mode = grip;
+            _resizingRoot = true;
+            _dragStart = mouse;
+            _rootDragBefore = SKRect.Create(Root.Location, Root.Size);
+            Capture();
+        }
+
         private void ApplyBoundsDrag(SKPoint mouse)
         {
+            if (_resizingRoot)
+            {
+                var rdx = mouse.X - _dragStart.X;
+                var rdy = mouse.Y - _dragStart.Y;
+                var w = _rootDragBefore.Width;
+                var h = _rootDragBefore.Height;
+
+                if (_mode is Grip.Right or Grip.BottomRight)
+                    w = Math.Max(MinControlSize, _s.Snap(_rootDragBefore.Width + rdx));
+                if (_mode is Grip.Bottom or Grip.BottomRight)
+                    h = Math.Max(MinControlSize, _s.Snap(_rootDragBefore.Height + rdy));
+
+                Root.Size = new SKSize(w, h);
+                _s.SelectionBoundsChanged?.Invoke();
+                Invalidate();
+                return;
+            }
+
             if (_dragBefore == null || _dragBefore.Count == 0)
                 return;
 
@@ -1438,6 +1813,12 @@ public sealed class DesignSurface : Element
             return SKRect.Create(Root.Location.X + loc.X, Root.Location.Y + loc.Y, designed.Width, designed.Height);
         }
 
+        /// <summary>The design root's own bounds in overlay space — <see cref="Root"/>'s Location is
+        /// already overlay-relative (it's the origin everything else is measured from), unlike a
+        /// nested designed control which needs the design-space-location walk <see cref="ToOverlay"/>
+        /// does.</summary>
+        private SKRect RootOverlayRect => SKRect.Create(Root.Location, Root.Size);
+
         /// <summary>The deepest designed control under a point, at any nesting depth — clicking into
         /// an already-nested control selects it directly rather than only its top-level container.
         /// Shares <see cref="DesignSurface.FindNestingTargetAt"/>, the same "any control can host
@@ -1447,6 +1828,13 @@ public sealed class DesignSurface : Element
         private void UpdateHoverCursor(SKPoint p)
         {
             var cursor = Cursors.Default;
+            var rootGrip = HitRootGrip(RootOverlayRect, p);
+            if (rootGrip != Grip.None)
+            {
+                Cursor = rootGrip == Grip.BottomRight ? Cursors.SizeNWSE : rootGrip == Grip.Right ? Cursors.SizeWE : Cursors.SizeNS;
+                return;
+            }
+
             if (_s.Selection.Items.Count == 1)
             {
                 cursor = HitGrip(ToOverlay(_s.Selection.Items[0]), p) switch
@@ -1490,6 +1878,15 @@ public sealed class DesignSurface : Element
             return Grip.None;
         }
 
+        /// <summary>Only the right/bottom/corner grips are meaningful for the root — growing it any
+        /// other direction would mean moving its Location, which has no clear meaning for "the form"
+        /// the way it does for an ordinary designed control.</summary>
+        private static Grip HitRootGrip(SKRect bounds, SKPoint p)
+        {
+            var grip = HitGrip(bounds, p);
+            return grip is Grip.Right or Grip.Bottom or Grip.BottomRight ? grip : Grip.None;
+        }
+
         private void Capture() => GetParentWindow()?.SetMouseCapture(this);
         private void Release() => GetParentWindow()?.ReleaseMouseCapture(this);
 
@@ -1502,6 +1899,7 @@ public sealed class DesignSurface : Element
                 _guide.Dispose();
                 _previewDash.Dispose();
                 _labelFont.Dispose();
+                _textEditor?.Dispose();
             }
 
             base.Dispose(disposing);

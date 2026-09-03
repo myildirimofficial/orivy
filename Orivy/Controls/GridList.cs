@@ -470,6 +470,28 @@ public class GridList : ElementBase
         if (TryGetInputTarget(e, out var target, out var childEventArgs) && target != null && childEventArgs != null)
         {
             target.OnMouseMove(childEventArgs);
+
+            // Returning right after forwarding skips ElementBase.OnMouseMove's own hover-tracking
+            // below, so a real embedded child control (e.g. PropertyGrid's search TextBox) never
+            // becomes this element's LastHoveredElement — and since a child's Cursor only actually
+            // reaches the OS cursor when OnCursorChanged finds it at the bottom of that hover chain
+            // (see ElementBase.OnCursorChanged), its Cursor (an I-beam, a resize arrow, ...) silently
+            // never took effect without mirroring that tracking here.
+            if (!ReferenceEquals(target, LastHoveredElement))
+            {
+                LastHoveredElement?.OnMouseLeave(EventArgs.Empty);
+                target.OnMouseEnter(EventArgs.Empty);
+                LastHoveredElement = target;
+
+                if (GetParentWindow() is { } window)
+                {
+                    var cursorElement = target;
+                    while (cursorElement.LastHoveredElement != null)
+                        cursorElement = cursorElement.LastHoveredElement;
+                    window.UpdateCursor(cursorElement);
+                }
+            }
+
             return;
         }
 

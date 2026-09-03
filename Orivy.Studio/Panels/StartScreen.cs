@@ -12,8 +12,8 @@ namespace Orivy.Studio.Panels;
 /// <summary>
 /// The Start Screen: a full-window scrim + centered card shown when Studio launches, instead of the
 /// app just dropping straight into a blank throwaway document. Offers New (a blank canvas) and Open
-/// Folder — there is no separate "project file" concept — plus a list of recently opened
-/// folders/files (see <see cref="RecentProjects"/>). Dismisses itself once the user picks something.
+/// Folder — there is no separate "project file" concept — plus a list of recently opened folders
+/// (see <see cref="RecentProjects"/>). Dismisses itself once the user picks something.
 ///
 /// Every piece of text at a non-default size (title, section header, action rows, recent rows) is
 /// drawn directly in an OnPaint override with its own <see cref="SKFont"/> instance, rather than
@@ -43,7 +43,7 @@ public sealed class StartScreen : Element
         _card = new Card();
         _card.NewRequested += () => NewRequested?.Invoke();
         _card.OpenFolderRequested += () => OpenFolderRequested?.Invoke();
-        _card.RecentSelected += (path, isFolder) => RecentSelected?.Invoke(path, isFolder);
+        _card.RecentSelected += path => RecentSelected?.Invoke(path);
 
         Controls.Add(_card);
         SizeChanged += (_, _) => CenterCard();
@@ -52,7 +52,7 @@ public sealed class StartScreen : Element
 
     public event Action? NewRequested;
     public event Action? OpenFolderRequested;
-    public event Action<string, bool>? RecentSelected; // path, isFolder
+    public event Action<string>? RecentSelected;
 
     private void CenterCard() =>
         _card.Location = new SKPoint((Width - _card.Width) / 2f, (Height - _card.Height) / 2f);
@@ -90,7 +90,7 @@ public sealed class StartScreen : Element
 
         public event Action? NewRequested;
         public event Action? OpenFolderRequested;
-        public event Action<string, bool>? RecentSelected;
+        public event Action<string>? RecentSelected;
 
         public Card()
         {
@@ -114,7 +114,7 @@ public sealed class StartScreen : Element
             {
                 Dock = DockStyle.Top, Border = new Thickness(0), Radius = new Radius(0),
                 Height = 60 * 2 + 8 * 1,
-                Margin = new Thickness(0, headerHeight, 0, 18),
+                Margin = new Thickness(0, headerHeight, 0, 30),
             };
             // Same-edge Dock siblings in this framework lay out in REVERSE insertion order — the
             // last-added control ends up closest to the true edge (confirmed against the working
@@ -126,7 +126,7 @@ public sealed class StartScreen : Element
             _recentList = new Element
             {
                 Dock = DockStyle.Fill, Border = new Thickness(0), Radius = new Radius(0),
-                AutoScroll = true, Margin = new Thickness(0, (int)SectionHeaderHeight + 4, 0, 0),
+                AutoScroll = true, Margin = new Thickness(0, (int)SectionHeaderHeight + 10, 0, 0),
             };
 
             Controls.Add(_recentList);
@@ -166,7 +166,7 @@ public sealed class StartScreen : Element
             {
                 var empty = new Element
                 {
-                    Text = "No recent projects yet.", Dock = DockStyle.Top, Height = 28,
+                    Text = "No recent folders yet.", Dock = DockStyle.Top, Height = 28,
                     Border = new Thickness(0), Radius = new Radius(0), TextAlign = ContentAlignment.MiddleLeft,
                 };
                 empty.ConfigureVisualStyles(styles => styles.Base(b => b.Foreground(ColorScheme.ForeColor.WithAlpha(110))));
@@ -179,8 +179,7 @@ public sealed class StartScreen : Element
             foreach (var entry in entries.Take(6).Reverse())
             {
                 var path = entry.Path;
-                var isFolder = entry.IsFolder;
-                _recentList.Controls.Add(new RecentRow(path, isFolder, () => RecentSelected?.Invoke(path, isFolder)));
+                _recentList.Controls.Add(new RecentRow(path, () => RecentSelected?.Invoke(path)));
             }
         }
 
@@ -273,7 +272,6 @@ public sealed class StartScreen : Element
     /// <see cref="ActionButton"/> and for the same reason.</summary>
     private sealed class RecentRow : Button
     {
-        private readonly bool _isFolder;
         private readonly string _name;
         private readonly string _path;
         private readonly SKFont _nameFont;
@@ -281,13 +279,10 @@ public sealed class StartScreen : Element
         private readonly SKPaint _iconPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round, StrokeWidth = 1.5f };
         private readonly SKPaint _textPaint = new() { IsAntialias = true };
 
-        public RecentRow(string path, bool isFolder, Action onClick)
+        public RecentRow(string path, Action onClick)
         {
             _path = path;
-            _isFolder = isFolder;
-            _name = isFolder
-                ? System.IO.Path.GetFileName(path.TrimEnd('\\', '/'))
-                : System.IO.Path.GetFileNameWithoutExtension(System.IO.Path.GetFileNameWithoutExtension(path));
+            _name = System.IO.Path.GetFileName(path.TrimEnd('\\', '/'));
             _nameFont = CreateUiFont(11.5f);
             _pathFont = CreateUiFont(9f);
 
@@ -317,7 +312,7 @@ public sealed class StartScreen : Element
             var content = DisplayRectangle;
             var iconRect = new SKRect(content.Left, content.MidY - 9f, content.Left + 18f, content.MidY + 9f);
             _iconPaint.Color = ColorScheme.ForeColor.WithAlpha(170);
-            ToolbarIcons.Draw(canvas, _isFolder ? "folder" : "file", iconRect, _iconPaint);
+            ToolbarIcons.Draw(canvas, "folder", iconRect, _iconPaint);
 
             var textLeft = iconRect.Right + 10f;
             _textPaint.Color = ColorScheme.ForeColor.WithAlpha(220);

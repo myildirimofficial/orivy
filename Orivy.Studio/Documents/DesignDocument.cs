@@ -1,7 +1,6 @@
 using Orivy;
 using Orivy.Controls;
 using Orivy.Controls.RichText;
-using Orivy.Studio.Persistence;
 using Orivy.Studio.Toolbox;
 using SkiaSharp;
 using System;
@@ -82,19 +81,30 @@ public sealed class DesignDocument : Container, IStudioDocument
             Border = new Thickness(0),
             Radius = new Radius(0),
             TabMode = TabViewMode.Embedded,
-            TabDesignMode = TabViewDesignMode.Pill,
+            TabDesignMode = TabViewDesignMode.MacOS,
             TabAlignment = TabViewAlignment.Center,
             TabLayoutMode = TabViewLayoutMode.Top,
             TabStripHeight = 44f,
             DrawTabIcons = true,
-            EnableTransitions = true,
-            TransitionEffect = TabViewTransitionEffect.Fade,
+            // A page-switch transition captures a snapshot of the incoming page synchronously as part
+            // of *starting* the switch — before SelectedIndexChanged (and therefore RefreshCode() below)
+            // ever gets a chance to populate it. A fade between a design canvas and a text view was
+            // never a transition worth keeping anyway, so it's simplest to just skip the whole snapshot
+            // dance rather than teach it to wait for RefreshCode() first.
+            EnableTransitions = false,
         };
         _switcher.Controls.Add(_designPage);
         _switcher.Controls.Add(_codePage);
-        _switcher.SelectedIndexChanged += (_, index) =>
+        _switcher.SelectedIndexChanged += (_, _) =>
         {
-            _showingCode = index == 1;
+            // The event argument is the *previous* selected index, not the new one — reading it as
+            // "the tab we just switched to" (as this used to) meant _showingCode was always one click
+            // behind: switching to Code left it false (so RefreshCode() never ran, showing an empty
+            // page), and switching back to Design set it true (running RefreshCode() pointlessly while
+            // the code page wasn't even visible). The *next* switch back to Code then looked fine only
+            // because that stale, wrongly-timed refresh had already populated it. _switcher.SelectedIndex
+            // itself is the authoritative current selection — always read that instead.
+            _showingCode = _switcher.SelectedIndex == 1;
             if (_showingCode)
                 RefreshCode();
         };
@@ -117,6 +127,14 @@ public sealed class DesignDocument : Container, IStudioDocument
     /// <summary>Backing project file path, or null if never saved.</summary>
     public string? FilePath { get; set; }
 
+    /// <summary>The exact text this document was loaded from (or last saved as) — null for a document
+    /// that was never backed by a file. <see cref="RefreshCode"/> shows this verbatim while the
+    /// document is clean, rather than <see cref="CodeGenerator"/>'s regenerated output: the generator
+    /// only knows about what the visual model tracks, so re-running it on a file nobody has touched
+    /// yet — just to show the Code tab — could visibly differ from (or silently discard parts of) the
+    /// actual file on disk, e.g. custom hand-written code or constructs the importer doesn't model.</summary>
+    public string? OriginalSourceText { get; set; }
+
     public bool IsDirty => _dirty;
 
     public event Action? DirtyChanged;
@@ -138,7 +156,12 @@ public sealed class DesignDocument : Container, IStudioDocument
         if (FilePath == null)
             throw new InvalidOperationException("This document has no file path to save to yet.");
 
-        File.WriteAllText(FilePath, DesignSerializer.Save(Surface));
+        // A design has no proprietary save format of its own — it saves as the exact same Designer
+        // C# code Export produces, so the file on disk is always a plain, valid, hand-editable .cs
+        // file rather than a hidden project format only Orivy.Studio understands.
+        var code = CodeGenerator.Generate(Surface, DocumentName);
+        File.WriteAllText(FilePath, code);
+        OriginalSourceText = code;
         MarkClean();
     }
 
@@ -173,6 +196,12 @@ public sealed class DesignDocument : Container, IStudioDocument
 
     private void RefreshCode()
     {
+        if (!_dirty && OriginalSourceText != null)
+        {
+            _codeView.Text = OriginalSourceText;
+            return;
+        }
+
         var className = string.IsNullOrWhiteSpace(DocumentName) ? "MyWindow" : DocumentName;
         _codeView.Text = CodeGenerator.Generate(Surface, className);
     }

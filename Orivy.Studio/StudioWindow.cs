@@ -9,6 +9,7 @@ using Orivy.Studio.Toolbox;
 using Orivy.Windowing.Desktop.Windows;
 using SkiaSharp;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 
 namespace Orivy.Studio;
@@ -43,16 +44,17 @@ public sealed class StudioWindow : Window
     private int _documentCounter;
     private bool _suppressInspectorCommit;
 
+
     /// <summary>
     /// The Visual-Studio-style "preview" tab: browsing files in the Explorer reuses this single tab
     /// instead of stacking a new permanent one per file clicked, so navigating around a folder
     /// doesn't leave a trail of tabs behind. It stops being reusable — is "promoted" to a normal,
     /// permanent tab — the moment the user actually edits it (see <see cref="WireDirtyPromotion"/>),
-    /// or is left alone entirely by explicit actions (File ▸ Open, New Project, Recent) which always
+    /// or is left alone entirely by explicit actions (File ▸ Open, New, Recent) which always
     /// open a real tab of their own, matching how Visual Studio's own preview tab behaves. Untyped as
-    /// <see cref="IStudioDocument"/> rather than <see cref="DesignDocument"/> specifically — a
-    /// <c>.orivy.json</c> and a plain text file both use the same single preview slot, just never at
-    /// the same time (see <see cref="OpenPath"/>).
+    /// <see cref="IStudioDocument"/> rather than <see cref="DesignDocument"/> specifically — a design
+    /// and a plain text file both use the same single preview slot, just never at the same time (see
+    /// <see cref="OpenPath"/>).
     /// </summary>
     private IStudioDocument? _previewDocument;
 
@@ -116,7 +118,7 @@ public sealed class StudioWindow : Window
         toolbar.Padding = new Thickness(12, 8, 12, 8);
         toolbar.Margin = new Thickness(0);
         toolbar.Border = new Thickness(0, 0, 0, 1);
-        Tint(toolbar, background: () => ColorScheme.SurfaceContainerHigh.WithAlpha(178), border: () => ColorScheme.Outline.WithAlpha(50));
+        Tint(toolbar, background: () => SKColors.Transparent, border: () => ColorScheme.Outline.WithAlpha(50));
 
         var newDocButton = new ToolbarButton("new-doc", "New document");
         var newButton = new ToolbarButton("new", "New (clear canvas)");
@@ -130,6 +132,7 @@ public sealed class StudioWindow : Window
         var snapToggle = new ToolbarButton("snap", "Snap to grid", 28f) { CheckOnClick = true, Checked = true };
         var guidesToggle = new ToolbarButton("guides", "Smart guides", 28f) { CheckOnClick = true, Checked = true };
         var themeToggle = new ToolbarButton("moon", "Toggle dark mode", 28f) { CheckOnClick = true, Checked = ColorScheme.IsDarkMode };
+        var randomizeToggle = new ToolbarButton("shuffle", "Randomize backgrounds", 28f) { CheckOnClick = true };
 
         // A compact segmented "pill" for the zoom cluster instead of four loose buttons. Positioned
         // with explicit Location/Size (Dock=None) rather than stacked Dock=Left — the reverse-order
@@ -141,10 +144,11 @@ public sealed class StudioWindow : Window
         {
             Dock = DockStyle.Left, Width = 3 + 28 + 44 + 28 + 28 + 3,
             Radius = new Radius(9),
-            Border = new Thickness(0), Padding = new Thickness(0),
+            Border = new Thickness(0), 
+            Padding = new Thickness(0),
             Margin = new Thickness(0, 0, 8, 0),
         };
-        Tint(zoomGroup, background: () => ColorScheme.SurfaceContainerLow);
+        Tint(zoomGroup, background: () => ColorScheme.SurfaceContainerLow.WithAlpha(120));
 
         PlaceInZoomGroup(zoomOut, 3f, 28f);
         PlaceInZoomGroup(_zoomLabel, 31f, 44f);
@@ -168,7 +172,7 @@ public sealed class StudioWindow : Window
         {
             themeToggle,
             Divider(),
-            guidesToggle, snapToggle, gridToggle,
+            randomizeToggle, guidesToggle, snapToggle, gridToggle,
             Divider(),
             zoomGroup,
             Divider(),
@@ -186,7 +190,7 @@ public sealed class StudioWindow : Window
         // embedded strip competing with the toolbar for vertical space. Requires WindowThemeType.Tabbed
         // and Window.TabView (both set in the constructor) to cooperate with the native chrome.
         _documents.TabMode = TabViewMode.TitleBar;
-        _documents.TabDesignMode = TabViewDesignMode.Rounded;
+        _documents.TabDesignMode = TabViewDesignMode.Rectangle;
         _documents.TransitionEffect = TabViewTransitionEffect.None;
         _documents.TabOverflowMode = TabOverflowMode.Scroll;
         _documents.NewTabButton = true;
@@ -199,7 +203,11 @@ public sealed class StudioWindow : Window
         };
         _documents.TabCloseButtonClick += (_, index) =>
         {
-            if (_documents.Controls[index] is ElementBase tab)
+            // Once any tab has been drag-reordered, TabView tracks display order in a separate
+            // _pageOrder list rather than physically reordering Controls (see GetPageAt) — indexing
+            // Controls directly here meant a close-button click closed whatever page originally sat
+            // at that Controls slot, not the page currently showing at that tab position.
+            if (_documents.GetPageAt(index) is ElementBase tab)
                 TryCloseDocument(tab);
         };
 
@@ -222,11 +230,12 @@ public sealed class StudioWindow : Window
         // embedded TabView (icon-only, top-aligned) instead of the Toolbox getting a static Header
         // and the Explorer inventing its own switcher — one tab-strip implementation, reused.
         _sidebar.TabMode = TabViewMode.Embedded;
-        _sidebar.TabDesignMode = TabViewDesignMode.Minimal;
+        _sidebar.TabDesignMode = TabViewDesignMode.MacOS;
         _sidebar.TabAlignment = TabViewAlignment.Start;
         _sidebar.TabLayoutMode = TabViewLayoutMode.Top;
         _sidebar.TabStripHeight = 38f;
         _sidebar.DrawTabIcons = true;
+        _sidebar.TabMode = TabViewMode.Embedded,
         _sidebar.EnableTransitions = true;
         _sidebar.TransitionEffect = TabViewTransitionEffect.Fade;
         _sidebar.Border = new Thickness(0);
@@ -234,8 +243,8 @@ public sealed class StudioWindow : Window
         _sidebar.BackColor = SKColors.Transparent;
         _toolboxPage.Controls.Add(_toolbox);
         _explorerPage.Controls.Add(_explorer);
-        _sidebar.Controls.Add(_toolboxPage);
         _sidebar.Controls.Add(_explorerPage);
+        _sidebar.Controls.Add(_toolboxPage);
         RefreshSidebarIcons();
         ColorScheme.ThemeChanged += (_, _) => RefreshSidebarIcons();
 
@@ -285,6 +294,7 @@ public sealed class StudioWindow : Window
         snapToggle.CheckedChanged += (_, _) => { _active.SnapToGrid = snapToggle.Checked; _active.Invalidate(); };
         guidesToggle.CheckedChanged += (_, _) => _active.SmartGuides = guidesToggle.Checked;
         themeToggle.CheckedChanged += (_, _) => ColorScheme.IsDarkMode = themeToggle.Checked;
+        randomizeToggle.CheckedChanged += (_, _) => _active.ShowRandomBackgrounds = randomizeToggle.Checked;
     }
 
     /// <summary>
@@ -366,13 +376,11 @@ public sealed class StudioWindow : Window
 
         _startScreen.NewRequested += () => Controls.Remove(_startScreen);
         _startScreen.OpenFolderRequested += () => { Controls.Remove(_startScreen); OpenFolder(); };
-        _startScreen.RecentSelected += (path, isFolder) =>
+        _startScreen.RecentSelected += path =>
         {
             Controls.Remove(_startScreen);
-            if (isFolder)
-                _explorer.RootFolder = path;
-            else
-                OpenPath(path);
+            _explorer.RootFolder = path;
+            RecentProjects.Add(path);
         };
 
         _inspector.PropertyValueChanged += (_, e) =>
@@ -472,7 +480,11 @@ public sealed class StudioWindow : Window
         }
 
         var wasActive = ReferenceEquals(_documents.SelectedTab, tab);
-        var index = _documents.Controls.IndexOf(tab);
+        // The tab strip's display order can differ from Controls' raw child order once any tab has
+        // been drag-reordered (see TabView's _pageOrder) — SelectedIndex is itself already the
+        // *display* position of this tab (it's the active one), so it's the right index to re-anchor
+        // on after removal, unlike a Controls.IndexOf lookup which would drift from the visual order.
+        var visualIndex = _documents.SelectedIndex;
         _documents.Controls.Remove(tab);
 
         if (_documents.Controls.Count == 0)
@@ -482,8 +494,8 @@ public sealed class StudioWindow : Window
         }
         else if (wasActive)
         {
-            var nextIndex = Math.Min(index, _documents.Controls.Count - 1);
-            if (_documents.Controls[nextIndex] is ElementBase next)
+            var nextIndex = Math.Min(visualIndex, _documents.Controls.Count - 1);
+            if (_documents.GetPageAt(nextIndex) is ElementBase next)
                 ActivateTab(next);
         }
 
@@ -571,14 +583,19 @@ public sealed class StudioWindow : Window
     private void UpdateStatus()
     {
         var count = _active.DesignedControls.Count;
+        // The form's own current size otherwise has no persistent display anywhere — the status bar
+        // only ever shows the *selected* control's size, so seeing the form's meant selecting the
+        // root itself (or opening Properties) first. Leading with it here means it stays visible
+        // alongside whatever else the status bar is currently reporting, selection or not.
+        var formSize = $"Form {_active.DesignRoot.Width:0}×{_active.DesignRoot.Height:0}";
         if (_active.PreviewMode)
             _statusHost.Text = "PREVIEW — controls are live. Click ⏹ Design to return.";
         else if (_active.Selection.Count > 1)
-            _statusHost.Text = $"{_active.Selection.Count} selected · right-click for align/distribute · {count} control(s)";
+            _statusHost.Text = $"{formSize}   ·   {_active.Selection.Count} selected · right-click for align/distribute · {count} control(s)";
         else if (_active.Selection.Primary is { } s)
-            _statusHost.Text = $"{s.Name} ({s.GetType().Name})   X={s.Location.X:0} Y={s.Location.Y:0}  W={s.Width:0} H={s.Height:0}   · {count} control(s)";
+            _statusHost.Text = $"{formSize}   ·   {s.Name} ({s.GetType().Name})   X={s.Location.X:0} Y={s.Location.Y:0}  W={s.Width:0} H={s.Height:0}   · {count} control(s)";
         else
-            _statusHost.Text = $"{count} control(s) · drag or double-click toolbox to add · Ctrl+wheel zoom · wheel/middle-drag pan";
+            _statusHost.Text = $"{formSize}   ·   {count} control(s) · drag or double-click toolbox to add · Ctrl+wheel zoom · wheel/middle-drag pan";
     }
 
     private void TogglePreview()
@@ -588,6 +605,7 @@ public sealed class StudioWindow : Window
         _previewButton.SetToolTip(_active.PreviewMode ? "Stop preview" : "Preview");
         UpdateStatus();
     }
+
 
     // ── File / export ────────────────────────────────────────────────────────
 
@@ -608,9 +626,9 @@ public sealed class StudioWindow : Window
             var dialog = new SaveFileDialog
             {
                 Title = "Save",
-                FileName = isDesign ? $"{doc.DocumentName}.orivy.json" : doc.DocumentName,
+                FileName = isDesign ? $"{doc.DocumentName}.Designer.cs" : doc.DocumentName,
                 Filter = isDesign
-                    ? "Orivy Studio project (*.orivy.json)|*.orivy.json|All files (*.*)|*.*"
+                    ? "C# source (*.cs)|*.cs|All files (*.*)|*.*"
                     : "All files (*.*)|*.*",
             };
             var path = dialog.ShowDialog(this);
@@ -622,37 +640,45 @@ public sealed class StudioWindow : Window
         doc.Save();
         _statusHost.Text = $"Saved → {doc.FilePath}";
 
-        // The saved file's folder becomes the browsed root, unless one is already open — a
-        // zero-friction "workspace follows your files" model instead of requiring an explicit
-        // project file format up front.
-        _explorer.RootFolder ??= System.IO.Path.GetDirectoryName(doc.FilePath);
+        AdoptRootFolderIfNone(doc.FilePath);
         _explorer.SetActiveFile(doc.FilePath);
-        RecentProjects.Add(doc.FilePath, isFolder: false);
         return true;
     }
 
     private void OpenFolder()
     {
-        // No native folder-picker dialog exists yet in Orivy — reuse the file picker and take the
-        // chosen file's directory, which is the same trick most lightweight editors offer as a
-        // fallback. Pick any file inside the folder you want to browse.
-        var dialog = new FileSelectionDialog { Title = "Choose any file inside the folder" };
-        var files = dialog.ShowDialog(this);
-        if (files.Length == 0)
+        var dialog = new FolderSelectionDialog { Title = "Open Folder" };
+        var folder = dialog.ShowDialog(this);
+        if (string.IsNullOrEmpty(folder))
             return;
 
-        var folder = System.IO.Path.GetDirectoryName(files[0]);
         _explorer.RootFolder = folder;
-        if (folder != null)
-            RecentProjects.Add(folder, isFolder: true);
+        RecentProjects.Add(folder);
+    }
+
+    /// <summary>The saved/opened file's folder becomes the browsed root, unless one is already open —
+    /// a zero-friction "workspace follows your files" model instead of requiring an explicit "Open
+    /// Folder" first. Only registers the folder as recent when it was actually just adopted this way
+    /// — a file opened inside an already-browsed folder shouldn't bump that folder's recency for
+    /// every single file click.</summary>
+    private void AdoptRootFolderIfNone(string filePath)
+    {
+        if (_explorer.RootFolder != null)
+            return;
+
+        _explorer.RootFolder = System.IO.Path.GetDirectoryName(filePath);
+        if (_explorer.RootFolder != null)
+            RecentProjects.Add(_explorer.RootFolder);
     }
 
     /// <summary>
     /// Opens <paramref name="path"/> as a document tab — reused by the File ▸ Open dialog, the
-    /// recent-projects list, and clicking a file in the Explorer sidebar. A <c>.orivy.json</c> opens
-    /// in the visual designer; anything else (a hand-written or Orivy-generated <c>Designer.cs</c>,
-    /// or any other text file) opens as plain text — no project system, no format requirement, just
-    /// whatever's actually in the browsed folder.
+    /// recent-projects list, and clicking a file in the Explorer sidebar. There is no proprietary
+    /// project format: a <c>.cs</c> file whose content is recognizable Designer code (see
+    /// <see cref="CodeImporter"/>) opens in the visual designer exactly like <see cref="ImportCode"/>
+    /// would; anything else — a hand-written class, a README, any other text file — opens as plain
+    /// text. Whatever the user picked from the browsed folder is exactly what gets read and written;
+    /// nothing here invents a hidden save format on top of it.
     /// </summary>
     /// <param name="asPreview">
     /// True for Explorer navigation: reuses the single preview tab (<see cref="_previewDocument"/>)
@@ -674,14 +700,30 @@ public sealed class StudioWindow : Window
             }
         }
 
-        var isDesignFile = path.EndsWith(".orivy.json", StringComparison.OrdinalIgnoreCase);
+        string content;
+        try
+        {
+            content = System.IO.File.ReadAllText(path);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Open failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        var isDesignFile = path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && LooksLikeDesignerCode(content);
         if (isDesignFile)
-            OpenDesignFile(path, asPreview);
+            OpenDesignFile(path, content, asPreview);
         else
-            OpenTextFile(path, asPreview);
+            OpenTextFile(path, content, asPreview);
     }
 
-    private void OpenDesignFile(string path, bool asPreview)
+    /// <summary>Same recognizability test <see cref="CodeImporter.Import"/> itself requires
+    /// (an <c>InitializeComponent</c> method) — cheap enough to run on every <c>.cs</c> file opened
+    /// without paying for a full parse first.</summary>
+    private static bool LooksLikeDesignerCode(string content) => content.Contains("InitializeComponent");
+
+    private void OpenDesignFile(string path, string content, bool asPreview)
     {
         // The preview tab can only ever hold one kind of document — if it's currently a text
         // file and we need a design tab (or vice versa, in OpenTextFile below), drop it and
@@ -698,14 +740,13 @@ public sealed class StudioWindow : Window
 
         try
         {
-            var skipped = DesignSerializer.Load(target.Surface, System.IO.File.ReadAllText(path));
+            var skipped = CodeImporter.Import(target.Surface, content);
             target.FilePath = path;
-            target.DocumentName = System.IO.Path.GetFileNameWithoutExtension(System.IO.Path.GetFileNameWithoutExtension(path));
+            target.OriginalSourceText = content;
+            target.DocumentName = CodeImporter.TryGetClassName(content) ?? System.IO.Path.GetFileNameWithoutExtension(path);
             target.MarkClean();
             ActivateTab(target);
-            target.Surface.NotifyStructureChanged();
-            _explorer.RootFolder ??= System.IO.Path.GetDirectoryName(path);
-            RecentProjects.Add(path, isFolder: false);
+            AdoptRootFolderIfNone(path);
             _statusHost.Text = skipped.Count == 0
                 ? $"Opened {path}"
                 : $"Opened; {skipped.Count} unknown type(s) skipped: {string.Join(", ", skipped)}";
@@ -726,47 +767,37 @@ public sealed class StudioWindow : Window
         }
     }
 
-    private void OpenTextFile(string path, bool asPreview)
+    private void OpenTextFile(string path, string content, bool asPreview)
     {
-        try
+        if (asPreview && _previewDocument is { } stale and not TextFileDocument)
         {
-            var content = System.IO.File.ReadAllText(path);
-
-            if (asPreview && _previewDocument is { } stale and not TextFileDocument)
-            {
-                _documents.Controls.Remove((ElementBase)stale);
-                stale.Dispose();
-                _previewDocument = null;
-            }
-
-            TextFileDocument target;
-            if (asPreview && _previewDocument is TextFileDocument reusable)
-            {
-                target = reusable;
-                target.Rename(System.IO.Path.GetFileName(path));
-            }
-            else
-            {
-                target = new TextFileDocument(System.IO.Path.GetFileName(path));
-                _documents.Controls.Add(target);
-                WireDirtyPromotion(target);
-            }
-
-            target.Content = content;
-            target.FilePath = path;
-            target.MarkClean();
-            ActivateTab(target);
-            _explorer.RootFolder ??= System.IO.Path.GetDirectoryName(path);
-            RecentProjects.Add(path, isFolder: false);
-            _statusHost.Text = $"Opened {path}";
-
-            if (asPreview)
-                _previewDocument = target;
+            _documents.Controls.Remove((ElementBase)stale);
+            stale.Dispose();
+            _previewDocument = null;
         }
-        catch (Exception ex)
+
+        TextFileDocument target;
+        if (asPreview && _previewDocument is TextFileDocument reusable)
         {
-            MessageBox.Show(ex.Message, "Open failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            target = reusable;
+            target.Rename(System.IO.Path.GetFileName(path));
         }
+        else
+        {
+            target = new TextFileDocument(System.IO.Path.GetFileName(path));
+            _documents.Controls.Add(target);
+            WireDirtyPromotion(target);
+        }
+
+        target.Content = content;
+        target.FilePath = path;
+        target.MarkClean();
+        ActivateTab(target);
+        AdoptRootFolderIfNone(path);
+        _statusHost.Text = $"Opened {path}";
+
+        if (asPreview)
+            _previewDocument = target;
     }
 
     private void RefreshSidebarIcons()
@@ -865,6 +896,7 @@ public sealed class StudioWindow : Window
             try
             {
                 var skipped = CodeImporter.Import(target.Surface, box.Text);
+                target.OriginalSourceText = box.Text;
                 target.DocumentName = CodeImporter.TryGetClassName(box.Text) ?? target.DocumentName;
                 target.MarkClean();
                 ActivateTab(target);

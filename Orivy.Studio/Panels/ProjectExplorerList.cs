@@ -12,11 +12,11 @@ namespace Orivy.Studio.Panels;
 /// <summary>
 /// A general-purpose folder browser (no project/solution file needed — just pick a folder), built on
 /// Orivy's own <see cref="Controls.TreeView"/> control instead of a hand-rolled owner-drawn list.
-/// Shows every file in the folder, not just <c>*.orivy.json</c> design files: a <c>.orivy.json</c>
-/// opens in the visual designer, anything else (a hand-written or Orivy-generated <c>Designer.cs</c>,
-/// or any other text file) opens as plain text for direct editing — see
-/// <see cref="StudioWindow.OpenPath"/>. The usual noise directories (<c>bin</c>, <c>obj</c>,
-/// <c>.git</c>, <c>.vs</c>) are skipped since there's no project file to scope the tree to otherwise.
+/// Shows every file in the folder: a <c>.cs</c> file recognizable as Designer code opens in the visual
+/// designer, anything else (a hand-written class, or any other text file) opens as plain text for
+/// direct editing — see <see cref="StudioWindow.OpenPath"/>. The usual noise directories (<c>bin</c>,
+/// <c>obj</c>, <c>.git</c>, <c>.vs</c>) are skipped since there's no project file to scope the tree to
+/// otherwise.
 /// </summary>
 public sealed class ProjectExplorerList : Element
 {

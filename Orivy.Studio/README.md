@@ -16,8 +16,7 @@ The app is built as independent modules so features can grow without entangling 
 | **Canvas Engine** | `DesignSurface.cs` | Zoom/pan viewport (rides `ChildRenderScale`), overlay input, selection adorners, grip resize, grid + smart-guide snapping, alignment/distribution, Z-order, preview mode, external `DropAt`. Every mutation is an undoable command. |
 | **Documents** | `Documents/DesignDocument.cs` | One design document (a `Container` page hosting a surface) — the unit of the multi-document TabView. |
 | **Drag & drop** | `Canvas/DragLayer.cs` | Full-window capture overlay that ghosts a toolbox entry to the cursor and drops it on the active canvas. |
-| **Persistence** | `Persistence/DesignSerializer.cs` | Save/load the document as JSON (`.orivy.json`), including Dock/Anchor. |
-| **Export** | `CodeGenerator.cs` | Emits WinForms-style `InitializeComponent` Designer code. |
+| **Persistence** | `CodeGenerator.cs` / `CodeImporter.cs` | Save/Open round-trips through plain Designer C# code (fields + `InitializeComponent`, Dock/Anchor/ZOrder/Visible included) — no separate project file format. |
 | **UI panels** | `Panels/ToolboxPanel.cs` + `Panels/ToolboxList.cs`, `Panels/LayersPanel.cs`, `Panels/LayoutHelperBar.cs` | Owner-drawn categorized toolbox (glyph badges, search, double-click or drag); rebindable layers outline with visibility/lock; quick Dock/Anchor editors. |
 | **Shell** | `StudioWindow.cs` | Toolbar + an embedded-tab TabView of documents inside resizable `SplitContainer` columns (left \| canvas \| right); rebinds panels to the active document. |
 
@@ -60,8 +59,10 @@ Every edit relayouts the canvas and is recorded as an undoable command.
 **History** — full undo/redo (Ctrl+Z / Ctrl+Y) over every add, delete, move, resize, reorder,
 dock/anchor and property edit.
 
-**Files** — Save/Open JSON projects (`.orivy.json`, Dock/Anchor preserved), Export C# Designer
-code (preview + Save .cs).
+**Files** — no project format: Save/Open read and write plain Designer C# code directly (any `.cs`
+file with a recognizable `InitializeComponent` opens in the visual designer); Export/Import Designer
+Code offer the same round trip via a paste-in dialog instead of a file. Pick a folder and every file
+and subfolder in it shows up in the Explorer sidebar — nothing else is required to start editing.
 
 ## Shortcuts
 
@@ -82,5 +83,5 @@ code (preview + Save .cs).
 - Container drop targets (design *inside* Card/Panel/TabView/SplitContainer children)
 - Rotation handles and design tokens / component variants
 - Auto-Layout (flex/grid) editors and responsive breakpoints
-- Round-trip code import and event-stub generation in the exporter
+- Event-stub generation in the exporter
 - Assets/icons manager and a plugin system for custom design-time behaviors

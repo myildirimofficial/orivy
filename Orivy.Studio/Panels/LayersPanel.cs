@@ -136,15 +136,12 @@ public sealed class LayersPanel : Element
             _rows.Clear();
             _list.Items.Clear();
 
-            // Topmost first, like Figma's layer list.
+            // Topmost first, like Figma's layer list. Recurses into a group's own children too — this
+            // used to only ever list the top-level DesignedControls, so a group's contents had no way
+            // to be seen, selected or unlocked from here at all short of clicking them directly on the
+            // (possibly crowded) canvas.
             foreach (var control in _surface.DesignedControls.OrderByDescending(c => c.ZOrder))
-            {
-                _rows.Add(control);
-                var item = new GridListItem($"{control.Name}  ·  {control.GetType().Name}");
-                item.Cells.Add(new GridListCell { CheckState = control.Visible ? CheckState.Checked : CheckState.Unchecked });
-                item.Cells.Add(new GridListCell { CheckState = _surface.Locked.Contains(control) ? CheckState.Checked : CheckState.Unchecked });
-                _list.Items.Add(item);
-            }
+                AddRow(control, depth: 0);
         }
         finally
         {
@@ -152,6 +149,26 @@ public sealed class LayersPanel : Element
         }
 
         SyncSelectionFromSurface();
+    }
+
+    /// <summary>Adds one row for <paramref name="control"/>, then recurses into its own children —
+    /// indented one level further each time — so nesting reads as a simple visual hierarchy even
+    /// though this is a flat list, not an actual collapsible tree.</summary>
+    private void AddRow(ElementBase control, int depth)
+    {
+        _rows.Add(control);
+
+        // A leading tree-branch glyph (rather than plain spaces, which some text renderers collapse)
+        // makes a nested row visually distinct from a top-level one at a glance.
+        var indent = depth > 0 ? new string(' ', (depth - 1) * 3) + "↳ " : string.Empty;
+        var item = new GridListItem($"{indent}{control.Name}  ·  {control.GetType().Name}");
+        item.Cells.Add(new GridListCell { CheckState = control.Visible ? CheckState.Checked : CheckState.Unchecked });
+        item.Cells.Add(new GridListCell { CheckState = _surface.Locked.Contains(control) ? CheckState.Checked : CheckState.Unchecked });
+        _list.Items.Add(item);
+
+        var children = control.Controls.OfType<ElementBase>().Where(c => c is not ScrollBar).OrderByDescending(c => c.ZOrder);
+        foreach (var child in children)
+            AddRow(child, depth + 1);
     }
 
     private void SyncSelectionFromSurface()

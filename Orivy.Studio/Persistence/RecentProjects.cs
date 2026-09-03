@@ -7,9 +7,11 @@ using System.Text.Json;
 namespace Orivy.Studio.Persistence;
 
 /// <summary>
-/// Tracks recently opened project files (and opened folders) across sessions, persisted as a small
-/// JSON file under the user's local app data — the "project system" the Start Screen surfaces so the
-/// app doesn't just boot straight into a throwaway blank canvas every time.
+/// Tracks recently opened folders across sessions, persisted as a small JSON file under the user's
+/// local app data — the list the Start Screen surfaces so the app doesn't just boot straight into a
+/// throwaway blank canvas every time. Folders only, not individual files: the shell is folder-centric
+/// (see <see cref="StudioWindow.OpenFolder"/>), and a recent list of every file ever opened inside
+/// whatever folder was already browsed added noise without a matching workflow to use it for.
 /// </summary>
 internal static class RecentProjects
 {
@@ -22,7 +24,6 @@ internal static class RecentProjects
     public sealed class Entry
     {
         public string Path { get; set; } = string.Empty;
-        public bool IsFolder { get; set; }
         public DateTime OpenedAt { get; set; }
     }
 
@@ -35,21 +36,23 @@ internal static class RecentProjects
                 return new List<Entry>();
 
             var entries = JsonSerializer.Deserialize<List<Entry>>(File.ReadAllText(path)) ?? new List<Entry>();
-            // Drop entries whose file/folder no longer exists instead of showing dead links.
-            return entries.Where(e => e.IsFolder ? Directory.Exists(e.Path) : File.Exists(e.Path)).ToList();
+            // Drop entries whose folder no longer exists instead of showing a dead link — also
+            // naturally discards any individual-file entries a pre-folder-only version of Studio wrote,
+            // since a file path never satisfies Directory.Exists.
+            return entries.Where(e => Directory.Exists(e.Path)).ToList();
         }
         catch (IOException) { return new List<Entry>(); }
         catch (JsonException) { return new List<Entry>(); }
         catch (UnauthorizedAccessException) { return new List<Entry>(); }
     }
 
-    public static void Add(string path, bool isFolder)
+    public static void Add(string folder)
     {
         try
         {
             var entries = Load();
-            entries.RemoveAll(e => string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase));
-            entries.Insert(0, new Entry { Path = path, IsFolder = isFolder, OpenedAt = DateTime.UtcNow });
+            entries.RemoveAll(e => string.Equals(e.Path, folder, StringComparison.OrdinalIgnoreCase));
+            entries.Insert(0, new Entry { Path = folder, OpenedAt = DateTime.UtcNow });
             if (entries.Count > MaxEntries)
                 entries.RemoveRange(MaxEntries, entries.Count - MaxEntries);
 

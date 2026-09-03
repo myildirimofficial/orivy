@@ -1,7 +1,9 @@
+using Orivy;
 using Orivy.Controls;
 using SkiaSharp;
 using System;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 
 namespace Orivy.Studio;
@@ -73,10 +75,28 @@ public static class CodeGenerator
         sb.AppendLine(string.Format(inv,
             "            Size = new SKSize({0}, {1}),",
             (int)control.Width, (int)control.Height));
+        sb.AppendLine($"            Dock = {FormatDock(control.Dock)},");
+        sb.AppendLine($"            Anchor = {FormatAnchor(control.Anchor)},");
+        sb.AppendLine($"            ZOrder = {control.ZOrder.ToString(inv)},");
+        if (!control.Visible)
+            sb.AppendLine("            Visible = false,");
         sb.AppendLine("        };");
 
         foreach (var child in NestedDesignedChildren(control))
             AppendInitializer(sb, child, inv);
+    }
+
+    private static string FormatDock(DockStyle dock) => $"DockStyle.{dock}";
+
+    private static string FormatAnchor(AnchorStyles anchor)
+    {
+        if (anchor == AnchorStyles.None)
+            return "AnchorStyles.None";
+
+        var flags = Enum.GetValues<AnchorStyles>()
+            .Where(f => f != AnchorStyles.None && anchor.HasFlag(f))
+            .Select(f => $"AnchorStyles.{f}");
+        return string.Join(" | ", flags);
     }
 
     private static void AppendAddCalls(StringBuilder sb, ElementBase control, string parentControlsExpression)

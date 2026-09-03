@@ -681,6 +681,9 @@ private IntPtr _hWnd;
             if (TryHandleMenuShortcut(Controls, commandKeyData))
                 return true;
 
+            if (TryHandleAdditionalMenuShortcut(commandKeyData))
+                return true;
+
             // Special keys that should always be processed at window level
             if (commandKeyData == Keys.Escape)
             {
@@ -711,6 +714,12 @@ private IntPtr _hWnd;
 
         return false;
     }
+
+    /// <summary>Hook for menu-like surfaces that live outside the normal <see cref="Controls"/> tree
+    /// (e.g. a title-bar "extend" or form menu button, which owns a popup rather than hosting it as a
+    /// child element) — <see cref="TryHandleMenuShortcut"/> alone can never find those, since it only
+    /// walks <see cref="Controls"/>. Base implementation does nothing; <c>Window</c> overrides it.</summary>
+    protected virtual bool TryHandleAdditionalMenuShortcut(Keys keyData) => false;
 
     private static bool TryHandleMenuShortcut(ElementCollection elements, Keys keyData)
     {

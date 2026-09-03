@@ -22,7 +22,18 @@ internal static class TextWrapper
         }
 
         if (maxWidth <= 0)
+        {
+            // A nested Fill-docked control can transiently (or permanently, if squeezed out by
+            // sibling Dock=Left/Right/Top/Bottom children) end up with zero or negative available
+            // width — returning no lines at all here meant its text vanished completely rather than
+            // just overflowing its tiny box, which is what happens for every other "ran out of room"
+            // case. Fall back to the unwrapped behavior (one line per paragraph, own natural width)
+            // instead: worse than a job well done, but far better than rendering nothing.
+            var paragraphsNoWidth = normalizedText.Split('\n');
+            for (var i = 0; i < paragraphsNoWidth.Length; i++)
+                lines.Add(paragraphsNoWidth[i]);
             return lines;
+        }
 
         var paragraphs = normalizedText.Split('\n');
         
