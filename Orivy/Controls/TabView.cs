@@ -786,6 +786,15 @@ public partial class TabView : ElementBase
 
     public int Count => GetPageCount();
 
+    /// <summary>Hit-tests <paramref name="localPoint"/> (in this control's own local coordinate
+    /// space, matching e.g. a normal <see cref="OnMouseDown"/>'s <c>MouseEventArgs.Location</c>)
+    /// against the tab strip, returning the tab index under it or -1 if it isn't over a tab. Exposes
+    /// the same hit-testing <see cref="OnMouseDown"/> uses internally for normal tab-click selection,
+    /// for callers that need to answer "is this point on a tab header" without routing a real mouse
+    /// event through the control — e.g. a design-time host where designed controls receive no input
+    /// of their own, but still wants clicking a tab in the design surface to switch pages.</summary>
+    public int HitTestTabHeader(SKPoint localPoint) => TryGetTabIndexAtPoint(localPoint, out var index) ? index : -1;
+
     public event EventHandler<int> SelectedIndexChanged
     {
         add => _onSelectedIndexChanged += value;

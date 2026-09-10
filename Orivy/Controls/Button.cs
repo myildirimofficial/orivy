@@ -27,9 +27,8 @@ public class Button : ElementBase
         AutoEllipsis = true;
         WrapMode = TextWrap.None;
         CanSelect = true;
-        MinimumSize = new SKSize(45, 24);
         Padding = new Thickness(8);
-        Radius = new Radius(12);
+        Radius = new Radius(8);
         Size = new SKSize(45, 24);
         TabStop = true;
         TextAlign = ContentAlignment.MiddleCenter;
@@ -53,7 +52,7 @@ public class Button : ElementBase
                     .Foreground(SKColors.White)
                     .Border(1)
                     .BorderColor(ColorScheme.Primary.Brightness(-0.18f))
-                    .Radius(12)
+                    .Radius(8)
                     .Shadow(new BoxShadow(0f, 2f, 4f, 0, ColorScheme.ShadowColor.WithAlpha(26))))
                 .OnHover(rule => rule
                     .Background(ColorScheme.Primary.Brightness(0.06f))

@@ -1,8 +1,8 @@
 using Orivy;
 using Orivy.Controls;
+using Orivy.Studio.History;
 using Orivy.Studio.Toolbox;
 using SkiaSharp;
-using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -59,6 +59,7 @@ public sealed class LayersPanel : Element
             RowHeight = 28,
             Radius = new Radius(10),
             Border = new Thickness(1),
+            AllowRowReorder = true,
         };
         _list.ConfigureVisualStyles(styles => styles.Base(b => b.Background(ColorScheme.Surface.WithAlpha(178))));
         _list.Columns.Add(new GridListColumn { Name = "name", Text = "Layer", SizeMode = GridListColumnSizeMode.Fill, Sortable = false });
@@ -103,6 +104,8 @@ public sealed class LayersPanel : Element
 
             _surface.Invalidate();
         };
+
+        _list.ItemReordered += (_, e) => ReorderRow(e.OldIndex, e.NewIndex);
 
         toFront.Click += (_, _) => { if (_surface.Selection.Primary is { } c) _surface.BringToFront(c); Rebuild(); };
         toBack.Click += (_, _) => { if (_surface.Selection.Primary is { } c) _surface.SendToBack(c); Rebuild(); };
@@ -169,6 +172,41 @@ public sealed class LayersPanel : Element
         var children = control.Controls.OfType<ElementBase>().Where(c => c is not ScrollBar).OrderByDescending(c => c.ZOrder);
         foreach (var child in children)
             AddRow(child, depth + 1);
+    }
+
+    /// <summary>Handles a drag-reorder gesture from <see cref="GridList.ItemReordered"/> (row indices
+    /// into the flat, depth-mixed <see cref="_rows"/> list). Reordering only makes sense
+    /// among controls that actually stack on each other, so a drag across two different parents (e.g.
+    /// a top-level control dropped onto a row nested inside a group) is silently ignored rather than
+    /// reparenting — that's a bigger, riskier operation better done by dragging on the canvas itself,
+    /// which already supports it.</summary>
+    private void ReorderRow(int fromIndex, int toIndex)
+    {
+        if (fromIndex < 0 || fromIndex >= _rows.Count || toIndex < 0 || toIndex >= _rows.Count || fromIndex == toIndex)
+            return;
+
+        var dragged = _rows[fromIndex];
+        var target = _rows[toIndex];
+        if (!ReferenceEquals(dragged.Parent, target.Parent))
+            return;
+
+        var siblings = dragged.Parent is ElementBase parent
+            ? parent.Controls.OfType<ElementBase>().Where(c => c is not ScrollBar)
+            : _surface.DesignedControls;
+
+        var ordered = siblings.OrderByDescending(c => c.ZOrder).ToList();
+        var oldIndex = ordered.IndexOf(dragged);
+        var newIndex = ordered.IndexOf(target);
+        if (oldIndex < 0 || newIndex < 0)
+            return;
+
+        ordered.RemoveAt(oldIndex);
+        if (newIndex > oldIndex)
+            newIndex--;
+        ordered.Insert(newIndex, dragged);
+
+        _surface.ReorderZ(ordered);
+        Rebuild();
     }
 
     private void SyncSelectionFromSurface()

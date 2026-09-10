@@ -138,7 +138,12 @@ public abstract partial class ElementBase
         if (!_visualStylesEnabled)
             return;
 
-        RefreshVisualStyles(forceImmediate: true);
+        // Not forceImmediate: a light/dark toggle should cross-fade through each control's own
+        // configured transition (the same one hover/focus already animate through) instead of
+        // every control's colors snapping to the new theme in one instant, uncoordinated cut —
+        // which across a whole window of controls reads as a jarring flash rather than a fluid
+        // switch.
+        RefreshVisualStyles(forceImmediate: false);
     }
 
     public void ApplyVisualStyleBase(ElementVisualStyle style)

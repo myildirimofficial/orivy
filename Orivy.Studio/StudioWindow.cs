@@ -3,6 +3,7 @@ using Orivy.Controls;
 using Orivy.Controls.RichText;
 using Orivy.Studio.Canvas;
 using Orivy.Studio.Documents;
+using Orivy.Studio.History;
 using Orivy.Studio.Panels;
 using Orivy.Studio.Persistence;
 using Orivy.Studio.Toolbox;
@@ -40,6 +41,45 @@ public sealed class StudioWindow : Window
     private readonly Element _zoomLabel;
     private readonly Element _statusHost;
 
+    // Grid row/column helpers — only meaningful (and only shown) while the primary selection is a
+    // Grid; the same add-row/add-column actions the on-canvas strips (see DesignSurface.DesignOverlay)
+    // already offer, just reachable from the toolbar without having to find the Grid's own edges on
+    // the canvas first.
+    private readonly Element _gridToolsGroup = new()
+    {
+        Dock = DockStyle.Left, Visible = false, Width = 168,
+        BackColor = SKColors.Transparent, Border = new Thickness(0), Radius = new Radius(0),
+        Margin = new Thickness(0, 0, 8, 0),
+    };
+
+    /// <summary>Ready-made row/column layouts a user can drop onto a Grid in one click instead of
+    /// building common shapes (an even split, a header/content/footer stack, a fixed sidebar) by hand
+    /// one Add-Row/Add-Column click at a time. Replaces whichever axis (or both) the preset touches;
+    /// leaves the other axis alone.</summary>
+    private static readonly (string Label, Action<Grid> Apply)[] GridPresets =
+    {
+        ("2 Columns", g => SetColumns(g, GridLength.FromStar(), GridLength.FromStar())),
+        ("3 Columns", g => SetColumns(g, GridLength.FromStar(), GridLength.FromStar(), GridLength.FromStar())),
+        ("Sidebar + Content", g => SetColumns(g, GridLength.FromPixels(200), GridLength.FromStar())),
+        ("2 Rows", g => SetRows(g, GridLength.FromStar(), GridLength.FromStar())),
+        ("3 Rows", g => SetRows(g, GridLength.FromStar(), GridLength.FromStar(), GridLength.FromStar())),
+        ("Header / Content / Footer", g => SetRows(g, GridLength.Auto, GridLength.FromStar(), GridLength.Auto)),
+    };
+
+    private static void SetColumns(Grid grid, params GridLength[] widths)
+    {
+        grid.ColumnDefinitions.Clear();
+        foreach (var w in widths)
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
+    }
+
+    private static void SetRows(Grid grid, params GridLength[] heights)
+    {
+        grid.RowDefinitions.Clear();
+        foreach (var h in heights)
+            grid.RowDefinitions.Add(new RowDefinition { Height = h });
+    }
+
     private DesignSurface _active = null!;
     private int _documentCounter;
     private bool _suppressInspectorCommit;
@@ -65,6 +105,7 @@ public sealed class StudioWindow : Window
         MinimumSize = new SKSize(1024, 640);
         StartPosition = FormStartPosition.CenterScreen;
         ShowIcon = true;
+        this.DrawTitleBorder = false;
 
         // Tabbed is the theme meant to cooperate with a TitleBar-mode TabView (see BuildLayout);
         // it falls back to a flat surface automatically on older Windows.
@@ -134,6 +175,33 @@ public sealed class StudioWindow : Window
         var themeToggle = new ToolbarButton("moon", "Toggle dark mode", 28f) { CheckOnClick = true, Checked = ColorScheme.IsDarkMode };
         var randomizeToggle = new ToolbarButton("shuffle", "Randomize backgrounds", 28f) { CheckOnClick = true };
 
+        // Same flat, transparent-until-hovered skin as the icon-only toolbar buttons around them
+        // (ToolbarButton.ApplyFlatSkin) — Button's own default is a bold filled pill meant for the
+        // canvas, not this toolbar, and looked completely out of place sitting next to gridToggle/
+        // snapToggle/etc.
+        var addGridRowButton = new Button { Text = "+ Row", Dock = DockStyle.Left, Width = 52, Height = 28, Margin = new Thickness(0, 0, 4, 0), ToolTipText = "Add row to selected Grid" };
+        var addGridColumnButton = new Button { Text = "+ Col", Dock = DockStyle.Left, Width = 52, Height = 28, Margin = new Thickness(0, 0, 4, 0), ToolTipText = "Add column to selected Grid" };
+        var gridPresetsButton = new Button { Text = "Presets ▾", Dock = DockStyle.Left, Width = 56, Height = 28, ToolTipText = "Apply a ready-made row/column layout" };
+        ToolbarButton.ApplyFlatSkin(addGridRowButton);
+        ToolbarButton.ApplyFlatSkin(addGridColumnButton);
+        ToolbarButton.ApplyFlatSkin(gridPresetsButton);
+        _gridToolsGroup.Controls.Add(gridPresetsButton);
+        _gridToolsGroup.Controls.Add(addGridColumnButton);
+        _gridToolsGroup.Controls.Add(addGridRowButton);
+
+        // Grid/snap spacing was a fixed 8px with no way to change it — a plain NumericUpDown next to
+        // the toggles it controls, rather than a whole settings dialog for one number.
+        var gridSizeField = new NumericUpDown
+        {
+            Dock = DockStyle.Left,
+            Size = new SKSize(56, 28),
+            Margin = new Thickness(0, 0, 4, 0),
+            Minimum = 2,
+            Maximum = 64,
+            Value = 4,
+            ToolTipText = "Grid / snap size (px)",
+        };
+
         // A compact segmented "pill" for the zoom cluster instead of four loose buttons. Positioned
         // with explicit Location/Size (Dock=None) rather than stacked Dock=Left — the reverse-order
         // docking quirk the rest of the toolbar relies on turned out unreliable for this tightly
@@ -172,8 +240,9 @@ public sealed class StudioWindow : Window
         {
             themeToggle,
             Divider(),
-            randomizeToggle, guidesToggle, snapToggle, gridToggle,
+            randomizeToggle, guidesToggle, snapToggle, gridSizeField, gridToggle,
             Divider(),
+            _gridToolsGroup,
             zoomGroup,
             Divider(),
             _previewButton,
@@ -235,7 +304,6 @@ public sealed class StudioWindow : Window
         _sidebar.TabLayoutMode = TabViewLayoutMode.Top;
         _sidebar.TabStripHeight = 38f;
         _sidebar.DrawTabIcons = true;
-        _sidebar.TabMode = TabViewMode.Embedded,
         _sidebar.EnableTransitions = true;
         _sidebar.TransitionEffect = TabViewTransitionEffect.Fade;
         _sidebar.Border = new Thickness(0);
@@ -292,9 +360,53 @@ public sealed class StudioWindow : Window
         zoomFit.Click += (_, _) => _active.FitToView();
         gridToggle.CheckedChanged += (_, _) => _active.ShowGrid = gridToggle.Checked;
         snapToggle.CheckedChanged += (_, _) => { _active.SnapToGrid = snapToggle.Checked; _active.Invalidate(); };
+        gridSizeField.ValueChanged += (_, _) => _active.GridStep = (float)gridSizeField.Value;
         guidesToggle.CheckedChanged += (_, _) => _active.SmartGuides = guidesToggle.Checked;
         themeToggle.CheckedChanged += (_, _) => ColorScheme.IsDarkMode = themeToggle.Checked;
         randomizeToggle.CheckedChanged += (_, _) => _active.ShowRandomBackgrounds = randomizeToggle.Checked;
+        addGridRowButton.Click += (_, _) =>
+        {
+            if (_active.Selection.Primary is not Grid grid)
+                return;
+            var def = new RowDefinition();
+            _active.Commands.Execute(new DelegateCommand("Add row", () => grid.RowDefinitions.Add(def), () => grid.RowDefinitions.Remove(def)));
+        };
+        addGridColumnButton.Click += (_, _) =>
+        {
+            if (_active.Selection.Primary is not Grid grid)
+                return;
+            var def = new ColumnDefinition();
+            _active.Commands.Execute(new DelegateCommand("Add column", () => grid.ColumnDefinitions.Add(def), () => grid.ColumnDefinitions.Remove(def)));
+        };
+        gridPresetsButton.Click += (_, _) =>
+        {
+            if (_active.Selection.Primary is not Grid grid)
+                return;
+
+            var menu = new ContextMenuStrip();
+            foreach (var (label, apply) in GridPresets)
+                menu.AddItem(new MenuItem(label, (_, _) => ApplyGridPreset(grid, apply, label)));
+            menu.Closed += (_, _) => menu.Dispose();
+            menu.Show(gridPresetsButton, gridPresetsButton.PointToScreen(new SKPoint(0, gridPresetsButton.Height)));
+        };
+    }
+
+    /// <summary>Swaps in a preset row/column layout as one undo step — snapshots the Grid's current
+    /// track sizes first (not the RowDefinition/ColumnDefinition objects themselves, which the preset
+    /// clears) so undo rebuilds equivalent tracks rather than needing to keep the old objects alive.</summary>
+    private void ApplyGridPreset(Grid grid, Action<Grid> apply, string label)
+    {
+        var oldRowHeights = grid.RowDefinitions.Select(d => d.Height).ToArray();
+        var oldColumnWidths = grid.ColumnDefinitions.Select(d => d.Width).ToArray();
+
+        _active.Commands.Execute(new DelegateCommand(
+            $"Apply preset: {label}",
+            () => apply(grid),
+            () =>
+            {
+                SetRows(grid, oldRowHeights);
+                SetColumns(grid, oldColumnWidths);
+            }));
     }
 
     /// <summary>
@@ -389,7 +501,7 @@ public sealed class StudioWindow : Window
                 _active.CommitPropertyEdit(e.ChangedItem, _inspector.SelectedObject, e.OldValue);
             _active.RelayoutRoot();
             _layers.Rebuild();
-            _layoutBar.Refresh();
+            RefreshSelectionDependentUi();
             UpdateStatus();
         };
 
@@ -517,7 +629,7 @@ public sealed class StudioWindow : Window
         AttachSurface(_active);
 
         _layers.Attach(_active);
-        _layoutBar.Refresh();
+        RefreshSelectionDependentUi();
         RefreshAllPanels();
     }
 
@@ -539,8 +651,17 @@ public sealed class StudioWindow : Window
         s.Commands.Changed -= OnCommandsChanged;
     }
 
-    private void OnSelectionChanged() { SetInspectorObject(_active.ActiveObject); _layoutBar.Refresh(); UpdateStatus(); }
+    private void OnSelectionChanged() { SetInspectorObject(_active.ActiveObject); RefreshSelectionDependentUi(); UpdateStatus(); }
     private void OnStructureChanged() { SetInspectorObject(_active.ActiveObject); UpdateStatus(); }
+
+    /// <summary>Resyncs every panel that mirrors the primary selection — the Layout helper bar plus
+    /// the Grid row/column toolbar buttons, which only make sense (and are only shown) while a Grid
+    /// is selected.</summary>
+    private void RefreshSelectionDependentUi()
+    {
+        _layoutBar.Refresh();
+        _gridToolsGroup.Visible = _active.Selection.Primary is Grid;
+    }
     private void OnZoomChanged() => _zoomLabel.Text = $"{_active.Zoom * 100f:0}%";
     private void OnCommandsChanged() { UpdateHistoryButtons(); _layers.Rebuild(); }
 
@@ -553,7 +674,7 @@ public sealed class StudioWindow : Window
         _suppressInspectorCommit = true;
         try { _inspector.RefreshVisibleValues(); }
         finally { _suppressInspectorCommit = false; }
-        _layoutBar.Refresh();
+        RefreshSelectionDependentUi();
         UpdateStatus();
     }
 
@@ -740,7 +861,7 @@ public sealed class StudioWindow : Window
 
         try
         {
-            var skipped = CodeImporter.Import(target.Surface, content);
+            var skipped = CodeImporter.Import(target.Surface, content, path);
             target.FilePath = path;
             target.OriginalSourceText = content;
             target.DocumentName = CodeImporter.TryGetClassName(content) ?? System.IO.Path.GetFileNameWithoutExtension(path);

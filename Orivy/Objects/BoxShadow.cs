@@ -6,38 +6,46 @@ namespace Orivy;
 /// CSS-like box shadow definition. Supports offset, blur, per-edge spread, color, and inset mode.
 /// Usage: <c>new BoxShadow(offsetX: 0, offsetY: 4, blur: 12, spread: new Thickness(8), color: SKColors.Black.WithAlpha(60))</c>
 /// </summary>
-public readonly struct BoxShadow
+public struct BoxShadow
 {
     /// <summary>
     /// Horizontal offset of the shadow. Positive = right, negative = left.
     /// </summary>
-    public float OffsetX { get; }
+    public float OffsetX { get; set; }
 
     /// <summary>
     /// Vertical offset of the shadow. Positive = down, negative = up.
     /// </summary>
-    public float OffsetY { get; }
+    public float OffsetY { get; set; }
+
+    private float _blur;
 
     /// <summary>
-    /// Gaussian blur radius. 0 = sharp edge, higher = softer.
+    /// Gaussian blur radius. 0 = sharp edge, higher = softer. Never negative — a negative value
+    /// (typed in directly, e.g. via a property grid, rather than through the constructor) clamps to
+    /// 0 instead of producing a meaningless inverted blur.
     /// </summary>
-    public float Blur { get; }
+    public float Blur
+    {
+        readonly get => _blur;
+        set => _blur = value >= 0 ? value : 0;
+    }
 
     /// <summary>
     /// Per-edge spread distance. Expands the shadow shape outward (or inward for negative values).
     /// Use uniform spread: <c>new Radius(8)</c> or per-edge: <c>new Radius(topLeft, topRight, bottomLeft, bottomRight)</c>.
     /// </summary>
-    public Radius Spread { get; }
+    public Radius Spread { get; set; }
 
     /// <summary>
     /// Shadow color with alpha for opacity control.
     /// </summary>
-    public SKColor Color { get; }
+    public SKColor Color { get; set; }
 
     /// <summary>
     /// When true, the shadow is drawn inside the element (inset shadow).
     /// </summary>
-    public bool Inset { get; }
+    public bool Inset { get; set; }
 
     /// <summary>
     /// Returns true if this shadow has no visible effect.
@@ -48,7 +56,7 @@ public readonly struct BoxShadow
     {
         OffsetX = offsetX;
         OffsetY = offsetY;
-        Blur = blur >= 0 ? blur : 0;
+        Blur = blur;
         Spread = spread;
         Color = color;
         Inset = inset;

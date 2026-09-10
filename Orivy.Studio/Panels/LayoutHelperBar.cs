@@ -19,6 +19,8 @@ public sealed class LayoutHelperBar : Element
     private readonly Func<DesignSurface> _active;
     private readonly ComboBox _dock;
     private readonly CheckBox _anchorLeft, _anchorTop, _anchorRight, _anchorBottom;
+    private readonly Element _gridRow;
+    private readonly NumericUpDown _gridRowField, _gridColumnField, _gridRowSpanField, _gridColumnSpanField;
     private bool _syncing;
 
     public LayoutHelperBar(Func<DesignSurface> active)
@@ -61,10 +63,39 @@ public sealed class LayoutHelperBar : Element
         _anchorRight = AnchorToggle("R", anchorRow);
         _anchorBottom = AnchorToggle("B", anchorRow);
 
+        // A Grid child's Row/Column/RowSpan/ColumnSpan live in the PARENT Grid's own placement
+        // dictionary (Grid.SetPlacement), not as a property on the child itself — so unlike Dock/
+        // Anchor above, there's nothing here reflection could ever find on the selected control to
+        // show in the ordinary property grid. Only shown when the selection's parent is a Grid.
+        _gridRow = new Element
+        {
+            Dock = DockStyle.Top, Height = 36, Margin = new Thickness(0, 0, 0, 8),
+            BackColor = SKColors.Transparent, Border = new Thickness(0), Radius = new Radius(0),
+        };
+        _gridRowField = GridPlacementField("Row", _gridRow);
+        _gridColumnField = GridPlacementField("Col", _gridRow);
+        _gridRowSpanField = GridPlacementField("RSpan", _gridRow);
+        _gridColumnSpanField = GridPlacementField("CSpan", _gridRow);
+
+        Controls.Add(_gridRow);
         Controls.Add(anchorRow);
         Controls.Add(dockRow);
 
         Refresh();
+    }
+
+    private NumericUpDown GridPlacementField(string label, Element row)
+    {
+        var field = new NumericUpDown { Dock = DockStyle.Right, Width = 44, Minimum = 0, Maximum = 999, Margin = new Thickness(4, 0, 0, 0) };
+        field.ValueChanged += (_, _) => ApplyGridPlacement();
+        row.Controls.Add(field);
+        row.Controls.Add(new Element
+        {
+            Text = label, Dock = DockStyle.Right, Width = 36, BackColor = SKColors.Transparent,
+            Border = new Thickness(0), Radius = new Radius(0), TextAlign = ContentAlignment.MiddleRight,
+            Margin = new Thickness(8, 0, 4, 0),
+        });
+        return field;
     }
 
     private CheckBox AnchorToggle(string text, Element row)
@@ -96,11 +127,47 @@ public sealed class LayoutHelperBar : Element
             // Anchor is meaningless while docked.
             var anchorEnabled = target != null && dock == DockStyle.None;
             _anchorLeft.Enabled = _anchorTop.Enabled = _anchorRight.Enabled = _anchorBottom.Enabled = anchorEnabled;
+
+            if (target?.Parent is Grid grid)
+            {
+                _gridRow.Visible = true;
+                var placement = grid.GetPlacement(target);
+                _gridRowField.Value = placement.Row;
+                _gridColumnField.Value = placement.Column;
+                _gridRowSpanField.Value = placement.RowSpan;
+                _gridColumnSpanField.Value = placement.ColumnSpan;
+            }
+            else
+            {
+                _gridRow.Visible = false;
+            }
         }
         finally
         {
             _syncing = false;
         }
+    }
+
+    private void ApplyGridPlacement()
+    {
+        if (_syncing)
+            return;
+        var surface = _active();
+        var target = surface.Selection.Primary;
+        if (target?.Parent is not Grid grid)
+            return;
+
+        var old = grid.GetPlacement(target);
+        var next = new GridPlacement(
+            (int)_gridRowField.Value, (int)_gridColumnField.Value,
+            (int)_gridRowSpanField.Value, (int)_gridColumnSpanField.Value);
+        if (next == old)
+            return;
+
+        surface.Commands.Execute(new DelegateCommand(
+            $"Grid placement of {target.Name}",
+            () => { grid.SetPlacement(target, next.Row, next.Column, next.RowSpan, next.ColumnSpan); surface.RelayoutRoot(); },
+            () => { grid.SetPlacement(target, old.Row, old.Column, old.RowSpan, old.ColumnSpan); surface.RelayoutRoot(); }));
     }
 
     private void ApplyDock()

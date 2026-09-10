@@ -10,10 +10,20 @@ namespace Orivy.Studio.Toolbox;
 /// <summary>One placeable control type discovered from Orivy.Controls.</summary>
 public sealed record ControlEntry(Type Type, string DisplayName, string Category, string Description)
 {
-    public ElementBase CreateInstance()
+    /// <param name="seedPlaceholderContent">Seeds a fresh instance with placeholder content (a
+    /// GridList's demo columns/rows, a ListBox's demo items, a TabView's "Tab 1"/"Tab 2" pages, ...)
+    /// so it isn't a blank, unusable-looking shape the moment it lands on the canvas. Only meaningful
+    /// for an actual toolbox drop/double-click — <see cref="CodeImporter"/> rebuilding a control from
+    /// real imported source applies that control's *real* columns/items/pages right after this call
+    /// returns, so seeding here first would leave the placeholder rows sitting alongside (not
+    /// replaced by) the real ones the file actually specifies.</param>
+    public ElementBase CreateInstance(bool seedPlaceholderContent = true)
     {
         var control = (ElementBase)Activator.CreateInstance(Type)!;
-        ControlCatalog.ApplyDesignDefaults(control);
+        if (seedPlaceholderContent)
+            ControlCatalog.ApplyDesignDefaults(control);
+        else
+            ControlCatalog.ApplySizeDefault(control);
         return control;
     }
 }
@@ -141,14 +151,33 @@ public static class ControlCatalog
             .ToList();
     }
 
-    internal static void ApplyDesignDefaults(ElementBase control)
+    internal static void ApplySizeDefault(ElementBase control)
     {
         if (DefaultSizes.TryGetValue(control.GetType().Name, out var size))
             control.Size = size;
         else if (control.Width <= 1 || control.Height <= 1)
             control.Size = new SKSize(160, 40);
 
-        // Seed a little content so data controls aren't empty white boxes on the canvas.
+        // TabView defaults to TabViewMode.TitleBar — meant for a window's own shell (see
+        // StudioWindow, which hosts its document tabs in the native title bar), not a plain child
+        // control sitting on a canvas. In that mode ShouldDrawTabStrip is permanently false, so a
+        // TabView would render with no visible/clickable tab strip of its own at all — nothing to
+        // switch pages with, at either design time or runtime. A real functional fix (not placeholder
+        // content), so it applies whether this instance is about to get placeholder pages or a real
+        // imported set of them — either way it needs a working strip to show them with.
+        if (control is TabView tabs)
+            tabs.TabMode = TabViewMode.Embedded;
+    }
+
+    internal static void ApplyDesignDefaults(ElementBase control)
+    {
+        ApplySizeDefault(control);
+
+        // Seed a little content so data controls aren't empty white boxes on the canvas. Only for a
+        // genuinely fresh toolbox drop (see CreateInstance's seedPlaceholderContent) — CodeImporter
+        // rebuilding a control from real source applies its actual columns/items/pages right after,
+        // so seeding placeholders here first would leave them sitting alongside (not replaced by) the
+        // ones the imported file actually specifies.
         switch (control)
         {
             case GridList grid when grid.Columns.Count == 0:
@@ -159,6 +188,10 @@ public static class ControlCatalog
                 break;
             case ListBox list when list.Items.Count == 0:
                 list.Items.AddRange("Item 1", "Item 2", "Item 3");
+                break;
+            case TabView tabs when tabs.Count == 0:
+                tabs.Controls.Add(new Container { Text = "Tab 1" });
+                tabs.Controls.Add(new Container { Text = "Tab 2" });
                 break;
         }
     }

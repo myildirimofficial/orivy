@@ -92,7 +92,6 @@ public class ListBox : ElementBase
 
     #region Public API
 
-    [Browsable(false)]
     public ObjectCollection Items => _items;
 
     /// <summary>

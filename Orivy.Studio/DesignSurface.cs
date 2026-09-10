@@ -21,8 +21,9 @@ namespace Orivy.Studio;
 /// </summary>
 public sealed class DesignSurface : Element
 {
-    private const float GripSize = 7f;
-    private const float GridStep = 8f;
+    private const float GripSize = 4f;
+    private const float MinGridStep = 2f;
+    private const float MaxGridStep = 64f;
     private const float GuideSnapDistance = 6f;
     private const float MinControlSize = 12f;
     private const float MinZoom = 0.25f;
@@ -225,6 +226,24 @@ public sealed class DesignSurface : Element
     public bool SnapToGrid { get; set; } = true;
     public bool SmartGuides { get; set; } = true;
 
+    private float _gridStep = 4f;
+
+    /// <summary>Spacing, in design-space pixels, of both the visible reference grid and the snap
+    /// increment <see cref="Snap"/> rounds to — previously a fixed 8px with no way to change it.</summary>
+    public float GridStep
+    {
+        get => _gridStep;
+        set
+        {
+            var clamped = Math.Clamp(value, MinGridStep, MaxGridStep);
+            if (Math.Abs(_gridStep - clamped) < 0.001f)
+                return;
+
+            _gridStep = clamped;
+            Invalidate();
+        }
+    }
+
     private bool _showGrid = true;
 
     /// <summary>Draws the design grid inside the root frame.</summary>
@@ -335,12 +354,21 @@ public sealed class DesignSurface : Element
     /// <summary>
     /// Adds a new control. When <paramref name="group"/> is set, the control nests as that group's
     /// child instead of the root's — <paramref name="location"/> is then interpreted relative to the
-    /// group, matching where it will actually render.
+    /// group, matching where it will actually render. When <paramref name="group"/> is itself a
+    /// <see cref="Grid"/>, <paramref name="gridPlacement"/> (if given) places the new child in that
+    /// specific row/column instead of the Grid's (0,0) default.
     /// </summary>
-    public ElementBase AddControl(ControlEntry entry, SKPoint? location, ElementBase? group)
+    public ElementBase AddControl(ControlEntry entry, SKPoint? location, ElementBase? group, GridPlacement? gridPlacement = null)
     {
         var control = entry.CreateInstance();
         PrepareForDesign(control);
+        // Deliberately NOT falling back to Text = Name for a control that starts out textless (a
+        // plain Container/Grid/FlowLayout etc.) — Text is real content the actual running app (and
+        // Preview mode, which renders the live tree exactly as-is) displays, not a design-time-only
+        // label; baking the auto-generated name into it leaked "container1"/"grid1"-style names into
+        // both Preview and any exported code. The selection name chip below (drawn from Name, not
+        // Text, and only while this overlay itself is visible) already identifies a selected empty
+        // control without touching what it actually renders.
         control.Name = MakeUniqueName(char.ToLowerInvariant(entry.DisplayName[0]) + entry.DisplayName[1..]);
         if (string.IsNullOrEmpty(control.Text))
             control.Text = control.Name;
@@ -350,9 +378,17 @@ public sealed class DesignSurface : Element
         control.Location = new SKPoint(Snap(at.X), Snap(at.Y));
 
         var parentControls = group != null ? group.Controls : _root.Controls;
+        var targetGrid = group as Grid;
         Commands.Execute(new DelegateCommand(
             group != null ? $"Add {entry.DisplayName} to {group.Name}" : $"Add {entry.DisplayName}",
-            () => { parentControls.Add(control); AfterStructureChange(); Selection.SelectOnly(group ?? control); },
+            () =>
+            {
+                parentControls.Add(control);
+                if (targetGrid != null && gridPlacement is { } placement)
+                    targetGrid.SetPlacement(control, placement.Row, placement.Column, placement.RowSpan, placement.ColumnSpan);
+                AfterStructureChange();
+                Selection.SelectOnly(group ?? control);
+            },
             () => { Selection.Remove(control); parentControls.Remove(control); Locked.Remove(control); AfterStructureChange(); }));
 
         return control;
@@ -360,30 +396,41 @@ public sealed class DesignSurface : Element
 
     /// <summary>Drops a toolbox entry at a point given in this surface's client (screen-derived) space.
     /// Nests into whatever existing control is hovered (see <see cref="PreviewDrop"/>), if any — any
-    /// designed control can host children, not just an explicit <see cref="Groups"/> shell.</summary>
+    /// designed control can host children, not just an explicit <see cref="Groups"/> shell. Landing on
+    /// a <see cref="Grid"/> specifically places the new child in whichever row/column the drop point
+    /// falls in, rather than always the Grid's (0,0) cell.</summary>
     public ElementBase DropAt(ControlEntry entry, SKPoint clientPoint)
     {
         var size = entry.CreateInstance().Size; // default size to center the drop under the cursor
         var logical = ToLogical(clientPoint);
         var target = FindNestingTargetAt(logical);
         var location = DropTargetLocation(logical, size, target);
+        var gridPlacement = target is Grid grid ? grid.HitTestCell(LocalPointIn(logical, grid)) : (GridPlacement?)null;
         ClearDropPreview();
-        return AddControl(entry, location, target);
+        return AddControl(entry, location, target, gridPlacement);
     }
 
     private ControlEntry? _previewEntry;
     private SKRect _previewRect;
     private ElementBase? _previewGroup;
+    private GridPlacement? _previewGridPlacement;
 
     /// <summary>The control a toolbox drag is currently hovering, if any — drawn as a highlighted
     /// nesting target by <see cref="DesignOverlay"/> and used by <see cref="DropAt"/> on release.</summary>
     internal ElementBase? PreviewGroup => _previewGroup;
 
+    /// <summary>The specific Grid cell a toolbox drag is currently hovering, when <see cref="PreviewGroup"/>
+    /// is a <see cref="Grid"/> — null otherwise (including when hovering a Grid that has no rows/columns
+    /// to speak of yet, which can't happen since RowCount/ColumnCount default to 1+, but kept nullable
+    /// for the non-Grid case).</summary>
+    internal GridPlacement? PreviewGridPlacement => _previewGridPlacement;
+
     /// <summary>
     /// Shows a live ghost of where <paramref name="entry"/> would land if dropped at
     /// <paramref name="clientPoint"/> right now — called continuously while a toolbox drag hovers
     /// over the canvas, so the user sees the snapped placement before releasing. Also detects and
-    /// highlights whatever existing control is under the cursor as a nesting target.
+    /// highlights whatever existing control is under the cursor as a nesting target, and — when that
+    /// target is a Grid — which specific cell would receive it.
     /// </summary>
     public void PreviewDrop(ControlEntry entry, SKPoint clientPoint)
     {
@@ -399,6 +446,7 @@ public sealed class DesignSurface : Element
         var location = DropTargetLocation(logical, size, target);
         _previewEntry = entry;
         _previewGroup = target;
+        _previewGridPlacement = target is Grid grid ? grid.HitTestCell(LocalPointIn(logical, grid)) : null;
         _previewRect = SKRect.Create(location, size);
         Invalidate();
     }
@@ -410,6 +458,7 @@ public sealed class DesignSurface : Element
             return;
         _previewEntry = null;
         _previewGroup = null;
+        _previewGridPlacement = null;
         Invalidate();
     }
 
@@ -506,17 +555,24 @@ public sealed class DesignSurface : Element
         return new SKPoint(x, y);
     }
 
+    /// <summary>A logical-space point translated into <paramref name="parent"/>'s own local space (its
+    /// top-left as origin), or root-relative when <paramref name="parent"/> is null — the same walk
+    /// <see cref="DropTargetLocation"/> and a Grid drop target's row/column hit-test both need.</summary>
+    private SKPoint LocalPointIn(SKPoint logicalPoint, ElementBase? parent)
+    {
+        var rootRel = new SKPoint(logicalPoint.X - _root.Location.X, logicalPoint.Y - _root.Location.Y);
+        if (parent == null)
+            return rootRel;
+
+        var parentAbsolute = GetDesignSpaceLocation(parent);
+        return new SKPoint(rootRel.X - parentAbsolute.X, rootRel.Y - parentAbsolute.Y);
+    }
+
     /// <summary>Snapped top-left for a <paramref name="size"/>d control centered under a logical-space
     /// point — relative to <paramref name="parent"/> when given, otherwise root-relative.</summary>
     private SKPoint DropTargetLocation(SKPoint logicalPoint, SKSize size, ElementBase? parent = null)
     {
-        var rootRel = new SKPoint(logicalPoint.X - _root.Location.X, logicalPoint.Y - _root.Location.Y);
-        if (parent != null)
-        {
-            var parentAbsolute = GetDesignSpaceLocation(parent);
-            rootRel = new SKPoint(rootRel.X - parentAbsolute.X, rootRel.Y - parentAbsolute.Y);
-        }
-
+        var rootRel = LocalPointIn(logicalPoint, parent);
         return new SKPoint(Snap(rootRel.X - size.Width / 2f), Snap(rootRel.Y - size.Height / 2f));
     }
 
@@ -728,28 +784,10 @@ public sealed class DesignSurface : Element
         var clones = new List<ElementBase>();
         foreach (var source in sources)
         {
-            ElementBase clone;
-            try
-            {
-                if (Activator.CreateInstance(source.GetType()) is not ElementBase created)
-                    continue;
-                clone = created;
-            }
-            catch
-            {
-                // A control without a working parameterless constructor just can't be duplicated —
-                // skip it rather than taking the whole operation down with an uncaught exception.
+            var clone = CloneControl(source);
+            if (clone == null)
                 continue;
-            }
 
-            ControlCatalog.ApplyDesignDefaults(clone);
-            PrepareForDesign(clone);
-            clone.Name = MakeUniqueName(source.GetType().Name.ToLowerInvariant());
-            clone.Text = source.Text;
-            clone.Size = source.Size;
-            clone.BackColor = source.BackColor;
-            clone.Dock = source.Dock;
-            clone.Anchor = source.Anchor;
             clone.Location = new SKPoint(source.Location.X + 16f, source.Location.Y + 16f);
             clones.Add(clone);
         }
@@ -761,6 +799,37 @@ public sealed class DesignSurface : Element
             $"Duplicate {clones.Count} control(s)",
             () => { foreach (var c in clones) _root.Controls.Add(c); Selection.SetMany(clones); AfterStructureChange(); },
             () => { foreach (var c in clones) { Selection.Remove(c); _root.Controls.Remove(c); } AfterStructureChange(); }));
+    }
+
+    /// <summary>Best-effort shallow clone of one designed control — a new instance of the same type
+    /// with the handful of properties an on-canvas copy actually needs to look/behave like the
+    /// original (not a full property-by-property clone). Shared by <see cref="DuplicateSelection"/>
+    /// and Ctrl+drag-to-copy; the caller positions and parents the result. Returns null for a type
+    /// with no working parameterless constructor rather than throwing.</summary>
+    private ElementBase? CloneControl(ElementBase source)
+    {
+        ElementBase clone;
+        try
+        {
+            if (Activator.CreateInstance(source.GetType()) is not ElementBase created)
+                return null;
+            clone = created;
+        }
+        catch
+        {
+            return null;
+        }
+
+        ControlCatalog.ApplyDesignDefaults(clone);
+        PrepareForDesign(clone);
+        clone.Name = MakeUniqueName(source.GetType().Name.ToLowerInvariant());
+        clone.Text = source.Text;
+        clone.Size = source.Size;
+        clone.BackColor = source.BackColor;
+        clone.Dock = source.Dock;
+        clone.Anchor = source.Anchor;
+        clone.Location = source.Location;
+        return clone;
     }
 
     public void ClearAll()
@@ -860,6 +929,31 @@ public sealed class DesignSurface : Element
 
     public void BringToFront(ElementBase control) => ShiftZ(control, +1_000, "Bring to front");
     public void SendToBack(ElementBase control) => ShiftZ(control, -1_000, "Send to back");
+
+    /// <summary>Undoable wrapper over the core <see cref="ElementBase.ReorderZ"/> primitive — e.g.
+    /// after dragging a row to a new position in the Layers panel. All entries must already share the
+    /// same parent; the caller (not this method) is responsible for keeping the reorder within one
+    /// sibling group, since Z-order is only ever meaningful among controls that actually stack on
+    /// each other.</summary>
+    public void ReorderZ(IReadOnlyList<ElementBase> newOrderTopmostFirst)
+    {
+        if (newOrderTopmostFirst.Count < 2)
+            return;
+
+        var oldZ = newOrderTopmostFirst.ToDictionary(c => c, c => c.ZOrder);
+
+        // No-op if this is already today's relative order (e.g. dropping a row back where it
+        // started) — comparing the raw Z values themselves would false-positive as "changed" any
+        // time the existing values aren't already a tidy 0..count-1 sequence (e.g. after a prior
+        // Bring to front/Send to back), even though nothing about the actual stacking order moved.
+        if (newOrderTopmostFirst.OrderByDescending(c => oldZ[c]).SequenceEqual(newOrderTopmostFirst))
+            return;
+
+        Commands.Execute(new DelegateCommand(
+            "Reorder layers",
+            () => { ElementBase.ReorderZ(newOrderTopmostFirst); Invalidate(); },
+            () => { foreach (var c in newOrderTopmostFirst) c.ZOrder = oldZ[c]; Invalidate(); }));
+    }
 
     private void ShiftZ(ElementBase control, int delta, string label)
     {
@@ -1007,7 +1101,7 @@ public sealed class DesignSurface : Element
             // instead (independent per line, no running total) removes that drift with no need for a
             // tiled brush at all.
             var r = new SKRect(0, 0, Width, Height);
-            var step = GridStep;
+            var step = _s.GridStep;
             var columns = (int)(r.Width / step);
             var rows = (int)(r.Height / step);
 
@@ -1057,7 +1151,21 @@ public sealed class DesignSurface : Element
         private Dictionary<ElementBase, SKRect>? _dragBefore;
         private bool _resizingRoot;
         private SKRect _rootDragBefore;
+        private bool _ctrlDragDuplicated;
         private readonly List<(SKPoint A, SKPoint B)> _activeGuides = new();
+
+        // ── Grid row/column live editing (WPF-designer-style strips along a selected Grid's own
+        // top/left edges) — a divider drag, not a bounds drag, so it's tracked independently of
+        // _mode/Grip rather than trying to route it through the generic resize machinery below.
+        private const float GridStripThickness = 16f;
+        private const float GridStripGap = 4f;
+        private const float GridDividerTolerance = 4f;
+        private Grid? _gridDragTarget;
+        private bool _gridDragIsRow;
+        private int _gridDragIndex;
+        private float _gridDragStartSize;
+        private float _gridDragStartMouse;
+        private GridLength _gridDragOldLength;
 
         private readonly SKPaint _stroke = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.4f };
         private readonly SKPaint _fill = new() { IsAntialias = true };
@@ -1127,6 +1235,29 @@ public sealed class DesignSurface : Element
                 _stroke.StrokeWidth = 2f;
                 canvas.DrawRoundRect(groupRect, 6f, 6f, _stroke);
                 _stroke.StrokeWidth = 1.4f;
+
+                // A Grid's own cells matter more than its overall bounds here — the light rect above
+                // only says "you're about to nest into this Grid," not which row/column. A stronger
+                // fill on the exact target cell answers that, the same way a real WPF designer marks
+                // the destination cell while dragging a control over a Grid. Gated on _previewEntry
+                // (a toolbox drag specifically): _previewGridPlacement is only kept live by
+                // PreviewDrop, so during an existing-control reparent drag (which only calls
+                // SetHoverNestingTarget, not PreviewDrop) it could be stale from an earlier toolbox
+                // drag — and DropAt is the only place that actually honors it, so showing it here
+                // would promise a placement a plain reparent drag doesn't deliver.
+                if (_s._previewEntry != null && hoveredGroup is Grid hoveredGrid && _s._previewGridPlacement is { } cellPlacement)
+                {
+                    var gridBounds = ToOverlay(hoveredGrid);
+                    var cellLocal = hoveredGrid.GetCellRect(cellPlacement.Row, cellPlacement.Column);
+                    var cellRect = SKRect.Create(gridBounds.Left + cellLocal.Left, gridBounds.Top + cellLocal.Top, cellLocal.Width, cellLocal.Height);
+
+                    _fill.Color = ColorScheme.Primary.WithAlpha(70);
+                    canvas.DrawRect(cellRect, _fill);
+                    _stroke.Color = ColorScheme.Primary;
+                    _stroke.StrokeWidth = 2f;
+                    canvas.DrawRect(cellRect, _stroke);
+                    _stroke.StrokeWidth = 1.4f;
+                }
             }
 
             // Locked-control affordance: a subtle dashed outline + lock glyph even when unselected, so
@@ -1190,6 +1321,7 @@ public sealed class DesignSurface : Element
 
                 SKRect labelAnchor;
                 string label;
+                var chipAnchorRight = false;
 
                 if (items.Count == 1 && !_s.Locked.Contains(items[0]))
                 {
@@ -1202,6 +1334,17 @@ public sealed class DesignSurface : Element
                     }
                     labelAnchor = bounds;
                     label = items[0].Name;
+
+                    if (items[0] is Grid selectedGridForStrips)
+                    {
+                        DrawGridStrips(canvas, selectedGridForStrips, bounds);
+                        // The column strip (and its "+" tile) runs along the top edge from Left to
+                        // Right, and the row strip runs along the left edge — the chip's usual top-left
+                        // anchor sits right on top of both. Anchoring it past the Grid's right edge
+                        // instead keeps it at the same height without competing with either strip for
+                        // space, regardless of how many rows/columns the Grid has.
+                        chipAnchorRight = true;
+                    }
 
                     // Live X/Y (while moving) or W×H (while resizing) readout — with guides on, the
                     // whole point of dragging precisely is knowing exactly where you've landed, and
@@ -1233,7 +1376,8 @@ public sealed class DesignSurface : Element
                 // chip stays legible regardless of what's underneath it, the same way the toolbox
                 // drop-ghost's chip already does below.
                 var textWidth = _labelFont.MeasureText(label);
-                var chip = SKRect.Create(labelAnchor.Left, labelAnchor.Top - 22f, textWidth + 14f, 18f);
+                var chipLeft = chipAnchorRight ? labelAnchor.Right + 8f : labelAnchor.Left;
+                var chip = SKRect.Create(chipLeft, labelAnchor.Top - 22f, textWidth + 14f, 18f);
                 _fill.Color = ColorScheme.Primary;
                 canvas.DrawRoundRect(chip, 4f, 4f, _fill);
                 _fill.Color = SKColors.White;
@@ -1288,6 +1432,9 @@ public sealed class DesignSurface : Element
 
             if (e.Button == MouseButtons.Right)
             {
+                if (TryShowGridStripContextMenu(e.Location))
+                    return;
+
                 var hitR = HitControl(e.Location);
                 if (hitR != null && !_s.Selection.Contains(hitR))
                     _s.Selection.SelectOnly(hitR);
@@ -1296,6 +1443,9 @@ public sealed class DesignSurface : Element
             }
 
             if (e.Button != MouseButtons.Left)
+                return;
+
+            if (TryBeginGridStripInteraction(e.Location))
                 return;
 
             var ctrl = (ModifierKeys & Keys.Control) == Keys.Control;
@@ -1323,6 +1473,27 @@ public sealed class DesignSurface : Element
             }
 
             var hit = HitControl(e.Location);
+
+            // Designed controls receive no input of their own in design mode (this overlay owns
+            // every mouse event instead), so a TabView's own tab strip — normally how you'd switch
+            // pages, since each page is only rendered while selected — never gets a chance to react.
+            // Special-cased here rather than opening input up generally: this is a narrow, safe
+            // exception (a view-only toggle, not a document edit, so it doesn't need undo) for a
+            // control whose designed content is otherwise unreachable one page at a time.
+            if (hit is TabView tabView)
+            {
+                var tabBounds = ToOverlay(tabView);
+                var localPoint = new SKPoint(e.Location.X - tabBounds.Left, e.Location.Y - tabBounds.Top);
+                var tabIndex = tabView.HitTestTabHeader(localPoint);
+                if (tabIndex >= 0)
+                {
+                    tabView.SelectedIndex = tabIndex;
+                    _s.Selection.SelectOnly(tabView);
+                    Invalidate();
+                    return;
+                }
+            }
+
             if (hit == null)
             {
                 if (!ctrl)
@@ -1438,6 +1609,12 @@ public sealed class DesignSurface : Element
         {
             base.OnMouseMove(e);
 
+            if (_gridDragTarget != null)
+            {
+                ApplyGridDividerDrag(e.Location);
+                return;
+            }
+
             switch (_mode)
             {
                 case Grip.PanView:
@@ -1460,6 +1637,12 @@ public sealed class DesignSurface : Element
         public override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+
+            if (_gridDragTarget != null)
+            {
+                EndGridDividerDrag();
+                return;
+            }
 
             switch (_mode)
             {
@@ -1546,7 +1729,7 @@ public sealed class DesignSurface : Element
             if (e.Handled)
                 return;
 
-            var step = e.Shift ? GridStep : 1f;
+            var step = e.Shift ? _s.GridStep : 1f;
             switch (e.KeyCode)
             {
                 case Keys.Delete:
@@ -1586,7 +1769,57 @@ public sealed class DesignSurface : Element
             _dragBefore = _s.Selection.Items
                 .Where(c => !_s.Locked.Contains(c))
                 .ToDictionary(c => c, c => SKRect.Create(c.Location, c.Size));
+            _ctrlDragDuplicated = false;
             Capture();
+        }
+
+        /// <summary>Ctrl held down while a <see cref="Grip.Body"/> drag is actually moving (checked on
+        /// the first move past the drag threshold, not at mouse-down — mouse-down's Ctrl already means
+        /// "toggle this into the selection" there) clones the selection in place, at its original
+        /// spot, and retargets the in-progress drag onto the clones instead — the same "Ctrl+drag to
+        /// copy" gesture PowerPoint, Figma and the WinForms designer all share. The clone creation is
+        /// its own undo step (mirroring <see cref="DesignSurface.DuplicateSelection"/>); the drag that
+        /// follows commits as a second, ordinary "Move" step at mouse-up like any other drag.</summary>
+        private void DuplicateForDrag()
+        {
+            if (_dragBefore == null || _dragBefore.Count == 0)
+                return;
+
+            var toClone = _dragBefore.Select(kv => (Original: kv.Key, Before: kv.Value)).ToList();
+            var clones = new List<(ElementBase Clone, ElementBase Parent, SKRect Before)>();
+            foreach (var (original, before) in toClone)
+            {
+                var clone = _s.CloneControl(original);
+                if (clone == null)
+                    continue;
+
+                var parent = original.Parent as ElementBase ?? _s.DesignRoot;
+                clones.Add((clone, parent, before));
+            }
+
+            if (clones.Count == 0)
+                return;
+
+            _s.Commands.Execute(new DelegateCommand(
+                clones.Count == 1 ? $"Duplicate {clones[0].Clone.Name}" : $"Duplicate {clones.Count} control(s)",
+                () =>
+                {
+                    foreach (var (clone, parent, _) in clones)
+                        parent.Controls.Add(clone);
+                    _s.Selection.SetMany(clones.Select(c => c.Clone));
+                    _s.AfterStructureChange();
+                },
+                () =>
+                {
+                    foreach (var (clone, parent, _) in clones)
+                    {
+                        _s.Selection.Remove(clone);
+                        parent.Controls.Remove(clone);
+                    }
+                    _s.AfterStructureChange();
+                }));
+
+            _dragBefore = clones.ToDictionary(c => c.Clone, c => c.Before);
         }
 
         private void BeginRootResizeDrag(Grip grip, SKPoint mouse)
@@ -1627,6 +1860,12 @@ public sealed class DesignSurface : Element
 
             if (_mode == Grip.Body)
             {
+                if (!_ctrlDragDuplicated && (ModifierKeys & Keys.Control) == Keys.Control)
+                {
+                    _ctrlDragDuplicated = true;
+                    DuplicateForDrag();
+                }
+
                 // Snap using the primary item's would-be bounds; the same delta applies to all.
                 var primary = _s.Selection.Primary!;
                 var pb = _dragBefore[primary];
@@ -1763,6 +2002,39 @@ public sealed class DesignSurface : Element
                 {
                     menu.AddItem(new MenuItem("Bring to front", (_, _) => _s.BringToFront(single)));
                     menu.AddItem(new MenuItem("Send to back", (_, _) => _s.SendToBack(single)));
+
+                    // Only meaningful for a nested control — a top-level one's Parent is the design
+                    // root itself ("the form"), which isn't a selectable designed control.
+                    if (single.Parent is ElementBase parent && !ReferenceEquals(parent, Root))
+                        menu.AddItem(new MenuItem("Select parent", (_, _) => _s.Selection.SelectOnly(parent)));
+                }
+                // TabView pages are just Container children (see TabView.IsTabViewPage) added/removed
+                // through the ordinary Controls collection — there's no separate "TabPage" type or
+                // collection to expose in the property grid. What's actually missing at design time is
+                // a way to add one at all: designed controls receive no input in design mode, so the
+                // TabView's own tab strip (normally how you'd switch pages, let alone add one) never
+                // fires here. Reuses AddControl's existing group-nesting + undo path exactly like a
+                // toolbox drop would, just targeting this TabView as the parent.
+                if (single is TabView tabView)
+                {
+                    menu.AddItem(new MenuItem("Add tab page", (_, _) =>
+                    {
+                        // A TabView added before this control-catalog default existed (or one whose
+                        // mode was changed back) is still in TabMode.TitleBar — meant for a window's
+                        // own shell, not a plain child control — where ShouldDrawTabStrip is
+                        // permanently false, so the new page would have no visible/clickable tab strip
+                        // to switch to it with at all. Not part of the undo entry below: like the
+                        // catalog default it mirrors, this is a "make the control usable" fix-up, not
+                        // a creative choice being overridden.
+                        if (tabView.TabMode != TabViewMode.Embedded)
+                            tabView.TabMode = TabViewMode.Embedded;
+
+                        if (ControlCatalog.Discover().FirstOrDefault(e => e.DisplayName == nameof(Container)) is { } containerEntry)
+                        {
+                            var page = _s.AddControl(containerEntry, null, tabView);
+                            tabView.SelectedTab = page;
+                        }
+                    }));
                 }
                 // Operates over the whole selection (not just a single item) like Duplicate/Delete/
                 // Group above — "Unlock" only when every selected item is already locked, otherwise
@@ -1835,6 +2107,16 @@ public sealed class DesignSurface : Element
                 return;
             }
 
+            if (_s.Selection.Items.Count == 1 && _s.Selection.Items[0] is Grid hoverGrid)
+            {
+                var divider = HitGridDivider(hoverGrid, ToOverlay(hoverGrid), p);
+                if (divider is { } d)
+                {
+                    Cursor = d.IsRow ? Cursors.SizeNS : Cursors.SizeWE;
+                    return;
+                }
+            }
+
             if (_s.Selection.Items.Count == 1)
             {
                 cursor = HitGrip(ToOverlay(_s.Selection.Items[0]), p) switch
@@ -1856,6 +2138,315 @@ public sealed class DesignSurface : Element
 
         private static SKRect RectFromPoints(SKPoint a, SKPoint b) =>
             new(MathF.Min(a.X, b.X), MathF.Min(a.Y, b.Y), MathF.Max(a.X, b.X), MathF.Max(a.Y, b.Y));
+
+        // ── Grid row/column live editing ──
+        //
+        // A WPF-designer-style pair of strips along the selected Grid's own top (columns) and left
+        // (rows) edges: one segment per RowDefinition/ColumnDefinition, sized from the same
+        // ActualHeight/ActualWidth the Grid just measured itself during layout — so what's drawn here
+        // always matches what the Grid actually did, Auto/Star tracks included, with nothing
+        // recomputed independently. A "+" tile past the last segment adds a new track; dragging the
+        // line between two segments resizes the one before it (converting it to Pixel, same as
+        // grabbing a real WPF GridSplitter); right-clicking a segment offers insert/remove.
+
+        private readonly record struct GridDividerHit(bool IsRow, int Index);
+
+        private static IReadOnlyList<(int Index, SKRect Rect, GridLength Length)> ComputeGridRowSegments(Grid grid, SKRect gridBounds)
+        {
+            var segments = new List<(int, SKRect, GridLength)>();
+            var x0 = gridBounds.Left - GridStripThickness - GridStripGap;
+            var y = gridBounds.Top;
+            for (var i = 0; i < grid.RowDefinitions.Count; i++)
+            {
+                var def = grid.RowDefinitions[i];
+                var h = Math.Max(1f, def.ActualHeight);
+                segments.Add((i, SKRect.Create(x0, y, GridStripThickness, h), def.Height));
+                y += h + grid.RowGap;
+            }
+            return segments;
+        }
+
+        private static IReadOnlyList<(int Index, SKRect Rect, GridLength Length)> ComputeGridColumnSegments(Grid grid, SKRect gridBounds)
+        {
+            var segments = new List<(int, SKRect, GridLength)>();
+            var y0 = gridBounds.Top - GridStripThickness - GridStripGap;
+            var x = gridBounds.Left;
+            for (var i = 0; i < grid.ColumnDefinitions.Count; i++)
+            {
+                var def = grid.ColumnDefinitions[i];
+                var w = Math.Max(1f, def.ActualWidth);
+                segments.Add((i, SKRect.Create(x, y0, w, GridStripThickness), def.Width));
+                x += w + grid.ColumnGap;
+            }
+            return segments;
+        }
+
+        private static SKRect GridRowAddButtonRect(Grid grid, SKRect gridBounds)
+        {
+            var x0 = gridBounds.Left - GridStripThickness - GridStripGap;
+            var y = gridBounds.Top;
+            foreach (var (_, rect, _) in ComputeGridRowSegments(grid, gridBounds))
+                y = rect.Bottom + grid.RowGap;
+            return SKRect.Create(x0, y, GridStripThickness, GridStripThickness);
+        }
+
+        private static SKRect GridColumnAddButtonRect(Grid grid, SKRect gridBounds)
+        {
+            var y0 = gridBounds.Top - GridStripThickness - GridStripGap;
+            var x = gridBounds.Left;
+            foreach (var (_, rect, _) in ComputeGridColumnSegments(grid, gridBounds))
+                x = rect.Right + grid.ColumnGap;
+            return SKRect.Create(x, y0, GridStripThickness, GridStripThickness);
+        }
+
+        private void DrawGridStrips(SKCanvas canvas, Grid grid, SKRect gridBounds)
+        {
+            var rowSegments = ComputeGridRowSegments(grid, gridBounds);
+            var columnSegments = ComputeGridColumnSegments(grid, gridBounds);
+
+            void DrawSegment(SKRect rect, GridLength length)
+            {
+                _fill.Color = ColorScheme.SurfaceContainerHigh;
+                canvas.DrawRect(rect, _fill);
+                _stroke.Color = ColorScheme.Outline.WithAlpha(160);
+                canvas.DrawRect(rect, _stroke);
+
+                var text = length.ToString();
+                var textWidth = _labelFont.MeasureText(text);
+                if (textWidth <= rect.Width - 2f)
+                {
+                    _fill.Color = ColorScheme.ForeColor.WithAlpha(200);
+                    TextRenderer.DrawText(canvas, text, rect.MidX - textWidth / 2f, rect.MidY + _labelFont.Size * 0.35f, _labelFont, _fill);
+                }
+            }
+
+            foreach (var (_, rect, length) in rowSegments)
+                DrawSegment(rect, length);
+            foreach (var (_, rect, length) in columnSegments)
+                DrawSegment(rect, length);
+
+            void DrawAddButton(SKRect rect)
+            {
+                _fill.Color = ColorScheme.Primary.WithAlpha(30);
+                canvas.DrawRect(rect, _fill);
+                _stroke.Color = ColorScheme.Primary;
+                canvas.DrawRect(rect, _stroke);
+                canvas.DrawLine(rect.Left + 4f, rect.MidY, rect.Right - 4f, rect.MidY, _stroke);
+                canvas.DrawLine(rect.MidX, rect.Top + 4f, rect.MidX, rect.Bottom - 4f, _stroke);
+            }
+
+            DrawAddButton(GridRowAddButtonRect(grid, gridBounds));
+            DrawAddButton(GridColumnAddButtonRect(grid, gridBounds));
+        }
+
+        /// <summary>The interior divider (between segment i and i+1) under <paramref name="p"/>, in
+        /// either strip — the boundary itself plus a small tolerance band, matching a WPF
+        /// GridSplitter's own forgiving hit area rather than requiring a pixel-perfect click.</summary>
+        private static GridDividerHit? HitGridDivider(Grid grid, SKRect gridBounds, SKPoint p)
+        {
+            var rows = ComputeGridRowSegments(grid, gridBounds);
+            for (var i = 0; i < rows.Count - 1; i++)
+            {
+                if (p.X < rows[i].Rect.Left || p.X > rows[i].Rect.Right)
+                    continue;
+                var boundary = (rows[i].Rect.Bottom + rows[i + 1].Rect.Top) / 2f;
+                if (Math.Abs(p.Y - boundary) <= GridDividerTolerance)
+                    return new GridDividerHit(true, i);
+            }
+
+            var columns = ComputeGridColumnSegments(grid, gridBounds);
+            for (var i = 0; i < columns.Count - 1; i++)
+            {
+                if (p.Y < columns[i].Rect.Top || p.Y > columns[i].Rect.Bottom)
+                    continue;
+                var boundary = (columns[i].Rect.Right + columns[i + 1].Rect.Left) / 2f;
+                if (Math.Abs(p.X - boundary) <= GridDividerTolerance)
+                    return new GridDividerHit(false, i);
+            }
+
+            return null;
+        }
+
+        private static int HitGridRowSegment(Grid grid, SKRect gridBounds, SKPoint p)
+        {
+            foreach (var (index, rect, _) in ComputeGridRowSegments(grid, gridBounds))
+                if (rect.Contains(p))
+                    return index;
+            return -1;
+        }
+
+        private static int HitGridColumnSegment(Grid grid, SKRect gridBounds, SKPoint p)
+        {
+            foreach (var (index, rect, _) in ComputeGridColumnSegments(grid, gridBounds))
+                if (rect.Contains(p))
+                    return index;
+            return -1;
+        }
+
+        /// <summary>Mouse-down handling for the Grid strips: add-button clicks apply immediately
+        /// (undoable, one command); a divider click begins a live-resize drag instead, committed as a
+        /// single undo entry on mouse-up by <see cref="EndGridDividerDrag"/> — mirrors how an ordinary
+        /// bounds drag is applied live and only recorded once released.</summary>
+        private bool TryBeginGridStripInteraction(SKPoint mouse)
+        {
+            if (_s.Selection.Items.Count != 1 || _s.Selection.Items[0] is not Grid grid)
+                return false;
+
+            var bounds = ToOverlay(grid);
+
+            if (GridRowAddButtonRect(grid, bounds).Contains(mouse))
+            {
+                var def = new RowDefinition();
+                _s.Commands.Execute(new DelegateCommand(
+                    "Add row",
+                    () => grid.RowDefinitions.Add(def),
+                    () => grid.RowDefinitions.Remove(def)));
+                Invalidate();
+                return true;
+            }
+
+            if (GridColumnAddButtonRect(grid, bounds).Contains(mouse))
+            {
+                var def = new ColumnDefinition();
+                _s.Commands.Execute(new DelegateCommand(
+                    "Add column",
+                    () => grid.ColumnDefinitions.Add(def),
+                    () => grid.ColumnDefinitions.Remove(def)));
+                Invalidate();
+                return true;
+            }
+
+            if (HitGridDivider(grid, bounds, mouse) is { } divider)
+            {
+                _gridDragTarget = grid;
+                _gridDragIsRow = divider.IsRow;
+                _gridDragIndex = divider.Index;
+                _gridDragOldLength = divider.IsRow ? grid.RowDefinitions[divider.Index].Height : grid.ColumnDefinitions[divider.Index].Width;
+                _gridDragStartSize = divider.IsRow ? grid.RowDefinitions[divider.Index].ActualHeight : grid.ColumnDefinitions[divider.Index].ActualWidth;
+                _gridDragStartMouse = divider.IsRow ? mouse.Y : mouse.X;
+                Capture();
+                return true;
+            }
+
+            return false;
+        }
+
+        private void ApplyGridDividerDrag(SKPoint mouse)
+        {
+            if (_gridDragTarget is not { } grid)
+                return;
+
+            var delta = (_gridDragIsRow ? mouse.Y : mouse.X) - _gridDragStartMouse;
+            var newSize = Math.Max(1f, _gridDragStartSize + delta);
+            var newLength = new GridLength(newSize, GridUnitType.Pixel);
+
+            if (_gridDragIsRow)
+                grid.RowDefinitions[_gridDragIndex].Height = newLength;
+            else
+                grid.ColumnDefinitions[_gridDragIndex].Width = newLength;
+
+            Invalidate();
+        }
+
+        private void EndGridDividerDrag()
+        {
+            if (_gridDragTarget is not { } grid)
+                return;
+
+            var index = _gridDragIndex;
+            var isRow = _gridDragIsRow;
+            var oldLength = _gridDragOldLength;
+            var newLength = isRow ? grid.RowDefinitions[index].Height : grid.ColumnDefinitions[index].Width;
+
+            if (newLength != oldLength)
+            {
+                _s.Commands.Push(new DelegateCommand(
+                    isRow ? $"Resize row {index}" : $"Resize column {index}",
+                    () => { if (isRow) grid.RowDefinitions[index].Height = newLength; else grid.ColumnDefinitions[index].Width = newLength; },
+                    () => { if (isRow) grid.RowDefinitions[index].Height = oldLength; else grid.ColumnDefinitions[index].Width = oldLength; }));
+            }
+
+            _gridDragTarget = null;
+            Release();
+            Invalidate();
+        }
+
+        /// <summary>Right-click on a Grid's row/column strip segment — insert/remove, the one thing a
+        /// drag or the append-only "+" button can't do. Returns false (defers to the ordinary
+        /// selection context menu) when the click isn't over a segment at all.</summary>
+        private bool TryShowGridStripContextMenu(SKPoint at)
+        {
+            if (_s.Selection.Items.Count != 1 || _s.Selection.Items[0] is not Grid grid)
+                return false;
+
+            var bounds = ToOverlay(grid);
+            var rowIndex = HitGridRowSegment(grid, bounds, at);
+            var columnIndex = rowIndex < 0 ? HitGridColumnSegment(grid, bounds, at) : -1;
+            if (rowIndex < 0 && columnIndex < 0)
+                return false;
+
+            var menu = new ContextMenuStrip();
+            if (rowIndex >= 0)
+            {
+                menu.AddItem(new MenuItem("Insert row above", (_, _) => InsertRowDefinition(grid, rowIndex)));
+                menu.AddItem(new MenuItem("Insert row below", (_, _) => InsertRowDefinition(grid, rowIndex + 1)));
+                menu.AddItem(new MenuItem("Remove row", (_, _) => RemoveRowDefinition(grid, rowIndex)));
+            }
+            else
+            {
+                menu.AddItem(new MenuItem("Insert column before", (_, _) => InsertColumnDefinition(grid, columnIndex)));
+                menu.AddItem(new MenuItem("Insert column after", (_, _) => InsertColumnDefinition(grid, columnIndex + 1)));
+                menu.AddItem(new MenuItem("Remove column", (_, _) => RemoveColumnDefinition(grid, columnIndex)));
+            }
+
+            menu.Closed += (_, _) => menu.Dispose();
+            menu.Show(this, PointToScreen(at));
+            return true;
+        }
+
+        private void InsertRowDefinition(Grid grid, int index)
+        {
+            var def = new RowDefinition();
+            _s.Commands.Execute(new DelegateCommand(
+                "Insert row",
+                () => grid.RowDefinitions.Insert(index, def),
+                () => grid.RowDefinitions.Remove(def)));
+            Invalidate();
+        }
+
+        private void InsertColumnDefinition(Grid grid, int index)
+        {
+            var def = new ColumnDefinition();
+            _s.Commands.Execute(new DelegateCommand(
+                "Insert column",
+                () => grid.ColumnDefinitions.Insert(index, def),
+                () => grid.ColumnDefinitions.Remove(def)));
+            Invalidate();
+        }
+
+        private void RemoveRowDefinition(Grid grid, int index)
+        {
+            if (index >= grid.RowDefinitions.Count)
+                return;
+            var def = grid.RowDefinitions[index];
+            _s.Commands.Execute(new DelegateCommand(
+                "Remove row",
+                () => grid.RowDefinitions.Remove(def),
+                () => grid.RowDefinitions.Insert(index, def)));
+            Invalidate();
+        }
+
+        private void RemoveColumnDefinition(Grid grid, int index)
+        {
+            if (index >= grid.ColumnDefinitions.Count)
+                return;
+            var def = grid.ColumnDefinitions[index];
+            _s.Commands.Execute(new DelegateCommand(
+                "Remove column",
+                () => grid.ColumnDefinitions.Remove(def),
+                () => grid.ColumnDefinitions.Insert(index, def)));
+            Invalidate();
+        }
 
         private static IEnumerable<(Grip Grip, SKRect Rect)> EnumerateGrips(SKRect b)
         {

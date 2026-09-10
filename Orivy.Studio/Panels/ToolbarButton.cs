@@ -45,11 +45,20 @@ public sealed class ToolbarButton : Button
         Text = string.Empty;
         SetToolTip(tooltip);
 
-        // Wipe Button's bold filled default and replace with a flat icon-toolbar skin.
-        ConfigureVisualStyles(styles => styles
+        ApplyFlatSkin(this);
+    }
+
+    /// <summary>Wipes <see cref="Button"/>'s bold filled default and applies this toolbar's flat,
+    /// transparent-until-hovered skin — shared with any plain <see cref="Button"/> that needs to sit
+    /// in the toolbar looking like it belongs there (e.g. a text-labeled action next to the icon-only
+    /// ones) without being a full icon glyph itself.</summary>
+    public static void ApplyFlatSkin(Button button)
+    {
+        button.ConfigureVisualStyles(styles => styles
             .DefaultTransition(TimeSpan.FromMilliseconds(110), AnimationType.CubicEaseOut)
             .Base(b => b
                 .Background(SKColors.Transparent)
+                .Foreground(ColorScheme.ForeColor.WithAlpha(215))
                 .Border(0)
                 .Radius(7)
                 .Shadow(BoxShadow.None))

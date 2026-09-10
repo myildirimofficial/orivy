@@ -817,6 +817,51 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         Parent.InvalidateRenderTree();
     }
 
+    /// <summary>
+    /// Reassigns ZOrder across <paramref name="childrenTopmostFirst"/> so each ends up exactly in
+    /// that order (index 0 rendered on top of the rest) — the general primitive behind "drag a child
+    /// to a new position among its siblings," the same way <see cref="BringToFront(ElementBase)"/>
+    /// and <see cref="SendToBack(ElementBase)"/> are the primitives behind those two specific moves.
+    /// Every entry must already share the same <see cref="Parent"/> — this only ever touches ZOrder,
+    /// never which container a child belongs to (see <see cref="Controls"/> for reparenting).
+    /// A no-op, raising nothing, if the requested order already matches today's.
+    /// </summary>
+    /// <param name="childrenTopmostFirst">The desired order, topmost first. Needs at least 2 entries
+    /// — reordering a single child relative to itself is meaningless.</param>
+    /// <param name="moved">The child whose position actually changed, if the caller knows it (e.g. the
+    /// one just dragged) — reported on <see cref="ChildrenReordered"/> so a listener doesn't have to
+    /// diff the whole list itself. Defaults to <paramref name="childrenTopmostFirst"/>'s first entry.</param>
+    public static void ReorderZ(IReadOnlyList<ElementBase> childrenTopmostFirst, ElementBase? moved = null)
+    {
+        if (childrenTopmostFirst == null || childrenTopmostFirst.Count < 2)
+            return;
+
+        var parent = childrenTopmostFirst[0].Parent;
+        if (parent == null)
+            return;
+
+        var alreadyInOrder = true;
+        for (var i = 1; i < childrenTopmostFirst.Count; i++)
+        {
+            if (childrenTopmostFirst[i].ZOrder > childrenTopmostFirst[i - 1].ZOrder)
+            {
+                alreadyInOrder = false;
+                break;
+            }
+        }
+
+        if (alreadyInOrder)
+            return;
+
+        for (var i = 0; i < childrenTopmostFirst.Count; i++)
+            childrenTopmostFirst[i].ZOrder = childrenTopmostFirst.Count - 1 - i;
+
+        parent.InvalidateRenderTree();
+        parent.OnChildrenReordered(new ElementEventArgs(moved ?? childrenTopmostFirst[0]));
+    }
+
+    public virtual void OnChildrenReordered(ElementEventArgs e) => ChildrenReordered?.Invoke(this, e);
+
     #region Properties
 
     private SKPoint _location;
@@ -1831,6 +1876,11 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     public event UIElementEventHandler? ControlAdded;
     public event UIElementEventHandler? ControlRemoved;
+
+    /// <summary>Raised on a parent after <see cref="ReorderZ"/> actually changes its children's
+    /// relative stacking order — the event's <see cref="ElementEventArgs.Element"/> is the child that
+    /// moved (or the one named via <c>moved</c>, for a caller applying a whole new order at once).</summary>
+    public event UIElementEventHandler? ChildrenReordered;
 
     public event MouseEventHandler? MouseWheel;
 

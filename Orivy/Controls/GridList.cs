@@ -45,6 +45,12 @@ public class GridList : ElementBase
     private bool _checkBoxes;
     private bool _allowRowResize;
     private bool _resizeAllRows;
+    private bool _allowRowReorder;
+    private int _reorderSourceIndex = -1;
+    private SKPoint _reorderPressPoint;
+    private bool _isReorderingRow;
+    private int _reorderDropIndex = -1;
+    private readonly SKPaint _reorderDropIndicatorPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2f };
     private bool _showGridLines = true;
     private bool _autoSortOnHeaderClick = true;
     private float _headerHeight;
@@ -199,6 +205,20 @@ public class GridList : ElementBase
         set => SetVisualProperty(ref _allowRowResize, value);
     }
 
+    /// <summary>When true, pressing and dragging a row past a small movement threshold reorders it
+    /// among its siblings instead of (or rather, in addition to — the normal click-selection at
+    /// mouse-down still happens) just selecting it; releasing over a different row raises
+    /// <see cref="ItemReordered"/> with the old/new indices so the owner can apply whatever
+    /// "reorder" means for its own data. GridList only ever reassigns <see cref="Items"/>'s own
+    /// order here — a caller backing rows by something else (e.g. the Layers panel, backed by
+    /// designed controls' ZOrder) applies the equivalent change to that in the event handler.</summary>
+    [DefaultValue(false)]
+    public bool AllowRowReorder
+    {
+        get => _allowRowReorder;
+        set => SetVisualProperty(ref _allowRowReorder, value);
+    }
+
     [DefaultValue(false)]
     public bool ResizeAllRows
     {
@@ -325,6 +345,11 @@ public class GridList : ElementBase
     public event EventHandler<GridListSelectionChangedEventArgs>? SelectionChanged;
     public event EventHandler<GridListColumnClickEventArgs>? ColumnClick;
     public event EventHandler<GridListCellEventArgs>? CellClick;
+
+    /// <summary>Raised after <see cref="AllowRowReorder"/> drag-and-drop actually moves a row to a
+    /// different index (never for a plain click, or a drop back on the row it started on) — the move
+    /// within <see cref="Items"/> has already happened by the time this fires.</summary>
+    public event EventHandler<GridListItemReorderedEventArgs>? ItemReordered;
 
     /// <summary>
     /// When true, rows/cells/headers are drawn by the owner via <see cref="DrawItem"/>,
@@ -529,6 +554,42 @@ public class GridList : ElementBase
             return;
         }
 
+        if (_isReorderingRow)
+        {
+            var dropIndex = GetItemIndexAt(e.Location);
+            if (dropIndex < 0 && Items.Count > 0)
+            {
+                // Past either end of the list still counts as "drop at the nearest end" instead of
+                // losing the drop target entirely the moment the cursor leaves the last/first row.
+                var bodyTop = GetBodyViewportRect(GetOuterViewport()).Top;
+                dropIndex = e.Location.Y < bodyTop ? 0 : Items.Count - 1;
+            }
+
+            if (dropIndex != _reorderDropIndex)
+            {
+                _reorderDropIndex = dropIndex;
+                Invalidate();
+            }
+
+            return;
+        }
+
+        if (_reorderSourceIndex >= 0)
+        {
+            var dx = e.Location.X - _reorderPressPoint.X;
+            var dy = e.Location.Y - _reorderPressPoint.Y;
+            const float dragThreshold = 4f;
+            if (dx * dx + dy * dy >= dragThreshold * dragThreshold)
+            {
+                _isReorderingRow = true;
+                _reorderDropIndex = _reorderSourceIndex;
+                GetParentWindow()?.SetMouseCapture(this);
+                Invalidate();
+                return;
+            }
+            // Still below the threshold — fall through to ordinary hover handling below.
+        }
+
         var hoverInfo = HitTestCore(e.Location);
         _hoveredHeader = hoverInfo.Kind == HitKind.Header || hoverInfo.Kind == HitKind.HeaderResize;
         _hoveredColumnIndex = hoverInfo.ColumnIndex;
@@ -626,7 +687,19 @@ public class GridList : ElementBase
                 break;
             case HitKind.ItemCell:
                 if (hit.ItemIndex >= 0)
+                {
                     HandleItemMouseDown(hit, e);
+                    if (AllowRowReorder)
+                    {
+                        // Armed, not yet dragging — OnMouseMove only promotes this to an actual
+                        // reorder once the cursor clears a small movement threshold, so an ordinary
+                        // click (the HandleItemMouseDown selection above) is never mistaken for one.
+                        _reorderSourceIndex = hit.ItemIndex;
+                        _reorderPressPoint = e.Location;
+                        _isReorderingRow = false;
+                        _reorderDropIndex = -1;
+                    }
+                }
                 break;
             case HitKind.Header:
                 if (AllowColumnSort && AutoSortOnHeaderClick && hit.ColumnIndex >= 0)
@@ -659,6 +732,32 @@ public class GridList : ElementBase
             GetParentWindow()?.ReleaseMouseCapture(this);
             return;
         }
+
+        if (_isReorderingRow)
+        {
+            _isReorderingRow = false;
+            var fromIndex = _reorderSourceIndex;
+            var toIndex = _reorderDropIndex;
+            _reorderSourceIndex = -1;
+            _reorderDropIndex = -1;
+            Cursor = Cursors.Default;
+            GetParentWindow()?.ReleaseMouseCapture(this);
+            Invalidate();
+
+            if (fromIndex >= 0 && toIndex >= 0 && toIndex != fromIndex)
+            {
+                Items.Move(fromIndex, toIndex);
+                ItemReordered?.Invoke(this, new GridListItemReorderedEventArgs(fromIndex, toIndex));
+            }
+
+            // A drag gesture already did its job above — skip the plain click-handling below (cell
+            // click, header sort) it would otherwise fall into, same as the resize branches do.
+            return;
+        }
+
+        // A press that got armed (see OnMouseDown) but never crossed the drag threshold was just an
+        // ordinary click — HandleItemMouseDown already handled its selection there.
+        _reorderSourceIndex = -1;
 
         // See OnMouseDown: base already dispatched to the hit child — don't dispatch twice.
         if (TryGetInputTarget(e, out var upTarget, out _) && upTarget != null)
@@ -841,6 +940,21 @@ public class GridList : ElementBase
             _headerDividerPaint.Color = GridLineColor.WithAlpha(180);
             canvas.DrawLine(stickyHeaderRect.Left, stickyHeaderRect.Bottom, stickyHeaderRect.Right, stickyHeaderRect.Bottom, _headerDividerPaint);
         }
+
+        if (_isReorderingRow && _reorderDropIndex >= 0)
+        {
+            for (var i = 0; i < _layoutEntries.Count; i++)
+            {
+                var entry = _layoutEntries[i];
+                if (entry.Kind != EntryKind.Item || entry.ItemIndex != _reorderDropIndex)
+                    continue;
+
+                var y = bodyViewport.Top + entry.Bounds.Top - roundedVerticalOffset;
+                _reorderDropIndicatorPaint.Color = ColorScheme.Primary;
+                canvas.DrawLine(bodyViewport.Left, y, bodyViewport.Right, y, _reorderDropIndicatorPaint);
+                break;
+            }
+        }
     }
 
     protected override void Dispose(bool disposing)
@@ -864,6 +978,7 @@ public class GridList : ElementBase
             _headerDividerPaint.Dispose();
             _columnResizeGripPaint.Dispose();
             _rowResizePaint.Dispose();
+            _reorderDropIndicatorPaint.Dispose();
         }
 
         base.Dispose(disposing);
@@ -2065,6 +2180,18 @@ public class GridList : ElementBase
     {
         var client = PointToClient(new SKPoint(screenPoint.X, screenPoint.Y));
         return new System.Drawing.Point((int)MathF.Round(client.X), (int)MathF.Round(client.Y));
+    }
+
+    /// <summary>Row index at <paramref name="clientPoint"/> (this control's own local coordinates),
+    /// or -1 if it isn't over a data row — the header, a resize grip, a group header, or empty space
+    /// below the last row. Exposes the same row hit-testing normal click-to-select uses internally,
+    /// for a caller that needs "which row is here" independent of a real mouse event — e.g. a
+    /// drag-to-reorder subclass tracking the row under the cursor while dragging, which is not
+    /// necessarily the row a preceding mouse-down actually selected.</summary>
+    public int GetItemIndexAt(SKPoint clientPoint)
+    {
+        var hit = HitTestCore(clientPoint);
+        return hit.Kind == HitKind.ItemCell ? hit.ItemIndex : -1;
     }
 
     private HitInfo HitTestCore(SKPoint location)

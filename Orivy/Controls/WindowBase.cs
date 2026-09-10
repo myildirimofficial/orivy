@@ -755,6 +755,15 @@ private IntPtr _hWnd;
             return true;
         }
 
+        // Only a modal dialog (ShowDialog()) gets an implicit "Escape cancels" close with no
+        // CancelButton set — matching a plain WinForms dialog. A normal top-level window (the main
+        // application window, shown via Show()/Application.Run) has no such convention: unconditionally
+        // closing it here meant Escape silently closed (and, as the last open form, quit) the whole
+        // app the moment focus wasn't inside some overlay/dialog — not something Escape should ever
+        // do outside an actual dialog.
+        if (!_isModal)
+            return false;
+
         Close(DialogResult.Cancel);
         return true;
     }

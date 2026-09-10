@@ -763,13 +763,36 @@ public class PropertyGrid : GridList
             return;
         }
 
+        // A struct-valued property (Shadow, Thickness, Radius, ...) hands back a *boxed copy* as
+        // `value` — reflection's SetValue does mutate that one shared box in place (a quirk of boxed
+        // value types the CLR actually allows), but the box itself is never the same storage as
+        // whatever field/property produced it. Writing only into the box, as the plain
+        // `pd.SetValue(component, v)` a child node gets by default would, updates a copy nobody reads
+        // back from — the edit visibly "does nothing" the moment the grid re-queries the real
+        // property. Every level of struct nesting needs the same fix, so each child's setter also
+        // re-pushes the whole (now-mutated) box through this node's own setter after writing into it.
+        var isValueTypeBox = value.GetType().IsValueType;
+
         try
         {
             foreach (var pd in (props ?? new PropertyDescriptorCollection(Array.Empty<PropertyDescriptor>()))
                          .Cast<PropertyDescriptor>().Where(p => p.IsBrowsable && !IsNoiseProperty(p))
                          .OrderBy(p => p.DisplayName, StringComparer.CurrentCultureIgnoreCase))
             {
-                node.Children.Add(CreatePropertyNode(pd, value, node.Depth + 1));
+                var child = CreatePropertyNode(pd, value, node.Depth + 1);
+                if (isValueTypeBox && child.Setter != null && node.Setter != null)
+                {
+                    var mutateBox = child.Setter;
+                    var boxedParent = value;
+                    var pushToGrandparent = node.Setter;
+                    child.Setter = v =>
+                    {
+                        mutateBox(v);
+                        pushToGrandparent(boxedParent);
+                    };
+                }
+
+                node.Children.Add(child);
             }
         }
         catch
@@ -1720,7 +1743,25 @@ public class PropertyGrid : GridList
         if (type == typeof(object))
             return string.Empty;
 
-        try { return Activator.CreateInstance(type); }
+        // Activator.CreateInstance(Type) only recognizes a true arity-0 constructor — a perfectly
+        // constructible type whose only constructor takes optional parameters (e.g. TreeNode(string
+        // text = "")) throws MissingMethodException through that overload even though `new TreeNode()`
+        // compiles fine. Find any constructor whose parameters are all optional (arity 0 included)
+        // and invoke it with its own defaults instead of guessing arguments.
+        try
+        {
+            var ctor = type.GetConstructors()
+                .Where(c => c.GetParameters().All(p => p.IsOptional))
+                .OrderBy(c => c.GetParameters().Length)
+                .FirstOrDefault();
+            if (ctor == null)
+                return null;
+
+            var args = ctor.GetParameters()
+                .Select(p => p.HasDefaultValue ? p.DefaultValue : (p.ParameterType.IsValueType ? Activator.CreateInstance(p.ParameterType) : null))
+                .ToArray();
+            return ctor.Invoke(args);
+        }
         catch { return null; }
     }
 
