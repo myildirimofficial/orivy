@@ -77,7 +77,6 @@ public static class CodeGenerator
             (int)control.Width, (int)control.Height));
         sb.AppendLine($"            Dock = {FormatDock(control.Dock)},");
         sb.AppendLine($"            Anchor = {FormatAnchor(control.Anchor)},");
-        sb.AppendLine($"            ZOrder = {control.ZOrder.ToString(inv)},");
         if (!control.Visible)
             sb.AppendLine("            Visible = false,");
         sb.AppendLine("        };");

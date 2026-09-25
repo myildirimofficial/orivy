@@ -106,7 +106,10 @@ public sealed class DesignDocument : Container, IStudioDocument
             // itself is the authoritative current selection — always read that instead.
             _showingCode = _switcher.SelectedIndex == 1;
             if (_showingCode)
+            {
                 RefreshCode();
+                _codeView.Focus();
+            }
         };
 
         RefreshSwitcherIcons();
@@ -159,10 +162,20 @@ public sealed class DesignDocument : Container, IStudioDocument
         // A design has no proprietary save format of its own — it saves as the exact same Designer
         // C# code Export produces, so the file on disk is always a plain, valid, hand-editable .cs
         // file rather than a hidden project format only Orivy.Studio understands.
-        var code = CodeGenerator.Generate(Surface, DocumentName);
+        var code = GetPersistedSource();
         File.WriteAllText(FilePath, code);
         OriginalSourceText = code;
         MarkClean();
+    }
+
+    /// <summary>
+    /// The text Save and the Code tab should show. An opened file is patched in place; a document
+    /// that was never backed by source gets a fresh <see cref="CodeGenerator"/> stub.
+    /// </summary>
+    public string GetPersistedSource()
+    {
+        var className = string.IsNullOrWhiteSpace(DocumentName) ? "MyWindow" : DocumentName;
+        return CodeMerger.Apply(OriginalSourceText, Surface, className);
     }
 
     public void MarkClean()
@@ -202,8 +215,7 @@ public sealed class DesignDocument : Container, IStudioDocument
             return;
         }
 
-        var className = string.IsNullOrWhiteSpace(DocumentName) ? "MyWindow" : DocumentName;
-        _codeView.Text = CodeGenerator.Generate(Surface, className);
+        _codeView.Text = GetPersistedSource();
     }
 
     /// <summary>

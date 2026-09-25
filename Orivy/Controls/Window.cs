@@ -1222,10 +1222,21 @@ public partial class Window : WindowBase
 
     public override void  OnMouseDown(MouseEventArgs e)
     {
-        // Make sure this Form receives keyboard input.
+        // Make sure this Form receives keyboard input. Clicking outside the currently focused
+        // subtree must also clear child focus when the clicked element is not focusable (for
+        // example, clicking the canvas or a panel after editing a PropertyGrid search box).
         var hitElement = FindHitTestElement(e.Location, requireEnabled: true);
-        if (CanFocus && !IsFocusWithinHitElement(FocusedElement, hitElement))
-            Focus();
+        if (CanFocus)
+        {
+            var focusWithinHit = IsFocusWithinHitElement(FocusedElement, hitElement);
+            if (!focusWithinHit)
+            {
+                if (FocusedElement != null)
+                    FocusedElement = null;
+
+                Focus();
+            }
+        }
 
         if (TryRouteMouseEventToFloatingOverlay(e, static (popup, localEvent) => popup.OnMouseDown(localEvent)))
         {

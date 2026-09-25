@@ -189,6 +189,29 @@ public sealed class StudioWindow : Window
         _gridToolsGroup.Controls.Add(addGridColumnButton);
         _gridToolsGroup.Controls.Add(addGridRowButton);
 
+        var sortPropertiesButton = new Button
+        {
+            Text = "Kategori",
+            Dock = DockStyle.Right,
+            Width = 70,
+            Height = 24,
+            Margin = new Thickness(0, 2, 0, 2),
+            AutoSize = false,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            CheckOnClick = true,
+            OpenDropDownOnClick = false,
+            ToolTipText = "Alfabetik sırala",
+        };
+        ToolbarButton.ApplyFlatSkin(sortPropertiesButton);
+        sortPropertiesButton.CheckedChanged += (_, _) =>
+        {
+            var alphabetical = sortPropertiesButton.Checked;
+            sortPropertiesButton.Text = alphabetical ? "A–Z" : "Kategori";
+            sortPropertiesButton.SetToolTip(alphabetical ? "Kategorilere göre sırala" : "Alfabetik sırala");
+            _inspector.PropertySort = alphabetical ? PropertySort.Alphabetical : PropertySort.Categorized;
+        };
+        sortPropertiesButton.Checked = _inspector.PropertySort == PropertySort.Alphabetical;
+
         // Grid/snap spacing was a fixed 8px with no way to change it — a plain NumericUpDown next to
         // the toggles it controls, rather than a whole settings dialog for one number.
         var gridSizeField = new NumericUpDown
@@ -321,7 +344,7 @@ public sealed class StudioWindow : Window
         innerSplit.Panel1.Controls.Add(_documents);
 
         innerSplit.Panel2.Controls.Add(_inspector);
-        innerSplit.Panel2.Controls.Add(Header("sliders", "Properties"));
+        innerSplit.Panel2.Controls.Add(Header("sliders", "Properties", sortPropertiesButton));
         innerSplit.Panel2.Controls.Add(_layoutBar);
         innerSplit.Panel2.Controls.Add(Header("layout", "Layout"));
         innerSplit.Panel2.Controls.Add(_layers);
@@ -651,8 +674,81 @@ public sealed class StudioWindow : Window
         s.Commands.Changed -= OnCommandsChanged;
     }
 
-    private void OnSelectionChanged() { SetInspectorObject(_active.ActiveObject); RefreshSelectionDependentUi(); UpdateStatus(); }
-    private void OnStructureChanged() { SetInspectorObject(_active.ActiveObject); UpdateStatus(); }
+    private bool _inspectorRefreshPending;
+
+    private void OnSelectionChanged()
+    {
+        QueueInspectorRefresh();
+        RefreshSelectionDependentUi();
+        UpdateStatus();
+    }
+
+    private void OnStructureChanged()
+    {
+        QueueInspectorRefresh();
+        UpdateStatus();
+    }
+
+    /// <summary>
+    /// Rebuilds the property grid only after the mouse button is up. Doing it inside
+    /// <c>OnMouseDown</c> — or on the posted message that still runs before mouse-up — walks every
+    /// property getter while capture and focus are changing. The grid then keeps a drag or a
+    /// capture pointed at rows that were just destroyed, and the right-hand panel ignores clicks.
+    /// </summary>
+    private void QueueInspectorRefresh()
+    {
+        _inspectorRefreshPending = true;
+        BeginInvoke(TryFlushInspectorRefresh);
+    }
+
+    public override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+        TryFlushInspectorRefresh();
+    }
+
+    private void TryFlushInspectorRefresh()
+    {
+        if (!_inspectorRefreshPending || IsDisposed)
+            return;
+
+        // Still inside the click that changed the selection. OnMouseUp flushes once capture is gone.
+        if ((GetAsyncKeyState(1) & 0x8000) != 0)
+            return;
+
+        _inspectorRefreshPending = false;
+        ReleaseInspectorCapture();
+        SetInspectorObject(_active.ActiveObject);
+    }
+
+    /// <summary>
+    /// Drops capture held by the inspector or one of its editors. Rebuilding the grid while that
+    /// capture is live leaves later clicks routed to a row that no longer exists.
+    /// </summary>
+    private void ReleaseInspectorCapture()
+    {
+        var captured = _mouseCapturedElement;
+        if (captured == null || !IsInsideInspector(captured))
+            return;
+
+        ReleaseMouseCapture(captured);
+    }
+
+    private bool IsInsideInspector(ElementBase element)
+    {
+        var current = element;
+        while (current != null)
+        {
+            if (ReferenceEquals(current, _inspector))
+                return true;
+            current = current.Parent as ElementBase;
+        }
+
+        return false;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
 
     /// <summary>Resyncs every panel that mirrors the primary selection — the Layout helper bar plus
     /// the Grid row/column toolbar buttons, which only make sense (and are only shown) while a Grid
@@ -937,8 +1033,8 @@ public sealed class StudioWindow : Window
 
     private void ExportCode()
     {
-        var code = CodeGenerator.Generate(_active,
-            (_documents.SelectedTab as DesignDocument)?.DocumentName ?? "MyWindow");
+        var code = (_documents.SelectedTab as DesignDocument)?.GetPersistedSource()
+            ?? CodeGenerator.Generate(_active, "MyWindow");
 
         var preview = new Window
         {
@@ -1103,9 +1199,9 @@ public sealed class StudioWindow : Window
         return divider;
     }
 
-    /// <summary>Section header for a side panel: a small glyph + title, with an optional muted
-    /// subtitle underneath, separated from its content by a hairline.</summary>
-    private static Element Header(string icon, string title, string? subtitle = null)
+    /// <summary>Section header for a side panel: a small glyph + title, with an optional action
+    /// slot and an optional muted subtitle underneath, separated from its content by a hairline.</summary>
+    private static Element Header(string icon, string title, ElementBase? action = null, string? subtitle = null)
     {
         var host = new Element
         {
@@ -1138,6 +1234,8 @@ public sealed class StudioWindow : Window
         };
         Tint(titleLabel, foreground: () => ColorScheme.ForeColor.WithAlpha(230));
         titleRow.Controls.Add(titleLabel);
+        if (action != null)
+            titleRow.Controls.Add(action);
         titleRow.Controls.Add(new IconGlyph(icon));
         host.Controls.Add(titleRow);
 

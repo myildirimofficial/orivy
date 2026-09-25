@@ -9,7 +9,7 @@ using System.Linq;
 
 namespace Orivy.Controls;
 
-public class GridList : ElementBase
+public class GridList : ElementBase, IMouseCaptureLost
 {
     private const float DefaultHeaderHeight = 38f;
     private const float DefaultRowHeight = 36f;
@@ -706,6 +706,23 @@ public class GridList : ElementBase
                     ToggleSort(hit.ColumnIndex);
                 break;
         }
+    }
+
+    public virtual void OnMouseCaptureLost()
+    {
+        // Capture can move to the design overlay (or be stolen by the OS) without a mouse-up.
+        // Leaving a column resize or row reorder armed makes the grid ignore later clicks.
+        _isResizingColumn = false;
+        _resizingColumnIndex = -1;
+        _isResizingRow = false;
+        _resizingRowIndex = -1;
+        _isReorderingRow = false;
+        _reorderSourceIndex = -1;
+        _reorderDropIndex = -1;
+        _pressedColumnIndex = -1;
+        _pressedItemIndex = -1;
+        Cursor = Cursors.Default;
+        Invalidate();
     }
 
     public override void OnMouseUp(MouseEventArgs e)

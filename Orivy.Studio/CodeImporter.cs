@@ -35,9 +35,10 @@ public static class CodeImporter
         public float Y;
         public float W;
         public float H;
+        public bool HasLocation;
+        public bool HasSize;
         public DockStyle Dock;
         public AnchorStyles Anchor = AnchorStyles.Top | AnchorStyles.Left;
-        public int ZOrder;
         public bool Visible = true;
 
         // Anything not one of the structural properties above (Margin, Padding, Radius, Border,
@@ -99,7 +100,9 @@ public static class CodeImporter
             throw new InvalidOperationException("No InitializeComponent() method found in the pasted code.");
 
         var knownTypeNames = ControlCatalog.Discover().Select(e => e.DisplayName).ToHashSet(StringComparer.Ordinal);
+        var projectClasses = DiscoverProjectClasses(filePath);
         var declaredFields = new HashSet<string>(StringComparer.Ordinal);
+        var declaredFieldTypes = new Dictionary<string, string>(StringComparer.Ordinal);
         var nodes = new Dictionary<string, NodeInfo>(StringComparer.Ordinal);
         var declarationOrder = new List<string>();
         // Empty parent name means "the design root" (a plain Controls.Add(x) call).
@@ -126,13 +129,13 @@ public static class CodeImporter
             if (className != null)
             {
                 LoadBaseClassChain(
-                    filePath, className, knownTypeNames, declaredFields,
+                    filePath, className, knownTypeNames, declaredFields, declaredFieldTypes,
                     nodes, declarationOrder, addEdges, ref clientSize,
                     visited: new HashSet<string>(StringComparer.Ordinal), depthRemaining: 6);
             }
         }
 
-        ProcessCompilationUnit(compilationUnit, knownTypeNames, declaredFields, nodes, declarationOrder, addEdges, ref clientSize);
+        ProcessCompilationUnit(compilationUnit, knownTypeNames, declaredFields, declaredFieldTypes, nodes, declarationOrder, addEdges, ref clientSize);
 
         if (declarationOrder.Count == 0)
             throw new InvalidOperationException("No control declarations found — is this Designer code Orivy Studio generated?");
@@ -151,7 +154,89 @@ public static class CodeImporter
                 localBaseTypeOf[classDecl.Identifier.Text] = GetSimpleTypeName(baseType.Type);
         }
 
-        return Rebuild(surface, clientSize, nodes, declarationOrder, addEdges, localBaseTypeOf);
+        return Rebuild(surface, clientSize, nodes, declarationOrder, addEdges, localBaseTypeOf, projectClasses);
+    }
+
+    private sealed record ProjectClassInfo(string? BaseType, string? FilePath, string? DesignerPath);
+
+    private static Dictionary<string, ProjectClassInfo> DiscoverProjectClasses(string? filePath)
+    {
+        var result = new Dictionary<string, ProjectClassInfo>(StringComparer.Ordinal);
+        if (string.IsNullOrEmpty(filePath))
+            return result;
+
+        var startDir = System.IO.Path.GetDirectoryName(filePath);
+        if (startDir == null)
+            return result;
+
+        var searchRoot = startDir;
+        var current = startDir;
+        for (var i = 0; i < 4; i++)
+        {
+            if (current == null) break;
+            try
+            {
+                if (System.IO.Directory.EnumerateFiles(current, "*.csproj").Any() ||
+                    System.IO.Directory.EnumerateFiles(current, "*.sln").Any())
+                {
+                    searchRoot = current;
+                    break;
+                }
+            }
+            catch { }
+            current = System.IO.Path.GetDirectoryName(current);
+        }
+
+        try
+        {
+            var files = System.IO.Directory.EnumerateFiles(searchRoot, "*.cs", System.IO.SearchOption.AllDirectories);
+            foreach (var file in files)
+            {
+                if (file.Contains("\\bin\\", StringComparison.OrdinalIgnoreCase) ||
+                    file.Contains("/bin/", StringComparison.OrdinalIgnoreCase) ||
+                    file.Contains("\\obj\\", StringComparison.OrdinalIgnoreCase) ||
+                    file.Contains("/obj/", StringComparison.OrdinalIgnoreCase) ||
+                    file.Contains("\\.git\\", StringComparison.OrdinalIgnoreCase) ||
+                    file.Contains("/.git/", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var isDesigner = file.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase);
+                try
+                {
+                    var text = System.IO.File.ReadAllText(file);
+                    if (!text.Contains("class ", StringComparison.Ordinal))
+                        continue;
+
+                    var tree = CSharpSyntaxTree.ParseText(text);
+                    var classes = tree.GetCompilationUnitRoot().DescendantNodes().OfType<ClassDeclarationSyntax>();
+                    foreach (var cls in classes)
+                    {
+                        var name = cls.Identifier.Text;
+                        string? baseType = null;
+                        if (cls.BaseList?.Types.Count > 0)
+                            baseType = GetSimpleTypeName(cls.BaseList.Types[0].Type);
+
+                        if (!result.TryGetValue(name, out var existing))
+                        {
+                            result[name] = new ProjectClassInfo(baseType, isDesigner ? null : file, isDesigner ? file : null);
+                        }
+                        else
+                        {
+                            result[name] = new ProjectClassInfo(
+                                baseType ?? existing.BaseType,
+                                isDesigner ? existing.FilePath : file,
+                                isDesigner ? file : existing.DesignerPath);
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+        catch { }
+
+        return result;
     }
 
     /// <summary>Walks up this class's inheritance chain (capped at <paramref name="depthRemaining"/>
@@ -167,6 +252,7 @@ public static class CodeImporter
         string className,
         HashSet<string> knownTypeNames,
         HashSet<string> declaredFields,
+        Dictionary<string, string> declaredFieldTypes,
         Dictionary<string, NodeInfo> nodes,
         List<string> declarationOrder,
         List<(string ParentName, string ChildName)> addEdges,
@@ -211,8 +297,8 @@ public static class CodeImporter
                 if (!TryParseClass(file, baseTypeName, out _, out var baseUnit))
                     continue;
 
-                ProcessCompilationUnit(baseUnit!, knownTypeNames, declaredFields, nodes, declarationOrder, addEdges, ref clientSize);
-                LoadBaseClassChain(file, baseTypeName, knownTypeNames, declaredFields, nodes, declarationOrder, addEdges, ref clientSize, visited, depthRemaining - 1);
+                ProcessCompilationUnit(baseUnit!, knownTypeNames, declaredFields, declaredFieldTypes, nodes, declarationOrder, addEdges, ref clientSize);
+                LoadBaseClassChain(file, baseTypeName, knownTypeNames, declaredFields, declaredFieldTypes, nodes, declarationOrder, addEdges, ref clientSize, visited, depthRemaining - 1);
                 return;
             }
         }
@@ -273,6 +359,7 @@ public static class CodeImporter
         CompilationUnitSyntax compilationUnit,
         HashSet<string> knownTypeNames,
         HashSet<string> declaredFields,
+        Dictionary<string, string> declaredFieldTypes,
         Dictionary<string, NodeInfo> nodes,
         List<string> declarationOrder,
         List<(string ParentName, string ChildName)> addEdges,
@@ -286,8 +373,13 @@ public static class CodeImporter
         // the "just files in the folder" case this importer needs to open, not only Studio's own export.
         foreach (var field in compilationUnit.DescendantNodes().OfType<FieldDeclarationSyntax>())
         {
+            var fieldTypeName = GetSimpleTypeName(field.Declaration.Type);
             foreach (var variable in field.Declaration.Variables)
-                declaredFields.Add(variable.Identifier.Text);
+            {
+                var name = variable.Identifier.Text;
+                declaredFields.Add(name);
+                declaredFieldTypes[name] = fieldTypeName;
+            }
         }
 
         // A third dialect: a control declared and configured entirely as a field initializer —
@@ -335,8 +427,14 @@ public static class CodeImporter
         if (initMethod?.Body == null)
             return;
 
-        foreach (var statement in initMethod.Body.Statements)
+        foreach (var statement in EnumerateDesignStatements(initMethod.Body))
         {
+            if (statement is LocalDeclarationStatementSyntax localDeclaration)
+            {
+                ImportLocalDeclaration(localDeclaration, knownTypeNames, nodes, declarationOrder);
+                continue;
+            }
+
             if (statement is not ExpressionStatementSyntax { Expression: var expression })
                 continue;
 
@@ -351,43 +449,69 @@ public static class CodeImporter
                 // one the file actually specifies (`this` here since the left side of a bare `Size =`
                 // has no receiver — it isn't a stray decl and isn't a member access, so it fell through
                 // every other case with no effect at all).
-                case AssignmentExpressionSyntax { Left: var clientSizeLeft, Right: ObjectCreationExpressionSyntax { ArgumentList.Arguments.Count: 2 } sizeCreation }
-                    when ResolveTargetName(clientSizeLeft) is "ClientSize" or "Size":
+                case AssignmentExpressionSyntax { Left: var clientSizeLeft, Right: var sizeExpr }
+                    when ResolveTargetName(clientSizeLeft) is "ClientSize" or "Size"
+                         && (sizeExpr is ObjectCreationExpressionSyntax { ArgumentList.Arguments.Count: 2 }
+                             || sizeExpr is ImplicitObjectCreationExpressionSyntax { ArgumentList.Arguments.Count: 2 }):
+                {
+                    var args = sizeExpr is ObjectCreationExpressionSyntax sOce
+                        ? sOce.ArgumentList!.Arguments
+                        : ((ImplicitObjectCreationExpressionSyntax)sizeExpr).ArgumentList!.Arguments;
                     clientSize = new SKSize(
-                        ParseFloat(sizeCreation.ArgumentList!.Arguments[0].Expression),
-                        ParseFloat(sizeCreation.ArgumentList!.Arguments[1].Expression));
+                        ParseFloat(args[0].Expression),
+                        ParseFloat(args[1].Expression));
                     break;
+                }
 
-                // A declaration: `x = new Type();` / `this.x = new Type();`, with or without an object
-                // initializer. Only counts as a control if `x` is a field the class actually declares,
-                // or (a partial paste with no field declarations in scope) its type is a known control
-                // — otherwise an ordinary Form-level property assignment that happens to construct a
-                // value (`this.ClientSize = new Size(...)`, `this.AutoScaleDimensions = new SizeF(...)`)
-                // would get misread as declaring a bogus control named "ClientSize"/"AutoScaleDimensions".
-                case AssignmentExpressionSyntax { Left: var declLeft, Right: ObjectCreationExpressionSyntax creation }
-                    when ResolveTargetName(declLeft) is { } declName
-                         && (declaredFields.Contains(declName)
-                             || (declaredFields.Count == 0 && knownTypeNames.Contains(GetSimpleTypeName(creation.Type)))):
-                    if (!nodes.TryGetValue(declName, out var info))
+                // A declaration: `x = new Type();` / `this.x = new Type();`, or `x = new();`, with or
+                // without an object initializer.
+                case AssignmentExpressionSyntax
+                {
+                    Left: var declLeft,
+                    Right: var creationExpr
+                } when ResolveTargetName(declLeft) is { } declName
+                       && (creationExpr is ObjectCreationExpressionSyntax || creationExpr is ImplicitObjectCreationExpressionSyntax):
+                {
+                    string? typeName = null;
+                    InitializerExpressionSyntax? initializer = null;
+
+                    if (creationExpr is ObjectCreationExpressionSyntax oce)
                     {
-                        info = new NodeInfo { Name = declName, Type = GetSimpleTypeName(creation.Type) };
-                        nodes[declName] = info;
-                        declarationOrder.Add(declName);
+                        typeName = GetSimpleTypeName(oce.Type);
+                        initializer = oce.Initializer;
                     }
-                    else
+                    else if (creationExpr is ImplicitObjectCreationExpressionSyntax ioce)
                     {
-                        info.Type = GetSimpleTypeName(creation.Type);
+                        if (declaredFieldTypes.TryGetValue(declName, out var dft))
+                            typeName = dft;
+                        initializer = ioce.Initializer;
                     }
 
-                    if (creation.Initializer != null)
+                    if (typeName != null && (declaredFields.Contains(declName)
+                         || (declaredFields.Count == 0 && knownTypeNames.Contains(typeName))))
                     {
-                        foreach (var member in creation.Initializer.Expressions.OfType<AssignmentExpressionSyntax>())
+                        if (!nodes.TryGetValue(declName, out var info))
                         {
-                            if (member.Left is IdentifierNameSyntax { Identifier.Text: var propertyName })
-                                ApplyProperty(info, propertyName, member.Right);
+                            info = new NodeInfo { Name = declName, Type = typeName };
+                            nodes[declName] = info;
+                            declarationOrder.Add(declName);
+                        }
+                        else
+                        {
+                            info.Type = typeName;
+                        }
+
+                        if (initializer != null)
+                        {
+                            foreach (var member in initializer.Expressions.OfType<AssignmentExpressionSyntax>())
+                            {
+                                if (member.Left is IdentifierNameSyntax { Identifier.Text: var propertyName })
+                                    ApplyProperty(info, propertyName, member.Right);
+                            }
                         }
                     }
                     break;
+                }
 
                 // A separate property-assignment statement for an already-declared control — the
                 // classic WinForms shape (`this.button1.Location = new Point(10, 10);`) sets each
@@ -458,6 +582,110 @@ public static class CodeImporter
         }
     }
 
+    /// <summary>
+    /// Statements the importer understands, in source order, including ones nested in a block or
+    /// <c>if</c>/<c>try</c>. Local functions are skipped: their statements are not part of the
+    /// control tree. A <c>var button = new Button { ... }</c> is a local declaration, not an
+    /// expression statement, so walking only the method's top-level expression statements dropped
+    /// every control a hand-written file declared that way and the canvas opened empty.
+    /// </summary>
+    private static IEnumerable<StatementSyntax> EnumerateDesignStatements(BlockSyntax body)
+    {
+        var stack = new Stack<StatementSyntax>();
+        for (var i = body.Statements.Count - 1; i >= 0; i--)
+            stack.Push(body.Statements[i]);
+
+        while (stack.Count > 0)
+        {
+            var statement = stack.Pop();
+            switch (statement)
+            {
+                case BlockSyntax block:
+                    for (var i = block.Statements.Count - 1; i >= 0; i--)
+                        stack.Push(block.Statements[i]);
+                    break;
+                case IfStatementSyntax ifStatement:
+                    if (ifStatement.Else != null)
+                        stack.Push(ifStatement.Else.Statement);
+                    stack.Push(ifStatement.Statement);
+                    break;
+                case TryStatementSyntax tryStatement:
+                    stack.Push(tryStatement.Block);
+                    break;
+                case LocalFunctionStatementSyntax:
+                    break;
+                default:
+                    yield return statement;
+                    break;
+            }
+        }
+    }
+
+    private static void ImportLocalDeclaration(
+        LocalDeclarationStatementSyntax localDeclaration,
+        HashSet<string> knownTypeNames,
+        Dictionary<string, NodeInfo> nodes,
+        List<string> declarationOrder)
+    {
+        var declaredTypeName = GetSimpleTypeName(localDeclaration.Declaration.Type);
+        foreach (var variable in localDeclaration.Declaration.Variables)
+        {
+            string? typeName;
+            InitializerExpressionSyntax? initializer;
+            switch (variable.Initializer?.Value)
+            {
+                case ObjectCreationExpressionSyntax objectCreation:
+                    typeName = GetSimpleTypeName(objectCreation.Type);
+                    initializer = objectCreation.Initializer;
+                    break;
+                case ImplicitObjectCreationExpressionSyntax implicitCreation when declaredTypeName != "var":
+                    typeName = declaredTypeName;
+                    initializer = implicitCreation.Initializer;
+                    break;
+                default:
+                    continue;
+            }
+
+            if (typeName == null || !IsCatalogTypeName(typeName, knownTypeNames))
+                continue;
+
+            var name = variable.Identifier.Text;
+            if (!nodes.TryGetValue(name, out var info))
+            {
+                info = new NodeInfo { Name = name, Type = typeName };
+                nodes[name] = info;
+                declarationOrder.Add(name);
+            }
+            else
+            {
+                info.Type = typeName;
+            }
+
+            if (initializer == null)
+                continue;
+
+            foreach (var member in initializer.Expressions.OfType<AssignmentExpressionSyntax>())
+            {
+                if (member.Left is IdentifierNameSyntax { Identifier.Text: var propertyName })
+                    ApplyProperty(info, propertyName, member.Right);
+            }
+        }
+    }
+
+    private static bool IsCatalogTypeName(string typeName, HashSet<string> knownTypeNames)
+    {
+        if (knownTypeNames.Contains(typeName))
+            return true;
+
+        foreach (var known in knownTypeNames)
+        {
+            if (typeName.Length > known.Length && typeName.EndsWith(known, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
     /// <summary>Extracts a plain field/variable name from either a bare identifier (<c>button1</c>) or
     /// a one-level <c>this.</c>-qualified access (<c>this.button1</c>) — the two shapes Studio's own
     /// generated code and classic WinForms Designer.cs respectively use to refer to a declared field.
@@ -512,22 +740,29 @@ public static class CodeImporter
             case "Text" when right is LiteralExpressionSyntax { Token.Value: string text }:
                 info.Text = text;
                 break;
-            case "Location" when right is ObjectCreationExpressionSyntax { ArgumentList.Arguments.Count: 2 } location:
-                info.X = ParseFloat(location.ArgumentList!.Arguments[0].Expression);
-                info.Y = ParseFloat(location.ArgumentList!.Arguments[1].Expression);
+            case "Location" when (right is ObjectCreationExpressionSyntax { ArgumentList.Arguments.Count: 2 }
+                               || right is ImplicitObjectCreationExpressionSyntax { ArgumentList.Arguments.Count: 2 }):
+                var locArgs = right is ObjectCreationExpressionSyntax locOce
+                    ? locOce.ArgumentList!.Arguments
+                    : ((ImplicitObjectCreationExpressionSyntax)right).ArgumentList!.Arguments;
+                info.X = ParseFloat(locArgs[0].Expression);
+                info.Y = ParseFloat(locArgs[1].Expression);
+                info.HasLocation = true;
                 break;
-            case "Size" when right is ObjectCreationExpressionSyntax { ArgumentList.Arguments.Count: 2 } size:
-                info.W = ParseFloat(size.ArgumentList!.Arguments[0].Expression);
-                info.H = ParseFloat(size.ArgumentList!.Arguments[1].Expression);
+            case "Size" when (right is ObjectCreationExpressionSyntax { ArgumentList.Arguments.Count: 2 }
+                           || right is ImplicitObjectCreationExpressionSyntax { ArgumentList.Arguments.Count: 2 }):
+                var sizeArgs = right is ObjectCreationExpressionSyntax sizeOce
+                    ? sizeOce.ArgumentList!.Arguments
+                    : ((ImplicitObjectCreationExpressionSyntax)right).ArgumentList!.Arguments;
+                info.W = ParseFloat(sizeArgs[0].Expression);
+                info.H = ParseFloat(sizeArgs[1].Expression);
+                info.HasSize = true;
                 break;
             case "Dock":
                 info.Dock = ParseDock(right);
                 break;
             case "Anchor":
                 info.Anchor = ParseAnchor(right);
-                break;
-            case "ZOrder" when right is LiteralExpressionSyntax:
-                info.ZOrder = (int)ParseFloat(right);
                 break;
             case "Visible":
                 info.Visible = !right.IsKind(SyntaxKind.FalseLiteralExpression);
@@ -548,10 +783,19 @@ public static class CodeImporter
     /// <c>SKColor</c>, <c>SKSize</c>, <c>SKPoint</c>, ...). Returns false for anything else (a method
     /// call, a variable reference, ...) rather than guessing — the property is then just left at
     /// whatever the control's own constructor default is, same as before this existed.</summary>
-    private static bool TryConvertValue(ExpressionSyntax expr, Type targetType, out object? value)
+    private static bool TryConvertValue(ExpressionSyntax expr, Type targetType, out object? value, Func<string, object?>? objectLookup = null)
     {
         var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
         value = null;
+
+        if (objectLookup != null && expr is IdentifierNameSyntax id && objectLookup(id.Identifier.Text) is { } resolved)
+        {
+            if (underlying.IsInstanceOfType(resolved))
+            {
+                value = resolved;
+                return true;
+            }
+        }
 
         // An untyped element slot (e.g. ListBox.ObjectCollection.AddRange(params object?[] values), a
         // GridList row cell) — the literal's own runtime type is exactly what belongs there, since
@@ -564,7 +808,7 @@ public static class CodeImporter
 
         if (expr is PrefixUnaryExpressionSyntax { RawKind: (int)SyntaxKind.UnaryMinusExpression } unary)
         {
-            if (!TryConvertValue(unary.Operand, underlying, out var inner) || inner == null || !IsNumericType(underlying))
+            if (!TryConvertValue(unary.Operand, underlying, out var inner, objectLookup) || inner == null || !IsNumericType(underlying))
                 return false;
             try { value = Convert.ChangeType(-Convert.ToDouble(inner, CultureInfo.InvariantCulture), underlying, CultureInfo.InvariantCulture); return true; }
             catch { return false; }
@@ -607,7 +851,7 @@ public static class CodeImporter
                 return false;
 
             case BinaryExpressionSyntax { RawKind: (int)SyntaxKind.BitwiseOrExpression } flags when underlying.IsEnum:
-                if (TryConvertValue(flags.Left, underlying, out var leftFlag) && TryConvertValue(flags.Right, underlying, out var rightFlag))
+                if (TryConvertValue(flags.Left, underlying, out var leftFlag, objectLookup) && TryConvertValue(flags.Right, underlying, out var rightFlag, objectLookup))
                 {
                     value = Enum.ToObject(underlying, Convert.ToInt64(leftFlag) | Convert.ToInt64(rightFlag));
                     return true;
@@ -620,9 +864,9 @@ public static class CodeImporter
                 return TryBuildSKColor(ioceColorArgs.Arguments, out value);
 
             case ObjectCreationExpressionSyntax { ArgumentList: { } oceArgs2 }:
-                return TryConstruct(underlying, oceArgs2.Arguments, out value);
+                return TryConstruct(underlying, oceArgs2.Arguments, out value, objectLookup);
             case ImplicitObjectCreationExpressionSyntax { ArgumentList: { } ioceArgs2 }:
-                return TryConstruct(underlying, ioceArgs2.Arguments, out value);
+                return TryConstruct(underlying, ioceArgs2.Arguments, out value, objectLookup);
 
             default:
                 return false;
@@ -664,7 +908,7 @@ public static class CodeImporter
     /// <see cref="TryEvaluateGeneric"/>, so a mixed numeric+enum constructor works same as an
     /// all-numeric one like <c>Thickness</c>/<c>Radius</c>/<c>SKSize</c>/<c>SKPoint</c>). Covers every
     /// plain layout/geometry struct Designer.cs code constructs inline without needing a case per type.</summary>
-    private static bool TryConstruct(Type type, SeparatedSyntaxList<ArgumentSyntax> args, out object? value)
+    private static bool TryConstruct(Type type, SeparatedSyntaxList<ArgumentSyntax> args, out object? value, Func<string, object?>? objectLookup = null)
     {
         value = null;
         if (args.Count == 0)
@@ -685,7 +929,7 @@ public static class CodeImporter
             {
                 if (i < args.Count)
                 {
-                    if (!TryEvaluateGeneric(args[i].Expression, parameters[i].ParameterType, out values[i]))
+                    if (!TryEvaluateGeneric(args[i].Expression, parameters[i].ParameterType, out values[i], objectLookup))
                         return false;
                 }
                 else
@@ -703,15 +947,15 @@ public static class CodeImporter
     }
 
     /// <summary>Replays the <c>.Add(...)</c>/<c>.AddRange(...)</c> calls <see cref="NodeInfo.CollectionCalls"/>
-    /// recorded against <paramref name="control"/>'s own content collections (<c>ListBox.Items</c>,
-    /// <c>GridList.Columns</c>/<c>Items</c>, ...) now that the real collection object exists to call
-    /// them on.</summary>
-    private static void ApplyCollectionCalls(ElementBase control, NodeInfo info)
+    /// recorded against <paramref name="targetObject"/>'s own content collections (<c>ListBox.Items</c>,
+    /// <c>GridList.Columns</c>/<c>Items</c>, <c>MenuStrip.Items</c>, ...) now that the real collection
+    /// object exists to call them on.</summary>
+    private static void ApplyCollectionCalls(object targetObject, NodeInfo info, Func<string, object?>? objectLookup = null)
     {
         foreach (var (memberName, methodName, args) in info.CollectionCalls)
         {
-            var memberProperty = control.GetType().GetProperty(memberName, BindingFlags.Public | BindingFlags.Instance);
-            var collection = memberProperty?.GetValue(control);
+            var memberProperty = targetObject.GetType().GetProperty(memberName, BindingFlags.Public | BindingFlags.Instance);
+            var collection = memberProperty?.GetValue(targetObject);
             if (collection == null)
                 continue;
 
@@ -724,17 +968,11 @@ public static class CodeImporter
             {
                 if (methodName == "Add")
                 {
-                    // A collection commonly exposes several convenience Add(T) overloads for the same
-                    // slot (GridListItemCollection alone has Add(GridListItem)/Add(string?)/Add(object?)
-                    // /Add(string?[])) — try each single-parameter one against the actual argument
-                    // shape and take the first whose parameter type the argument actually converts to,
-                    // rather than assuming reflection's (unordered) first 1-parameter match is the
-                    // right one.
                     if (args.Count != 1)
                         continue;
                     foreach (var method in candidateMethods.Where(m => m.GetParameters().Length == 1))
                     {
-                        if (TryEvaluateGeneric(args[0], method.GetParameters()[0].ParameterType, out var arg))
+                        if (TryEvaluateGeneric(args[0], method.GetParameters()[0].ParameterType, out var arg, objectLookup))
                         {
                             method.Invoke(collection, new[] { arg });
                             break;
@@ -743,10 +981,6 @@ public static class CodeImporter
                 }
                 else // AddRange
                 {
-                    // Either one array/collection-literal argument (`AddRange(new[] { a, b, c })`) or
-                    // several individual arguments (`AddRange("a", "b", "c")`, a `params T[]` call) —
-                    // both end up needing a single T[] built from the element type of whichever
-                    // AddRange(T[]) / AddRange(IEnumerable<T>) overload the collection actually has.
                     var method = candidateMethods.FirstOrDefault(m =>
                         m.GetParameters().Length == 1
                         && (m.GetParameters()[0].ParameterType.IsArray
@@ -771,7 +1005,7 @@ public static class CodeImporter
                     var array = Array.CreateInstance(elementType, elementExprs.Count);
                     for (var i = 0; i < elementExprs.Count; i++)
                     {
-                        if (!TryEvaluateGeneric(elementExprs[i], elementType, out var elementValue))
+                        if (!TryEvaluateGeneric(elementExprs[i], elementType, out var elementValue, objectLookup))
                         {
                             array = null;
                             break;
@@ -795,32 +1029,32 @@ public static class CodeImporter
     /// (<c>new GridListColumn { Name = ..., Text = ... }</c>, a parameterless ctor plus per-property
     /// assignments, as opposed to <see cref="TryConstruct"/>'s constructor-argument struct shape) and
     /// array literals (<c>new[] { "Alpha", "1" }</c>, a GridList row's cell values).</summary>
-    private static bool TryEvaluateGeneric(ExpressionSyntax expr, Type targetType, out object? value)
+    private static bool TryEvaluateGeneric(ExpressionSyntax expr, Type targetType, out object? value, Func<string, object?>? objectLookup = null)
     {
-        if (TryConvertValue(expr, targetType, out value))
+        if (TryConvertValue(expr, targetType, out value, objectLookup))
             return true;
 
         switch (expr)
         {
             case ObjectCreationExpressionSyntax { Initializer: { } initializer }:
-                return TryEvaluateObjectInitializer(targetType, initializer, out value);
+                return TryEvaluateObjectInitializer(targetType, initializer, out value, objectLookup);
 
             case ImplicitObjectCreationExpressionSyntax { Initializer: { } implicitInitializer }:
-                return TryEvaluateObjectInitializer(targetType, implicitInitializer, out value);
+                return TryEvaluateObjectInitializer(targetType, implicitInitializer, out value, objectLookup);
 
             case ArrayCreationExpressionSyntax { Initializer: { } arrayInit } when targetType.IsArray:
-                return TryEvaluateArray(targetType.GetElementType()!, arrayInit.Expressions, out value);
+                return TryEvaluateArray(targetType.GetElementType()!, arrayInit.Expressions, out value, objectLookup);
             case ImplicitArrayCreationExpressionSyntax { Initializer: { } implicitArrayInit } when targetType.IsArray:
-                return TryEvaluateArray(targetType.GetElementType()!, implicitArrayInit.Expressions, out value);
+                return TryEvaluateArray(targetType.GetElementType()!, implicitArrayInit.Expressions, out value, objectLookup);
             case InitializerExpressionSyntax bareArrayInit when targetType.IsArray:
-                return TryEvaluateArray(targetType.GetElementType()!, bareArrayInit.Expressions, out value);
+                return TryEvaluateArray(targetType.GetElementType()!, bareArrayInit.Expressions, out value, objectLookup);
 
             default:
                 return false;
         }
     }
 
-    private static bool TryEvaluateObjectInitializer(Type targetType, InitializerExpressionSyntax initializer, out object? value)
+    private static bool TryEvaluateObjectInitializer(Type targetType, InitializerExpressionSyntax initializer, out object? value, Func<string, object?>? objectLookup = null)
     {
         value = null;
         if (targetType.GetConstructor(Type.EmptyTypes) == null)
@@ -836,7 +1070,7 @@ public static class CodeImporter
                 var descriptor = TypeDescriptor.GetProperties(instance)[propertyName];
                 if (descriptor == null || descriptor.IsReadOnly)
                     continue;
-                if (TryEvaluateGeneric(member.Right, descriptor.PropertyType, out var propValue))
+                if (TryEvaluateGeneric(member.Right, descriptor.PropertyType, out var propValue, objectLookup))
                     descriptor.SetValue(instance, propValue);
             }
             value = instance;
@@ -848,18 +1082,132 @@ public static class CodeImporter
         }
     }
 
-    private static bool TryEvaluateArray(Type elementType, SeparatedSyntaxList<ExpressionSyntax> elements, out object? value)
+    private static bool TryEvaluateArray(Type elementType, SeparatedSyntaxList<ExpressionSyntax> elements, out object? value, Func<string, object?>? objectLookup = null)
     {
         value = null;
         var array = Array.CreateInstance(elementType, elements.Count);
         for (var i = 0; i < elements.Count; i++)
         {
-            if (!TryEvaluateGeneric(elements[i], elementType, out var elementValue))
+            if (!TryEvaluateGeneric(elements[i], elementType, out var elementValue, objectLookup))
                 return false;
             array.SetValue(elementValue, i);
         }
         value = array;
         return true;
+    }
+
+    private static void ApplyExtraPropertiesToObject(object target, NodeInfo info, Func<string, object?>? objectLookup = null)
+    {
+        var properties = TypeDescriptor.GetProperties(target);
+        foreach (var (propName, expr) in info.ExtraProperties)
+        {
+            var descriptor = properties[propName];
+            if (descriptor == null || descriptor.IsReadOnly)
+                continue;
+            if (TryConvertValue(expr, descriptor.PropertyType, out var value, objectLookup))
+            {
+                try { descriptor.SetValue(target, value); }
+                catch { }
+            }
+        }
+    }
+
+    private static string ResolveProjectAncestorType(
+        string typeName,
+        Dictionary<string, ProjectClassInfo> projectClasses,
+        Dictionary<string, string> localBaseTypeOf,
+        Dictionary<string, ControlEntry> catalog)
+    {
+        var current = typeName;
+        for (var i = 0; i < 16; i++)
+        {
+            if (catalog.ContainsKey(current))
+                return current;
+            if (current is "Container" or "UserControl" or "Panel" or "Form" or "Window")
+                return "Container";
+            if (current is "Element" or "ElementBase" or "Control")
+                return "Element";
+
+            if (localBaseTypeOf.TryGetValue(current, out var nextLocal))
+                current = nextLocal;
+            else if (projectClasses.TryGetValue(current, out var nextProj) && nextProj.BaseType != null)
+                current = nextProj.BaseType;
+            else
+                break;
+        }
+
+        return ResolveKnownAncestorType(current, localBaseTypeOf, catalog);
+    }
+
+    private static void LoadChildControlsFromDesigner(
+        ElementBase parentControl,
+        string designerPath,
+        Dictionary<string, ControlEntry> catalog,
+        HashSet<string> knownTypeNames,
+        HashSet<string> usedNames)
+    {
+        try
+        {
+            var text = System.IO.File.ReadAllText(designerPath);
+            var subNodes = new Dictionary<string, NodeInfo>(StringComparer.Ordinal);
+            var subOrder = new List<string>();
+            var subEdges = new List<(string ParentName, string ChildName)>();
+            SKSize? subSize = null;
+            var subDeclaredFields = new HashSet<string>(StringComparer.Ordinal);
+            var subFieldTypes = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            var tree = CSharpSyntaxTree.ParseText(text);
+            ProcessCompilationUnit(tree.GetCompilationUnitRoot(), knownTypeNames, subDeclaredFields, subFieldTypes, subNodes, subOrder, subEdges, ref subSize);
+
+            var subInstances = new Dictionary<string, ElementBase>(StringComparer.Ordinal);
+            foreach (var name in subOrder)
+            {
+                var info = subNodes[name];
+                if (!catalog.TryGetValue(info.Type, out var entry))
+                    continue;
+
+                var child = entry.CreateInstance(seedPlaceholderContent: false);
+                DesignSurface.PrepareForDesign(child);
+                child.Name = DesignNameValidator.Normalize(info.Name, info.Type, usedNames);
+                if (info.Text != null) child.Text = info.Text;
+                child.Location = new SKPoint(info.X, info.Y);
+                child.Size = new SKSize(info.W, info.H);
+                child.Dock = info.Dock;
+                child.Anchor = info.Anchor;
+                child.Visible = info.Visible;
+                ApplyExtraPropertiesToObject(child, info, key => subInstances.TryGetValue(key, out var ci) ? ci : null);
+                subInstances[name] = child;
+            }
+
+            parentControl.SuspendLayout();
+            try
+            {
+                foreach (var (pName, cName) in subEdges)
+                {
+                    if (!subInstances.TryGetValue(cName, out var child))
+                        continue;
+                    if (pName.Length == 0)
+                        parentControl.Controls.Add(child);
+                    else if (subInstances.TryGetValue(pName, out var innerParent))
+                        innerParent.Controls.Add(child);
+                }
+            }
+            finally
+            {
+                parentControl.ResumeLayout(false);
+            }
+
+            foreach (var (name, child) in subInstances)
+            {
+                if (!subNodes.TryGetValue(name, out var info))
+                    continue;
+                if (info.HasLocation)
+                    child.Location = new SKPoint(info.X, info.Y);
+                if (info.HasSize)
+                    child.Size = new SKSize(info.W, info.H);
+            }
+        }
+        catch { }
     }
 
     private static IReadOnlyList<string> Rebuild(
@@ -868,52 +1216,118 @@ public static class CodeImporter
         Dictionary<string, NodeInfo> nodes,
         List<string> declarationOrder,
         List<(string ParentName, string ChildName)> addEdges,
-        Dictionary<string, string> localBaseTypeOf)
+        Dictionary<string, string> localBaseTypeOf,
+        Dictionary<string, ProjectClassInfo> projectClasses)
     {
         var skipped = new List<string>();
         var catalog = ControlCatalog.Discover().ToDictionary(e => e.DisplayName, StringComparer.Ordinal);
         var instances = new Dictionary<string, ElementBase>(StringComparer.Ordinal);
+        var nonElementObjects = new Dictionary<string, object>(StringComparer.Ordinal);
         var usedNames = new HashSet<string>(StringComparer.Ordinal);
+        var knownTypeNames = catalog.Keys.ToHashSet(StringComparer.Ordinal);
+
+        object? LookupObject(string key) =>
+            nonElementObjects.TryGetValue(key, out var no) ? no : instances.TryGetValue(key, out var inst) ? inst : null;
 
         foreach (var name in declarationOrder)
         {
             var info = nodes[name];
-            if (!catalog.TryGetValue(info.Type, out var entry)
-                && !catalog.TryGetValue(ResolveKnownAncestorType(info.Type, localBaseTypeOf, catalog), out entry))
+
+            // 1. Menu items: MenuItem does not inherit from ElementBase, but is a first-class UI element for MenuStrip / ContextMenuStrip.
+            if (string.Equals(info.Type, "MenuItem", StringComparison.OrdinalIgnoreCase))
             {
-                skipped.Add(info.Type);
+                var menuItem = new MenuItem(info.Text ?? string.Empty);
+                menuItem.Name = DesignNameValidator.Normalize(info.Name, info.Type, usedNames);
+                menuItem.Visible = info.Visible;
+                if (info.W > 0 && info.H > 0)
+                    menuItem.Size = new SKSize(info.W, info.H);
+                ApplyExtraPropertiesToObject(menuItem, info, LookupObject);
+                nonElementObjects[name] = menuItem;
                 continue;
             }
 
-            var control = entry.CreateInstance(seedPlaceholderContent: false);
+            // 2. ContextMenuStrip: overlay menu component.
+            if (string.Equals(info.Type, "ContextMenuStrip", StringComparison.OrdinalIgnoreCase))
+            {
+                var cms = new ContextMenuStrip();
+                cms.Name = DesignNameValidator.Normalize(info.Name, info.Type, usedNames);
+                ApplyExtraPropertiesToObject(cms, info, LookupObject);
+                nonElementObjects[name] = cms;
+                continue;
+            }
+
+            // 3. Element controls: resolve through catalog, local base classes, or project custom classes.
+            ControlEntry? entry = null;
+            if (catalog.TryGetValue(info.Type, out var directEntry))
+            {
+                entry = directEntry;
+            }
+            else
+            {
+                var resolvedName = ResolveKnownAncestorType(info.Type, localBaseTypeOf, catalog);
+                if (catalog.TryGetValue(resolvedName, out var ancestorEntry))
+                {
+                    entry = ancestorEntry;
+                }
+                else if (projectClasses.TryGetValue(info.Type, out var pci) && pci.BaseType != null)
+                {
+                    var projectResolved = ResolveProjectAncestorType(pci.BaseType, projectClasses, localBaseTypeOf, catalog);
+                    if (catalog.TryGetValue(projectResolved, out var projEntry))
+                        entry = projEntry;
+                }
+            }
+
+            ElementBase control;
+            if (entry != null)
+            {
+                control = entry.CreateInstance(seedPlaceholderContent: false);
+            }
+            else
+            {
+                // Fallback for custom controls defined in the project or external libraries:
+                // If it has children added to it, treat as Container; otherwise Element.
+                var isContainer = addEdges.Any(e => e.ParentName == name)
+                    || (projectClasses.TryGetValue(info.Type, out var pc) && pc.BaseType is "Container" or "UserControl" or "Panel" or "Form" or "Window");
+                control = isContainer ? new Orivy.Controls.Container() : new Element();
+                skipped.Add(info.Type);
+            }
+
             DesignSurface.PrepareForDesign(control);
-            // Pasted/hand-edited Designer code isn't guaranteed to declare valid or unique C#
-            // identifiers any more than a hand-edited project file is — see DesignNameValidator.
             control.Name = DesignNameValidator.Normalize(info.Name, info.Type, usedNames);
             if (info.Text != null)
                 control.Text = info.Text;
+            else if (entry == null && control is not Orivy.Controls.Container)
+                control.Text = $"[{info.Type}]";
+
             control.Location = new SKPoint(info.X, info.Y);
             control.Size = new SKSize(info.W, info.H);
             control.Dock = info.Dock;
             control.Anchor = info.Anchor;
-            control.ZOrder = info.ZOrder;
             control.Visible = info.Visible;
 
-            foreach (var (propName, expr) in info.ExtraProperties)
+            ApplyExtraPropertiesToObject(control, info, LookupObject);
+
+            // If the custom control has its own .Designer.cs file in the project, load its inner child controls!
+            if (projectClasses.TryGetValue(info.Type, out var classInfo)
+                && !string.IsNullOrEmpty(classInfo.DesignerPath)
+                && System.IO.File.Exists(classInfo.DesignerPath))
             {
-                var descriptor = TypeDescriptor.GetProperties(control)[propName];
-                if (descriptor == null || descriptor.IsReadOnly)
-                    continue;
-                if (TryConvertValue(expr, descriptor.PropertyType, out var value))
-                {
-                    try { descriptor.SetValue(control, value); }
-                    catch { /* bad/unsupported value for this property — leave the default in place */ }
-                }
+                LoadChildControlsFromDesigner(control, classInfo.DesignerPath, catalog, knownTypeNames, usedNames);
             }
 
-            ApplyCollectionCalls(control, info);
-
             instances[name] = control;
+        }
+
+        // Replay collection calls now that all controls and non-element items (like MenuItems) exist!
+        foreach (var (name, control) in instances)
+        {
+            if (nodes.TryGetValue(name, out var info))
+                ApplyCollectionCalls(control, info, LookupObject);
+        }
+        foreach (var (name, obj) in nonElementObjects)
+        {
+            if (nodes.TryGetValue(name, out var info))
+                ApplyCollectionCalls(obj, info, LookupObject);
         }
 
         // Only commit to the live surface once parsing has fully succeeded — a half-built tree from
@@ -923,24 +1337,47 @@ public static class CodeImporter
             surface.DesignRoot.Controls.Remove(existing);
         surface.Locked.Clear();
         surface.Groups.Clear();
+        surface.DeletedControlNames.Clear();
+        surface.AddedControlNames.Clear();
 
         if (clientSize is { Width: > 0, Height: > 0 })
             surface.DesignRoot.Size = clientSize.Value;
 
-        foreach (var (parentName, childName) in addEdges)
+        surface.DesignRoot.SuspendLayout();
+        try
         {
-            if (!instances.TryGetValue(childName, out var child))
-                continue;
+            foreach (var (parentName, childName) in addEdges)
+            {
+                if (!instances.TryGetValue(childName, out var child))
+                    continue;
 
-            if (parentName.Length == 0)
-            {
-                surface.DesignRoot.Controls.Add(child);
+                if (parentName.Length == 0)
+                {
+                    surface.DesignRoot.Controls.Add(child);
+                }
+                else if (instances.TryGetValue(parentName, out var parent))
+                {
+                    parent.Controls.Add(child);
+                    surface.Groups.Add(parent);
+                }
             }
-            else if (instances.TryGetValue(parentName, out var parent))
-            {
-                parent.Controls.Add(child);
-                surface.Groups.Add(parent);
-            }
+        }
+        finally
+        {
+            surface.DesignRoot.ResumeLayout(false);
+        }
+
+        // Dock/Anchor layout during Controls.Add rewrites right-anchored Location into overflow
+        // storage (negative X). The designer must keep the file's coordinates so drag stays 1:1
+        // and CodeMerger does not persist those rewritten values over the original source.
+        foreach (var (name, control) in instances)
+        {
+            if (!nodes.TryGetValue(name, out var info))
+                continue;
+            if (info.HasLocation)
+                control.Location = new SKPoint(info.X, info.Y);
+            if (info.HasSize)
+                control.Size = new SKSize(info.W, info.H);
         }
 
         surface.Commands.Clear();

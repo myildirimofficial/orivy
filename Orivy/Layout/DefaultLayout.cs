@@ -747,7 +747,7 @@ internal partial class DefaultLayout : LayoutEngine
     /// <summary>
     ///  Updates the control's anchors information based on the control's current bounds.
     /// </summary>
-    private static void UpdateAnchorInfo(IArrangedElement element)
+    internal static void UpdateAnchorInfo(IArrangedElement element)
     {
         Debug.Assert(!HasCachedBoundsFor(element), "Do not call this method with an active cached bounds entry for this element.");
  

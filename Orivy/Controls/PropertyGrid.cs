@@ -628,7 +628,18 @@ public class PropertyGrid : GridList
             return;
 
         foreach (var pd in GetProperties(_selectedObject))
-            _rootNodes.Add(CreatePropertyNode(pd, _selectedObject, depth: 0));
+        {
+            try
+            {
+                _rootNodes.Add(CreatePropertyNode(pd, _selectedObject, depth: 0));
+            }
+            catch
+            {
+                // One getter that throws (native state, a disposed child, a converter with side
+                // effects) must not abort the whole grid — that leaves the inspector blank and,
+                // mid-click, can drop the mouse-up that would have released capture.
+            }
+        }
     }
 
     /// <summary>
@@ -674,7 +685,7 @@ public class PropertyGrid : GridList
 
     private static bool IsExpandable(Type type, object? value)
     {
-        if (value == null)
+        if (value == null || value is ElementBase || value is Delegate)
             return false;
 
         var t = Nullable.GetUnderlyingType(type) ?? type;
@@ -1514,6 +1525,16 @@ public class PropertyGrid : GridList
 
     private bool HasInlineEditorOpen =>
         _textEditor?.Visible == true || _numericEditor?.Visible == true || _dateEditor?.Visible == true;
+
+    public override void OnMouseCaptureLost()
+    {
+        // A scrub that loses capture without mouse-up keeps the row in a dragging state, and the
+        // next click on the grid is swallowed.
+        _scrubNode = null;
+        _scrubItem = null;
+        _scrubActive = false;
+        base.OnMouseCaptureLost();
+    }
 
     public override void OnMouseDown(MouseEventArgs e)
     {

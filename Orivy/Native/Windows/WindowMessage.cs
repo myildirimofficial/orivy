@@ -25,6 +25,10 @@ public enum WindowMessage : uint
     WM_MOUSEHWHEEL = 0x020E,
     WM_MOUSEHOVER = 0x02A1,
     WM_MOUSELEAVE = 0x02A3,
+    /// <summary>
+    /// Sent to a window when it loses mouse capture.
+    /// </summary>
+    WM_CAPTURECHANGED = 0x0215,
     WM_PRINT = 0x0317,
     WM_REFLECT = 0x2000,
     WM_NOFITY = 0x4E,

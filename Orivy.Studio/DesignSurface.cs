@@ -37,6 +37,14 @@ public sealed class DesignSurface : Element
     public CommandStack Commands { get; } = new();
     public SelectionService Selection { get; } = new();
 
+    /// <summary>Names of controls explicitly deleted from the canvas by the user during this session.</summary>
+    public HashSet<string> DeletedControlNames { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Names of controls the user added on the canvas this session (toolbox drop, duplicate).
+    /// The merger only inserts these — it must not serialize constructor-created children that happen
+    /// to be missing from the opened source.</summary>
+    public HashSet<string> AddedControlNames { get; } = new(StringComparer.Ordinal);
+
     /// <summary>Controls excluded from hit-testing and dragging (still rendered).</summary>
     public HashSet<ElementBase> Locked { get; } = new();
 
@@ -72,6 +80,7 @@ public sealed class DesignSurface : Element
             Border = new Thickness(1),
             Radius = new Radius(8),
             Padding = new Thickness(0),
+            IsAncestorSiteInDesignMode = true,
         };
         _root.ConfigureVisualStyles(styles => styles.Base(b => b
             .Background(ColorScheme.Surface.WithAlpha(140))
@@ -386,10 +395,18 @@ public sealed class DesignSurface : Element
                 parentControls.Add(control);
                 if (targetGrid != null && gridPlacement is { } placement)
                     targetGrid.SetPlacement(control, placement.Row, placement.Column, placement.RowSpan, placement.ColumnSpan);
+                RegisterAdded(control);
                 AfterStructureChange();
                 Selection.SelectOnly(group ?? control);
             },
-            () => { Selection.Remove(control); parentControls.Remove(control); Locked.Remove(control); AfterStructureChange(); }));
+            () =>
+            {
+                Selection.Remove(control);
+                parentControls.Remove(control);
+                Locked.Remove(control);
+                UnregisterAdded(control);
+                AfterStructureChange();
+            }));
 
         return control;
     }
@@ -486,34 +503,36 @@ public sealed class DesignSurface : Element
     internal ElementBase? FindNestingTargetAt(SKPoint logicalPoint, ElementBase? excluding = null)
     {
         var rootRel = new SKPoint(logicalPoint.X - _root.Location.X, logicalPoint.Y - _root.Location.Y);
-        return FindNestingTargetRecursive(DesignedControls, rootRel, excluding);
-    }
-
-    private ElementBase? FindNestingTargetRecursive(IEnumerable<ElementBase> candidates, SKPoint parentRel, ElementBase? excluding)
-    {
         ElementBase? best = null;
+        var bestDepth = -1;
         var bestZ = int.MinValue;
-        foreach (var child in candidates)
+
+        // Visual bounds, not Location and not clipped to the parent. A right-anchored child can
+        // paint (and show an outside-form stroke) past its container; testing Location inside the
+        // parent rectangle missed that area, and using Location while VisualLocation was the
+        // overflow-mapped point made the same control move opposite the mouse.
+        foreach (var child in AllDesignedControls)
         {
             if (!child.Visible || Locked.Contains(child))
                 continue;
             if (excluding != null && (ReferenceEquals(child, excluding) || IsDescendantOf(child, excluding)))
                 continue;
-            if (!SKRect.Create(child.Location, child.Size).Contains(parentRel))
+            if (!GetDesignSpaceBounds(child).Contains(rootRel))
                 continue;
-            if (child.ZOrder >= bestZ)
+
+            var depth = 0;
+            for (var parent = child.Parent; parent != null && !ReferenceEquals(parent, _root); parent = parent.Parent)
+                depth++;
+
+            if (depth > bestDepth || (depth == bestDepth && child.ZOrder >= bestZ))
             {
                 best = child;
+                bestDepth = depth;
                 bestZ = child.ZOrder;
             }
         }
 
-        if (best == null)
-            return null;
-
-        var childRel = new SKPoint(parentRel.X - best.Location.X, parentRel.Y - best.Location.Y);
-        var nested = FindNestingTargetRecursive(NestedDesignedChildrenOf(best), childRel, excluding);
-        return nested ?? best;
+        return best;
     }
 
     private static IEnumerable<ElementBase> NestedDesignedChildrenOf(ElementBase control)
@@ -542,17 +561,32 @@ public sealed class DesignSurface : Element
     /// container parents, accumulating their locations, until reaching the design root.</summary>
     internal SKPoint GetDesignSpaceLocation(ElementBase control)
     {
-        var x = control.Location.X;
-        var y = control.Location.Y;
+        var x = control.VisualLocation.X;
+        var y = control.VisualLocation.Y;
         var current = control.Parent;
         while (current != null && !ReferenceEquals(current, _root))
         {
-            x += current.Location.X;
-            y += current.Location.Y;
+            x += current.VisualLocation.X;
+            y += current.VisualLocation.Y;
             current = current.Parent;
         }
 
         return new SKPoint(x, y);
+    }
+
+    internal SKRect GetDesignSpaceBounds(ElementBase control) =>
+        SKRect.Create(GetDesignSpaceLocation(control), control.Size);
+
+    internal void RegisterAdded(ElementBase control)
+    {
+        if (!string.IsNullOrEmpty(control.Name))
+            AddedControlNames.Add(control.Name);
+    }
+
+    internal void UnregisterAdded(ElementBase control)
+    {
+        if (!string.IsNullOrEmpty(control.Name))
+            AddedControlNames.Remove(control.Name);
     }
 
     /// <summary>A logical-space point translated into <paramref name="parent"/>'s own local space (its
@@ -736,6 +770,7 @@ public sealed class DesignSurface : Element
     {
         control.AutoSize = false;
         control.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        control.IsAncestorSiteInDesignMode = true;
         if (control.Dock == DockStyle.None)
             control.Anchor = AnchorStyles.Top | AnchorStyles.Left;
     }
@@ -759,6 +794,8 @@ public sealed class DesignSurface : Element
                     Selection.Remove(control);
                     _root.Controls.Remove(control);
                     Groups.Remove(control);
+                    if (!string.IsNullOrEmpty(control.Name) && !AddedControlNames.Remove(control.Name))
+                        DeletedControlNames.Add(control.Name);
                 }
                 AfterStructureChange();
             },
@@ -769,6 +806,8 @@ public sealed class DesignSurface : Element
                     _root.Controls.Add(control);
                     if (wasGroup.Contains(control))
                         Groups.Add(control);
+                    if (!string.IsNullOrEmpty(control.Name) && !DeletedControlNames.Remove(control.Name))
+                        AddedControlNames.Add(control.Name);
                 }
                 Selection.SetMany(doomed);
                 AfterStructureChange();
@@ -788,7 +827,7 @@ public sealed class DesignSurface : Element
             if (clone == null)
                 continue;
 
-            clone.Location = new SKPoint(source.Location.X + 16f, source.Location.Y + 16f);
+            clone.Location = new SKPoint(source.VisualLocation.X + 16f, source.VisualLocation.Y + 16f);
             clones.Add(clone);
         }
 
@@ -797,8 +836,26 @@ public sealed class DesignSurface : Element
 
         Commands.Execute(new DelegateCommand(
             $"Duplicate {clones.Count} control(s)",
-            () => { foreach (var c in clones) _root.Controls.Add(c); Selection.SetMany(clones); AfterStructureChange(); },
-            () => { foreach (var c in clones) { Selection.Remove(c); _root.Controls.Remove(c); } AfterStructureChange(); }));
+            () =>
+            {
+                foreach (var c in clones)
+                {
+                    _root.Controls.Add(c);
+                    RegisterAdded(c);
+                }
+                Selection.SetMany(clones);
+                AfterStructureChange();
+            },
+            () =>
+            {
+                foreach (var c in clones)
+                {
+                    Selection.Remove(c);
+                    _root.Controls.Remove(c);
+                    UnregisterAdded(c);
+                }
+                AfterStructureChange();
+            }));
     }
 
     /// <summary>Best-effort shallow clone of one designed control — a new instance of the same type
@@ -920,15 +977,30 @@ public sealed class DesignSurface : Element
         catch { /* keep the previous value in place */ }
     }
 
-    /// <summary>Forces the design root to re-run layout so Dock/Anchor/Size edits take effect immediately.</summary>
+    /// <summary>Forces the design tree to re-run layout so Dock/Anchor/Size edits take effect immediately.</summary>
     public void RelayoutRoot()
     {
-        _root.PerformLayout();
+        _root.ApplyStoredDesignLayout();
         Invalidate();
     }
 
-    public void BringToFront(ElementBase control) => ShiftZ(control, +1_000, "Bring to front");
-    public void SendToBack(ElementBase control) => ShiftZ(control, -1_000, "Send to back");
+    public new void BringToFront(ElementBase control)
+    {
+        var old = control.ZOrder;
+        Commands.Execute(new DelegateCommand(
+            "Bring to front",
+            () => { control.BringToFront(); Invalidate(); },
+            () => { control.ZOrder = old; Invalidate(); }));
+    }
+
+    public new void SendToBack(ElementBase control)
+    {
+        var old = control.ZOrder;
+        Commands.Execute(new DelegateCommand(
+            "Send to back",
+            () => { control.SendToBack(); Invalidate(); },
+            () => { control.ZOrder = old; Invalidate(); }));
+    }
 
     /// <summary>Undoable wrapper over the core <see cref="ElementBase.ReorderZ"/> primitive — e.g.
     /// after dragging a row to a new position in the Layers panel. All entries must already share the
@@ -953,19 +1025,6 @@ public sealed class DesignSurface : Element
             "Reorder layers",
             () => { ElementBase.ReorderZ(newOrderTopmostFirst); Invalidate(); },
             () => { foreach (var c in newOrderTopmostFirst) c.ZOrder = oldZ[c]; Invalidate(); }));
-    }
-
-    private void ShiftZ(ElementBase control, int delta, string label)
-    {
-        var old = control.ZOrder;
-        var max = DesignedControls.Count == 0 ? 0 : DesignedControls.Max(c => c.ZOrder);
-        var min = DesignedControls.Count == 0 ? 0 : DesignedControls.Min(c => c.ZOrder);
-        var target = delta > 0 ? max + 1 : min - 1;
-
-        Commands.Execute(new DelegateCommand(
-            label,
-            () => { control.ZOrder = target; Invalidate(); },
-            () => { control.ZOrder = old; Invalidate(); }));
     }
 
     // ── Alignment / distribution (Figma-style, over the selection) ──────────
@@ -1084,6 +1143,8 @@ public sealed class DesignSurface : Element
 
         public DesignRootCanvas(DesignSurface surface) => _s = surface;
 
+        protected override bool ClipChildrenToShape => false;
+
         public override void OnPaint(SKCanvas canvas)
         {
             base.OnPaint(canvas);
@@ -1141,7 +1202,7 @@ public sealed class DesignSurface : Element
         TopLeft, Top, TopRight, Left, Right, BottomLeft, Bottom, BottomRight
     }
 
-    private sealed class DesignOverlay : Element
+    private sealed class DesignOverlay : Element, IMouseCaptureLost
     {
         private readonly DesignSurface _s;
 
@@ -1152,6 +1213,9 @@ public sealed class DesignSurface : Element
         private bool _resizingRoot;
         private SKRect _rootDragBefore;
         private bool _ctrlDragDuplicated;
+        private bool _pendingBodyDrag;
+        private SKPoint _pendingBodyDragStart;
+        private const float BodyDragThreshold = 3f;
         private readonly List<(SKPoint A, SKPoint B)> _activeGuides = new();
 
         // ── Grid row/column live editing (WPF-designer-style strips along a selected Grid's own
@@ -1199,25 +1263,6 @@ public sealed class DesignSurface : Element
                     _fill.Color = color.WithAlpha(60);
                     canvas.DrawRect(ToOverlay(control), _fill);
                 }
-            }
-
-            // A control dragged fully or partly outside the form's own bounds otherwise becomes
-            // invisible (or nearly so) wherever it overflows — normal child rendering clips to Root's
-            // rect, same as it would at runtime — leaving no visible affordance to click and drag it
-            // back in. Drawn for every top-level control that pokes outside Root, not just a selected
-            // one, since the point is making an accidentally-stranded control discoverable at all;
-            // hit-testing (FindNestingTargetAt) was never clipped to Root, only the painting was.
-            foreach (var control in _s.DesignedControls)
-            {
-                if (!control.Visible)
-                    continue;
-                var bounds = ToOverlay(control);
-                if (RootOverlayRect.Contains(bounds))
-                    continue;
-                _stroke.Color = ColorScheme.Error.WithAlpha(190);
-                _stroke.PathEffect = _previewDash;
-                canvas.DrawRect(bounds, _stroke);
-                _stroke.PathEffect = null;
             }
 
             // Highlight the control group under the cursor while a toolbox drag hovers it — the
@@ -1401,6 +1446,13 @@ public sealed class DesignSurface : Element
                     canvas.DrawLine(a, b, _guide);
             }
 
+            // Outside-form controls. Drawn after selection so the primary selection stroke cannot
+            // cover the distinct outline, and for every designed control (including nested ones).
+            // Bounds come from VisualLocation: a right/bottom-anchored child keeps a negative
+            // Location while painting somewhere else, and testing Location marked the wrong rect
+            // (or none, once that rect fell outside the overlay).
+            DrawOutsideFormBorders(canvas);
+
             // The design root's own resize grips — a permanent affordance (not tied to selection) for
             // resizing the form itself, drawn last so it's always reachable on top of everything else.
             var rootBounds = RootOverlayRect;
@@ -1419,6 +1471,7 @@ public sealed class DesignSurface : Element
 
         public override void OnMouseDown(MouseEventArgs e)
         {
+            CancelPendingBodyDrag();
             base.OnMouseDown(e);
             Focus();
 
@@ -1514,8 +1567,14 @@ public sealed class DesignSurface : Element
                 _s.Selection.SelectOnly(hit);
             }
 
+            // Do not capture the mouse for a plain selection click. A click that does not move
+            // should remain a click: starting a body drag (and Win32 capture) here can leave the
+            // Studio's inspector/layers panels unable to receive the following mouse-up.
             if (_s.Selection.Contains(hit) && !_s.Locked.Contains(hit))
-                BeginBoundsDrag(Grip.Body, e.Location);
+            {
+                _pendingBodyDrag = true;
+                _pendingBodyDragStart = e.Location;
+            }
         }
 
         /// <summary>Double-clicking a plain label-like control (<see cref="Element"/>, <see cref="Badge"/>,
@@ -1609,6 +1668,22 @@ public sealed class DesignSurface : Element
         {
             base.OnMouseMove(e);
 
+            if (_pendingBodyDrag)
+            {
+                var dx = e.Location.X - _pendingBodyDragStart.X;
+                var dy = e.Location.Y - _pendingBodyDragStart.Y;
+                if (dx * dx + dy * dy >= BodyDragThreshold * BodyDragThreshold)
+                {
+                    var start = _pendingBodyDragStart;
+                    _pendingBodyDrag = false;
+                    BeginBoundsDrag(Grip.Body, start);
+                    ApplyBoundsDrag(e.Location);
+                    return;
+                }
+
+                return;
+            }
+
             if (_gridDragTarget != null)
             {
                 ApplyGridDividerDrag(e.Location);
@@ -1634,6 +1709,14 @@ public sealed class DesignSurface : Element
             }
         }
 
+        public override void OnMouseLeave(EventArgs e)
+        {
+            if (_mode == Grip.None)
+                CancelPendingBodyDrag();
+
+            base.OnMouseLeave(e);
+        }
+
         public override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
@@ -1652,6 +1735,7 @@ public sealed class DesignSurface : Element
                 case Grip.PanView:
                     break;
                 case Grip.None:
+                    CancelPendingBodyDrag();
                     return;
                 default:
                     _activeGuides.Clear();
@@ -1768,7 +1852,7 @@ public sealed class DesignSurface : Element
             _dragStart = mouse;
             _dragBefore = _s.Selection.Items
                 .Where(c => !_s.Locked.Contains(c))
-                .ToDictionary(c => c, c => SKRect.Create(c.Location, c.Size));
+                .ToDictionary(c => c, c => SKRect.Create(c.VisualLocation, c.Size));
             _ctrlDragDuplicated = false;
             Capture();
         }
@@ -1805,7 +1889,10 @@ public sealed class DesignSurface : Element
                 () =>
                 {
                     foreach (var (clone, parent, _) in clones)
+                    {
                         parent.Controls.Add(clone);
+                        _s.RegisterAdded(clone);
+                    }
                     _s.Selection.SetMany(clones.Select(c => c.Clone));
                     _s.AfterStructureChange();
                 },
@@ -1815,6 +1902,7 @@ public sealed class DesignSurface : Element
                     {
                         _s.Selection.Remove(clone);
                         parent.Controls.Remove(clone);
+                        _s.UnregisterAdded(clone);
                     }
                     _s.AfterStructureChange();
                 }));
@@ -1913,17 +2001,24 @@ public sealed class DesignSurface : Element
             if (!_s.SmartGuides)
                 return bounds;
 
-            var candidatesX = new List<float> { 0f, Root.Width / 2f, Root.Width };
-            var candidatesY = new List<float> { 0f, Root.Height / 2f, Root.Height };
-            foreach (var other in _s.DesignedControls)
+            var container = dragged.Parent as ElementBase ?? Root;
+            var isRoot = ReferenceEquals(container, Root);
+            var candidatesX = new List<float> { 0f, container.Width / 2f, container.Width };
+            var candidatesY = new List<float> { 0f, container.Height / 2f, container.Height };
+            var siblings = isRoot
+                ? (IEnumerable<ElementBase>)_s.DesignedControls
+                : container.Controls.OfType<ElementBase>();
+
+            foreach (var other in siblings)
             {
                 if (ReferenceEquals(other, dragged) || !other.Visible || _s.Selection.Contains(other))
                     continue;
-                var ob = SKRect.Create(other.Location, other.Size);
+                var ob = SKRect.Create(other.VisualLocation, other.Size);
                 candidatesX.Add(ob.Left); candidatesX.Add(ob.MidX); candidatesX.Add(ob.Right);
                 candidatesY.Add(ob.Top); candidatesY.Add(ob.MidY); candidatesY.Add(ob.Bottom);
             }
 
+            var containerOverlay = isRoot ? RootOverlayRect : ToOverlay(container);
             var result = bounds;
             foreach (var (edge, set) in new (float, string)[] { (bounds.Left, "L"), (bounds.MidX, "C"), (bounds.Right, "R") })
             {
@@ -1932,8 +2027,8 @@ public sealed class DesignSurface : Element
                 {
                     var shift = best - edge;
                     result = SKRect.Create(result.Left + shift, result.Top, result.Width, result.Height);
-                    var gx = Root.Location.X + best;
-                    _activeGuides.Add((new SKPoint(gx, Root.Location.Y), new SKPoint(gx, Root.Location.Y + Root.Height)));
+                    var gx = containerOverlay.Left + best;
+                    _activeGuides.Add((new SKPoint(gx, containerOverlay.Top), new SKPoint(gx, containerOverlay.Bottom)));
                     break;
                 }
             }
@@ -1945,8 +2040,8 @@ public sealed class DesignSurface : Element
                 {
                     var shift = best - edge;
                     result = SKRect.Create(result.Left, result.Top + shift, result.Width, result.Height);
-                    var gy = Root.Location.Y + best;
-                    _activeGuides.Add((new SKPoint(Root.Location.X, gy), new SKPoint(Root.Location.X + Root.Width, gy)));
+                    var gy = containerOverlay.Top + best;
+                    _activeGuides.Add((new SKPoint(containerOverlay.Left, gy), new SKPoint(containerOverlay.Right, gy)));
                     break;
                 }
             }
@@ -1960,9 +2055,9 @@ public sealed class DesignSurface : Element
             if (movable.Count == 0)
                 return;
 
-            var before = movable.ToDictionary(c => c, c => SKRect.Create(c.Location, c.Size));
+            var before = movable.ToDictionary(c => c, c => SKRect.Create(c.VisualLocation, c.Size));
             foreach (var c in movable)
-                c.Location = new SKPoint(c.Location.X + dx, c.Location.Y + dy);
+                c.Location = new SKPoint(c.VisualLocation.X + dx, c.VisualLocation.Y + dy);
             _s.CommitBoundsChange("Nudge", before);
             Invalidate();
         }
@@ -1974,7 +2069,7 @@ public sealed class DesignSurface : Element
                 _marquee.Right - Root.Location.X, _marquee.Bottom - Root.Location.Y);
 
             var hits = _s.DesignedControls
-                .Where(c => c.Visible && !_s.Locked.Contains(c) && rootRel.IntersectsWith(SKRect.Create(c.Location, c.Size)))
+                .Where(c => c.Visible && !_s.Locked.Contains(c) && rootRel.IntersectsWith(_s.GetDesignSpaceBounds(c)))
                 .ToList();
 
             if ((ModifierKeys & Keys.Control) == Keys.Control)
@@ -2083,6 +2178,35 @@ public sealed class DesignSurface : Element
         {
             var loc = _s.GetDesignSpaceLocation(designed);
             return SKRect.Create(Root.Location.X + loc.X, Root.Location.Y + loc.Y, designed.Width, designed.Height);
+        }
+
+        private void DrawOutsideFormBorders(SKCanvas canvas)
+        {
+            var root = RootOverlayRect;
+            foreach (var control in _s.AllDesignedControls)
+            {
+                if (!control.Visible || control.Width <= 0f || control.Height <= 0f)
+                    continue;
+
+                var bounds = ToOverlay(control);
+                if (!ExtendsOutside(root, bounds))
+                    continue;
+
+                _stroke.Color = ColorScheme.Error.WithAlpha(190);
+                _stroke.PathEffect = _previewDash;
+                _stroke.StrokeWidth = 1.4f;
+                canvas.DrawRect(bounds, _stroke);
+                _stroke.PathEffect = null;
+            }
+        }
+
+        private static bool ExtendsOutside(SKRect outer, SKRect inner)
+        {
+            const float slop = 0.5f;
+            return inner.Left < outer.Left - slop
+                || inner.Top < outer.Top - slop
+                || inner.Right > outer.Right + slop
+                || inner.Bottom > outer.Bottom + slop;
         }
 
         /// <summary>The design root's own bounds in overlay space — <see cref="Root"/>'s Location is
@@ -2321,9 +2445,9 @@ public sealed class DesignSurface : Element
                 _gridDragTarget = grid;
                 _gridDragIsRow = divider.IsRow;
                 _gridDragIndex = divider.Index;
-                _gridDragOldLength = divider.IsRow ? grid.RowDefinitions[divider.Index].Height : grid.ColumnDefinitions[divider.Index].Width;
                 _gridDragStartSize = divider.IsRow ? grid.RowDefinitions[divider.Index].ActualHeight : grid.ColumnDefinitions[divider.Index].ActualWidth;
                 _gridDragStartMouse = divider.IsRow ? mouse.Y : mouse.X;
+                _gridDragOldLength = divider.IsRow ? grid.RowDefinitions[divider.Index].Height : grid.ColumnDefinitions[divider.Index].Width;
                 Capture();
                 return true;
             }
@@ -2478,8 +2602,30 @@ public sealed class DesignSurface : Element
             return grip is Grip.Right or Grip.Bottom or Grip.BottomRight ? grip : Grip.None;
         }
 
+        private void CancelPendingBodyDrag()
+        {
+            _pendingBodyDrag = false;
+            _pendingBodyDragStart = SKPoint.Empty;
+        }
+
         private void Capture() => GetParentWindow()?.SetMouseCapture(this);
         private void Release() => GetParentWindow()?.ReleaseMouseCapture(this);
+
+        public void OnMouseCaptureLost()
+        {
+            // Native mouse capture was lost without a matching mouse-up (e.g. window
+            // deactivation, alt-tab, modal dialog). Cancel any in-progress drag so the
+            // overlay doesn't remain in a stale captured state that blocks the UI.
+            _mode = Grip.None;
+            _dragBefore = null;
+            _resizingRoot = false;
+            _ctrlDragDuplicated = false;
+            _pendingBodyDrag = false;
+            _gridDragTarget = null;
+            _activeGuides.Clear();
+            _s.SetHoverNestingTarget(null);
+            Invalidate();
+        }
 
         protected override void Dispose(bool disposing)
         {

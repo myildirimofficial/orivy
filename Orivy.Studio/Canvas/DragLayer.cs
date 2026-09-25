@@ -12,7 +12,7 @@ namespace Orivy.Studio.Canvas;
 /// captures the mouse, draws a small "ghost" chip that follows the cursor, and on release reports
 /// the drop in screen coordinates so the shell can place the control on the active canvas.
 /// </summary>
-public sealed class DragLayer : Element
+public sealed class DragLayer : Element, IMouseCaptureLost
 {
     private ControlEntry? _entry;
     private SKPoint _ghost;
@@ -79,6 +79,14 @@ public sealed class DragLayer : Element
         Visible = false;
         GetParentWindow()?.ReleaseMouseCapture(this);
         Invalidate();
+    }
+
+    public void OnMouseCaptureLost()
+    {
+        // Native mouse capture was lost without a matching mouse-up (e.g. window
+        // deactivation, alt-tab, modal dialog). Cancel the drag so the overlay
+        // doesn't remain visible and blocking the UI.
+        Cancel();
     }
 
     public override void OnPaint(SKCanvas canvas)

@@ -15,7 +15,7 @@ namespace Orivy.Studio.Panels;
 /// overrides the mouse handlers directly, so drag-to-canvas works reliably (GridList does not raise
 /// the public MouseMove event, and WM_MOUSEMOVE reports no button, which broke event-based DnD).
 /// </summary>
-public sealed class ToolboxList : Element
+public sealed class ToolboxList : Element, IMouseCaptureLost
 {
     private const float HeaderHeight = 22f;
     private const float RowHeight = 32f;
@@ -299,6 +299,14 @@ public sealed class ToolboxList : Element
     {
         _armed = false;
         _armedEntry = null;
+    }
+
+    public void OnMouseCaptureLost()
+    {
+        // Native mouse capture was lost without a matching mouse-up (e.g. window
+        // deactivation, alt-tab, modal dialog). Disarm any in-progress toolbox drag
+        // so the list doesn't remain in a stale armed state.
+        Disarm();
     }
 
     protected override void Dispose(bool disposing)

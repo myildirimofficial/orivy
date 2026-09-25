@@ -678,6 +678,25 @@ private IntPtr _hWnd;
         {
             var commandKeyData = keyData | ModifierKeys;
 
+            // When a text box or rich text editor is focused, give it first chance to handle standard
+            // editing shortcuts (Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X, Ctrl+Z, Ctrl+Y, Delete, Back) so window-level
+            // menu shortcuts (like Studio's canvas Select All or Undo) don't hijack editing.
+            if (FocusedElement is TextBox focusedTextBox && focusedTextBox.Enabled)
+            {
+                var modifierMask = Keys.Shift | Keys.Control | Keys.Alt;
+                var baseKey = keyData & ~modifierMask;
+                var hasCtrl = (ModifierKeys & Keys.Control) == Keys.Control;
+                var hasAlt = (ModifierKeys & Keys.Alt) == Keys.Alt;
+                if (!hasAlt && ((hasCtrl && baseKey is Keys.A or Keys.C or Keys.V or Keys.X or Keys.Z or Keys.Y)
+                                || baseKey is Keys.Delete or Keys.Back))
+                {
+                    var textKeyArgs = new KeyEventArgs(baseKey, ModifierKeys);
+                    focusedTextBox.OnKeyDown(textKeyArgs);
+                    if (textKeyArgs.Handled)
+                        return true;
+                }
+            }
+
             if (TryHandleMenuShortcut(Controls, commandKeyData))
                 return true;
 
@@ -1251,6 +1270,20 @@ private IntPtr _hWnd;
                     OnMouseWheel(args);
                     return IntPtr.Zero;
                 }
+            case WindowMessage.WM_CAPTURECHANGED:
+                {
+                    // Mouse capture was lost without a matching mouse-up (e.g. the window lost
+                    // activation, or another window took capture). Clear the tracked owner before
+                    // cancellation so callbacks cannot observe or redispatch stale capture state.
+                    var capturedElement = _mouseCapturedElement;
+                    _mouseCapturedElement = null;
+                    if (capturedElement is IMouseCaptureLost captureAwareElement)
+                    {
+                        captureAwareElement.OnMouseCaptureLost();
+                    }
+
+                    return IntPtr.Zero;
+                }
             case WindowMessage.WM_KEYDOWN:
             case WindowMessage.WM_SYSKEYDOWN:
                 {
@@ -1555,7 +1588,50 @@ private IntPtr _hWnd;
 
     public virtual void  OnDeactivate(EventArgs e)
     {
+        // When the window loses activation (alt-tab, another window steals focus, a modal opens),
+        // the currently-focused child element must be told it lost focus too. Without this, a
+        // focused TextBox keeps its Focused flag set (and its caret blinking) even though the window
+        // is no longer active — the window's own OnLostFocus only clears the window's flag, not the
+        // child's. Clearing the focused element here fires the child's OnLostFocus so it can tear
+        // down its transient focus state (stop the caret, release capture, commit an editor).
+        ClearChildFocus();
+
         Deactivated?.Invoke(this, e);
+    }
+
+    /// <summary>
+    /// The window itself losing focus (WM_KILLFOCUS) must also clear the focused child element, for
+    /// the same reason <see cref="OnDeactivate"/> does — otherwise a focused TextBox keeps its caret
+    /// blinking while the window is unfocused. The base implementation only clears the window's own
+    /// Focused flag; this additionally tells the focused child it lost focus.
+    /// </summary>
+    public override void  OnLostFocus(EventArgs e)
+    {
+        ClearChildFocus();
+        base.OnLostFocus(e);
+    }
+
+    private bool _clearingChildFocus;
+
+    /// <summary>
+    /// Clears <see cref="ElementBase.FocusedElement"/> once. The child's <c>OnLostFocus</c> can
+    /// commit an editor that moves focus again; without this guard that re-enters until the
+    /// inspector stops taking input.
+    /// </summary>
+    private void ClearChildFocus()
+    {
+        if (_clearingChildFocus || FocusedElement == null)
+            return;
+
+        _clearingChildFocus = true;
+        try
+        {
+            FocusedElement = null;
+        }
+        finally
+        {
+            _clearingChildFocus = false;
+        }
     }
 
     public virtual void  OnActivated(EventArgs e)

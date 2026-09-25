@@ -40,6 +40,13 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     // Guard to prevent layout during Arrange phase
     private bool _isArranging;
 
+    /// <summary>
+    /// While &gt; 0, a design-mode container may run <see cref="DefaultLayout"/> even though
+    /// <see cref="IsAncestorSiteInDesignMode"/> would otherwise keep the stored bounds.
+    /// </summary>
+    [ThreadStatic]
+    private static int s_explicitDesignLayout;
+
     // Guard to prevent re-entrant PerformLayout calls from causing stack overflows.
     private SKSize _lastMeasureConstraint;
     private int _layoutPassId;
@@ -878,12 +885,29 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                 return;
 
             _location = value;
+            SyncAnchorFromBounds();
 
-            Parent?.PerformLayout(this, nameof(Location));
+            if (CommonProperties.GetNeedsDockLayout(this) || AutoSize)
+            {
+                Parent?.PerformLayout(this, nameof(Location));
+            }
 
             OnLocationChanged(EventArgs.Empty);
         }
     }
+
+    /// <summary>
+    /// Position used when painting. Anchored children can render outside the parent's layout box
+    /// while <see cref="Location"/> stays at the layout coordinate, so adorners must follow this.
+    /// </summary>
+    [Browsable(false)]
+    public SKPoint VisualLocation => GetRenderLocation();
+
+    /// <summary>
+    /// When false, children are painted after the rounded shape clip is removed, so a child that
+    /// extends past this element stays visible. Runtime controls keep the default.
+    /// </summary>
+    protected virtual bool ClipChildrenToShape => true;
 
     [ThreadStatic] private static GRContext? s_currentGpuContext;
 
@@ -1002,6 +1026,13 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             if (_size == newSize) return;
             _size = newSize;
             SetStyleBaseSize(newSize, preserveOverriddenDimensions: _isArranging);
+            SyncAnchorFromBounds();
+
+            if (CommonProperties.GetNeedsDockLayout(this) || AutoSize)
+            {
+                Parent?.PerformLayout(this, nameof(Size));
+            }
+
             OnSizeChanged(EventArgs.Empty);
             RefreshVisualStyles(forceImmediate: !_visualStylesEnabled || !_visualStyleAnimation.IsAnimating());
         }
@@ -1017,6 +1048,23 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
             Size = value.Size;
         }
+    }
+
+    /// <summary>
+    /// A direct Location/Size write is the new anchor baseline. Without this, the next layout
+    /// (showing the design page again, resizing the parent) reapplies the margins captured at the
+    /// previous position and the edit snaps back.
+    /// </summary>
+    private void SyncAnchorFromBounds()
+    {
+        if (_isArranging || Parent == null || !CommonProperties.GetNeedsAnchorLayout(this))
+            return;
+
+        var display = Parent.DisplayRectangle;
+        if (display.Width <= 0f || display.Height <= 0f)
+            return;
+
+        DefaultLayout.UpdateAnchorInfo(this);
     }
 
     /// <summary>
@@ -2115,6 +2163,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private static bool UsesAnchorOverflowLayout(ElementBase element)
     {
+        if (element.IsAncestorSiteInDesignMode)
+            return false;
+
         var anchor = element.Anchor;
         return element.Dock == DockStyle.None &&
                (((anchor & AnchorStyles.Right) == AnchorStyles.Right &&
@@ -2192,6 +2243,31 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     private SKRect GetRenderBounds()
     {
         return SKRect.Create(GetRenderLocation(), Size);
+    }
+
+    /// <summary>
+    /// Hit rectangle in parent space. The element's own bounds, plus anchor-overflow children that
+    /// paint outside it after the scale transform is restored. Children that are only larger in
+    /// local space because of <see cref="ChildRenderScale"/> (the design overlay is Width/zoom)
+    /// are excluded: on screen they fit the parent, and unioning them covered the panels beside
+    /// the canvas.
+    /// </summary>
+    private SKRect GetInputBounds()
+    {
+        var bounds = GetRenderBounds();
+
+        for (var i = 0; i < Controls.Count; i++)
+        {
+            if (Controls[i] is not ElementBase child || !child.Visible)
+                continue;
+
+            if (!UsesAnchorOverflowLayout(child))
+                continue;
+
+            bounds = UnionRects(bounds, child.GetInputBounds());
+        }
+
+        return bounds;
     }
 
     private SKRect GetRenderBoundsWithOverflow()
@@ -2293,7 +2369,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
             var candidatePoint = GetInputCandidatePoint(control, originalPoint, adjustedPoint, scale);
 
-            if (!control.GetRenderBoundsWithOverflow().Contains(candidatePoint))
+            if (!control.GetInputBounds().Contains(candidatePoint))
                 continue;
 
             target = control;
@@ -2816,6 +2892,15 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
             if (ShouldRenderDefaultText)
                 RenderDefaultText(targetCanvas);
+
+            // Lift the rounded shape clip before children when a host (the design root) must show
+            // controls that sit outside its own bounds. The child clip below still unions those
+            // children, so they paint; the shape clip would otherwise intersect that union away.
+            if (!ClipChildrenToShape && shapeClipSaveCount >= 0)
+            {
+                targetCanvas.RestoreToCount(shapeClipSaveCount);
+                shapeClipSaveCount = -1;
+            }
 
             // ── Children ──
             var customRenderedChildren = false;
@@ -3424,7 +3509,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
     [Browsable(false)]
-    public bool IsAncestorSiteInDesignMode { get; internal set; }
+    public bool IsAncestorSiteInDesignMode { get; set; }
 
     public virtual void  AdjustSize()
     {
@@ -4834,10 +4919,42 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
+    /// <summary>
+    /// Runs dock/anchor layout for this design container and every nested container.
+    /// Spontaneous layout (showing the design page, resizing the shell) does not call this, so a
+    /// drag or property edit survives a round trip through the code view.
+    /// </summary>
+    public void ApplyStoredDesignLayout()
+    {
+        s_explicitDesignLayout++;
+        try
+        {
+            ApplyStoredDesignLayoutCore(this);
+        }
+        finally
+        {
+            s_explicitDesignLayout--;
+        }
+    }
+
+    private static void ApplyStoredDesignLayoutCore(ElementBase node)
+    {
+        node.PerformLayout();
+        for (var i = 0; i < node.Controls.Count; i++)
+        {
+            if (node.Controls[i] is ElementBase child && child.Controls.Count > 0)
+                ApplyStoredDesignLayoutCore(child);
+        }
+    }
+
     public virtual void  OnLayout(LayoutEventArgs e)
     {
         Layout?.Invoke(this, e);
-        Orivy.Layout.DefaultLayout.Instance.Layout(this, e);
+        // Showing the design page again calls ForceDescendantsLayout. Dock/anchor would then
+        // rewrite every designed control back to the margins captured before the edit, so the
+        // canvas and the code generated immediately afterwards both look like the old file.
+        if (!IsAncestorSiteInDesignMode || s_explicitDesignLayout > 0)
+            Orivy.Layout.DefaultLayout.Instance.Layout(this, e);
         ResolveChildOverflowLocations();
 
         if (AutoSize && Parent == null)
