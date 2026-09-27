@@ -107,6 +107,8 @@ public static class CodeImporter
         var declarationOrder = new List<string>();
         // Empty parent name means "the design root" (a plain Controls.Add(x) call).
         var addEdges = new List<(string ParentName, string ChildName)>();
+        var eventWires = new List<EventWire>();
+        var controlBindings = new List<ControlBinding>();
         SKSize? clientSize = null;
 
         // Cross-file inheritance: a Designer.cs whose InitializeComponent only ever touches fields
@@ -130,12 +132,12 @@ public static class CodeImporter
             {
                 LoadBaseClassChain(
                     filePath, className, knownTypeNames, declaredFields, declaredFieldTypes,
-                    nodes, declarationOrder, addEdges, ref clientSize,
+                    nodes, declarationOrder, addEdges, ref clientSize, eventWires, controlBindings,
                     visited: new HashSet<string>(StringComparer.Ordinal), depthRemaining: 6);
             }
         }
 
-        ProcessCompilationUnit(compilationUnit, knownTypeNames, declaredFields, declaredFieldTypes, nodes, declarationOrder, addEdges, ref clientSize);
+        ProcessCompilationUnit(compilationUnit, knownTypeNames, declaredFields, declaredFieldTypes, nodes, declarationOrder, addEdges, ref clientSize, eventWires, controlBindings);
 
         if (declarationOrder.Count == 0)
             throw new InvalidOperationException("No control declarations found — is this Designer code Orivy Studio generated?");
@@ -154,7 +156,7 @@ public static class CodeImporter
                 localBaseTypeOf[classDecl.Identifier.Text] = GetSimpleTypeName(baseType.Type);
         }
 
-        return Rebuild(surface, clientSize, nodes, declarationOrder, addEdges, localBaseTypeOf, projectClasses);
+        return Rebuild(surface, clientSize, nodes, declarationOrder, addEdges, localBaseTypeOf, projectClasses, eventWires, controlBindings);
     }
 
     private sealed record ProjectClassInfo(string? BaseType, string? FilePath, string? DesignerPath);
@@ -257,6 +259,8 @@ public static class CodeImporter
         List<string> declarationOrder,
         List<(string ParentName, string ChildName)> addEdges,
         ref SKSize? clientSize,
+        List<EventWire> eventWires,
+        List<ControlBinding> controlBindings,
         HashSet<string> visited,
         int depthRemaining)
     {
@@ -297,8 +301,8 @@ public static class CodeImporter
                 if (!TryParseClass(file, baseTypeName, out _, out var baseUnit))
                     continue;
 
-                ProcessCompilationUnit(baseUnit!, knownTypeNames, declaredFields, declaredFieldTypes, nodes, declarationOrder, addEdges, ref clientSize);
-                LoadBaseClassChain(file, baseTypeName, knownTypeNames, declaredFields, declaredFieldTypes, nodes, declarationOrder, addEdges, ref clientSize, visited, depthRemaining - 1);
+                ProcessCompilationUnit(baseUnit!, knownTypeNames, declaredFields, declaredFieldTypes, nodes, declarationOrder, addEdges, ref clientSize, eventWires, controlBindings);
+                LoadBaseClassChain(file, baseTypeName, knownTypeNames, declaredFields, declaredFieldTypes, nodes, declarationOrder, addEdges, ref clientSize, eventWires, controlBindings, visited, depthRemaining - 1);
                 return;
             }
         }
@@ -363,7 +367,9 @@ public static class CodeImporter
         Dictionary<string, NodeInfo> nodes,
         List<string> declarationOrder,
         List<(string ParentName, string ChildName)> addEdges,
-        ref SKSize? clientSize)
+        ref SKSize? clientSize,
+        List<EventWire>? eventWires = null,
+        List<ControlBinding>? controlBindings = null)
     {
         // Recognizes both dialects: the compact object-initializer form CodeGenerator itself emits
         // (`button1 = new Button { Location = ..., ... };`) and the classic WinForms Designer.cs shape
@@ -437,6 +443,8 @@ public static class CodeImporter
 
             if (statement is not ExpressionStatementSyntax { Expression: var expression })
                 continue;
+
+            DesignInteractions.Collect(expression, eventWires, controlBindings);
 
             switch (expression)
             {
@@ -1217,7 +1225,9 @@ public static class CodeImporter
         List<string> declarationOrder,
         List<(string ParentName, string ChildName)> addEdges,
         Dictionary<string, string> localBaseTypeOf,
-        Dictionary<string, ProjectClassInfo> projectClasses)
+        Dictionary<string, ProjectClassInfo> projectClasses,
+        List<EventWire> eventWires,
+        List<ControlBinding> controlBindings)
     {
         var skipped = new List<string>();
         var catalog = ControlCatalog.Discover().ToDictionary(e => e.DisplayName, StringComparer.Ordinal);
@@ -1339,6 +1349,10 @@ public static class CodeImporter
         surface.Groups.Clear();
         surface.DeletedControlNames.Clear();
         surface.AddedControlNames.Clear();
+        surface.EventWires.Clear();
+        surface.ControlBindings.Clear();
+        surface.EventWires.AddRange(eventWires);
+        surface.ControlBindings.AddRange(controlBindings);
 
         if (clientSize is { Width: > 0, Height: > 0 })
             surface.DesignRoot.Size = clientSize.Value;

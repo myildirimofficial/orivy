@@ -175,7 +175,7 @@ public sealed class DesignDocument : Container, IStudioDocument
     public string GetPersistedSource()
     {
         var className = string.IsNullOrWhiteSpace(DocumentName) ? "MyWindow" : DocumentName;
-        return CodeMerger.Apply(OriginalSourceText, Surface, className);
+        return CodeMerger.Apply(OriginalSourceText, Surface, className, FilePath);
     }
 
     public void MarkClean()

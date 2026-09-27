@@ -32,6 +32,9 @@ public sealed class StudioWindow : Window
     private readonly LayersPanel _layers;
     private readonly PropertyGrid _inspector = new() { Dock = DockStyle.Fill, PropertySort = PropertySort.Categorized };
     private readonly LayoutHelperBar _layoutBar;
+    private readonly EventHelper _eventHelper;
+    private readonly BindingHelper _bindingHelper;
+    private readonly TabView _inspectorTabs = new() { Dock = DockStyle.Fill };
     private readonly DragLayer _dragLayer = new();
     private readonly StartScreen _startScreen = new();
 
@@ -135,6 +138,8 @@ public sealed class StudioWindow : Window
         _active = firstDoc.Surface;
         _layers = new LayersPanel(_active) { Dock = DockStyle.Top, Height = 230, Margin = new Thickness(0, 0, 0, 10) };
         _layoutBar = new LayoutHelperBar(() => _active) { Dock = DockStyle.Top, Height = 92, Margin = new Thickness(0, 0, 0, 10) };
+        _eventHelper = new EventHelper(() => _active) { Dock = DockStyle.Fill };
+        _bindingHelper = new BindingHelper(() => _active) { Dock = DockStyle.Fill };
 
         BuildLayout();
         TabView = _documents; // hosts the tab strip in the native title bar (TabViewMode.TitleBar)
@@ -343,8 +348,35 @@ public sealed class StudioWindow : Window
 
         innerSplit.Panel1.Controls.Add(_documents);
 
-        innerSplit.Panel2.Controls.Add(_inspector);
-        innerSplit.Panel2.Controls.Add(Header("sliders", "Properties", sortPropertiesButton));
+        var propertiesPage = new Container { Dock = DockStyle.Fill, Text = "Properties", Border = new Thickness(0), Radius = new Radius(0) };
+        var eventsPage = new Container { Dock = DockStyle.Fill, Text = "Events", Border = new Thickness(0), Radius = new Radius(0) };
+        var bindingsPage = new Container { Dock = DockStyle.Fill, Text = "Bindings", Border = new Thickness(0), Radius = new Radius(0) };
+        var sortRow = new Element
+        {
+            Dock = DockStyle.Top, Height = 32, Margin = new Thickness(0, 0, 0, 6),
+            Border = new Thickness(0), Radius = new Radius(0), BackColor = SKColors.Transparent,
+        };
+        sortRow.Controls.Add(sortPropertiesButton);
+        propertiesPage.Controls.Add(_inspector);
+        propertiesPage.Controls.Add(sortRow);
+        eventsPage.Controls.Add(_eventHelper);
+        bindingsPage.Controls.Add(_bindingHelper);
+
+        _inspectorTabs.TabMode = TabViewMode.Embedded;
+        _inspectorTabs.TabDesignMode = TabViewDesignMode.Rectangle;
+        _inspectorTabs.TabLayoutMode = TabViewLayoutMode.Top;
+        _inspectorTabs.TabStripHeight = 32f;
+        _inspectorTabs.EnableTransitions = false;
+        _inspectorTabs.DrawTabIcons = false;
+        _inspectorTabs.Border = new Thickness(0);
+        _inspectorTabs.Radius = new Radius(0);
+        _inspectorTabs.BackColor = SKColors.Transparent;
+        _inspectorTabs.Controls.Add(propertiesPage);
+        _inspectorTabs.Controls.Add(bindingsPage);
+        _inspectorTabs.Controls.Add(eventsPage);
+        _inspectorTabs.SelectedTab = propertiesPage;
+
+        innerSplit.Panel2.Controls.Add(_inspectorTabs);
         innerSplit.Panel2.Controls.Add(_layoutBar);
         innerSplit.Panel2.Controls.Add(Header("layout", "Layout"));
         innerSplit.Panel2.Controls.Add(_layers);
@@ -653,6 +685,7 @@ public sealed class StudioWindow : Window
 
         _layers.Attach(_active);
         RefreshSelectionDependentUi();
+        RefreshInteractionPages();
         RefreshAllPanels();
     }
 
@@ -680,12 +713,14 @@ public sealed class StudioWindow : Window
     {
         QueueInspectorRefresh();
         RefreshSelectionDependentUi();
+        RefreshInteractionPages();
         UpdateStatus();
     }
 
     private void OnStructureChanged()
     {
         QueueInspectorRefresh();
+        RefreshInteractionPages();
         UpdateStatus();
     }
 
@@ -757,6 +792,12 @@ public sealed class StudioWindow : Window
     {
         _layoutBar.Refresh();
         _gridToolsGroup.Visible = _active.Selection.Primary is Grid;
+    }
+
+    private void RefreshInteractionPages()
+    {
+        _eventHelper.Reload();
+        _bindingHelper.Reload();
     }
     private void OnZoomChanged() => _zoomLabel.Text = $"{_active.Zoom * 100f:0}%";
     private void OnCommandsChanged() { UpdateHistoryButtons(); _layers.Rebuild(); }

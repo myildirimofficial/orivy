@@ -2,6 +2,7 @@ using Orivy;
 using Orivy.Controls;
 using SkiaSharp;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
@@ -44,15 +45,33 @@ public static class CodeGenerator
         sb.AppendLine();
 
         foreach (var control in controls)
-            AppendInitializer(sb, control, inv);
+            AppendInitializer(sb, control, inv, surface);
 
         sb.AppendLine();
         foreach (var control in controls)
             AppendAddCalls(sb, control, "Controls");
 
         sb.AppendLine("    }");
+        AppendHandlerMethods(sb, surface);
         sb.AppendLine("}");
         return sb.ToString();
+    }
+
+    private static void AppendHandlerMethods(StringBuilder sb, DesignSurface surface)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var wire in surface.EventWires)
+        {
+            if (!DesignInteractions.TryPlainHandlerName(wire.Handler, out var name) || !seen.Add(name))
+                continue;
+
+            var method = DesignInteractions.FormatHandlerMethod(surface, wire);
+            if (method.Length == 0)
+                continue;
+
+            sb.AppendLine();
+            sb.AppendLine(method);
+        }
     }
 
     private static void AppendFieldDeclaration(StringBuilder sb, ElementBase control)
@@ -62,7 +81,7 @@ public static class CodeGenerator
             AppendFieldDeclaration(sb, child);
     }
 
-    private static void AppendInitializer(StringBuilder sb, ElementBase control, IFormatProvider inv)
+    private static void AppendInitializer(StringBuilder sb, ElementBase control, IFormatProvider inv, DesignSurface surface)
     {
         sb.AppendLine($"        {control.Name} = new {control.GetType().Name}");
         sb.AppendLine("        {");
@@ -80,9 +99,25 @@ public static class CodeGenerator
         if (!control.Visible)
             sb.AppendLine("            Visible = false,");
         sb.AppendLine("        };");
+        AppendControlInteractions(sb, surface, control.Name);
 
         foreach (var child in NestedDesignedChildren(control))
-            AppendInitializer(sb, child, inv);
+            AppendInitializer(sb, child, inv, surface);
+    }
+
+    private static void AppendControlInteractions(StringBuilder sb, DesignSurface surface, string controlName)
+    {
+        foreach (var wire in surface.EventWires)
+        {
+            if (wire.ControlName == controlName && !string.IsNullOrWhiteSpace(wire.Handler))
+                sb.AppendLine(DesignInteractions.FormatEvent(wire));
+        }
+
+        foreach (var binding in surface.ControlBindings)
+        {
+            if (binding.ControlName == controlName)
+                sb.AppendLine(DesignInteractions.FormatBinding(surface, binding));
+        }
     }
 
     private static string FormatDock(DockStyle dock) => $"DockStyle.{dock}";

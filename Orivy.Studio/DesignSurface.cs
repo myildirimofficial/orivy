@@ -45,6 +45,12 @@ public sealed class DesignSurface : Element
     /// to be missing from the opened source.</summary>
     public HashSet<string> AddedControlNames { get; } = new(StringComparer.Ordinal);
 
+    /// <summary><c>name.Event += handler</c> lines edited from the Events page.</summary>
+    public List<EventWire> EventWires { get; } = new();
+
+    /// <summary><c>Link().From()</c> lines edited from the Bindings page.</summary>
+    public List<ControlBinding> ControlBindings { get; } = new();
+
     /// <summary>Controls excluded from hit-testing and dragging (still rendered).</summary>
     public HashSet<ElementBase> Locked { get; } = new();
 
@@ -773,6 +779,23 @@ public sealed class DesignSurface : Element
         control.IsAncestorSiteInDesignMode = true;
         if (control.Dock == DockStyle.None)
             control.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+        MarkDesignMode(control);
+    }
+
+    /// <summary>
+    /// Constructor-built children are not passed through <see cref="PrepareForDesign"/> themselves.
+    /// Without the flag their anchor layout still runs and a drag snaps back to the stored margin.
+    /// </summary>
+    private static void MarkDesignMode(ElementBase control)
+    {
+        foreach (var child in control.Controls)
+        {
+            if (child is not ElementBase element)
+                continue;
+
+            element.IsAncestorSiteInDesignMode = true;
+            MarkDesignMode(element);
+        }
     }
 
     public void DeleteSelection()
@@ -784,6 +807,9 @@ public sealed class DesignSurface : Element
             return;
 
         var wasGroup = doomed.Where(Groups.Contains).ToList();
+        var names = new HashSet<string>(doomed.Select(control => control.Name).Where(name => !string.IsNullOrEmpty(name))!);
+        var wires = EventWires.Where(wire => names.Contains(wire.ControlName)).ToList();
+        var bindings = ControlBindings.Where(binding => names.Contains(binding.ControlName) || (binding.SourceControl != null && names.Contains(binding.SourceControl))).ToList();
 
         Commands.Execute(new DelegateCommand(
             doomed.Count == 1 ? $"Delete {doomed[0].Name}" : $"Delete {doomed.Count} controls",
@@ -797,6 +823,8 @@ public sealed class DesignSurface : Element
                     if (!string.IsNullOrEmpty(control.Name) && !AddedControlNames.Remove(control.Name))
                         DeletedControlNames.Add(control.Name);
                 }
+                EventWires.RemoveAll(wire => wires.Contains(wire));
+                ControlBindings.RemoveAll(binding => bindings.Contains(binding));
                 AfterStructureChange();
             },
             () =>
@@ -809,6 +837,8 @@ public sealed class DesignSurface : Element
                     if (!string.IsNullOrEmpty(control.Name) && !DeletedControlNames.Remove(control.Name))
                         AddedControlNames.Add(control.Name);
                 }
+                EventWires.AddRange(wires);
+                ControlBindings.AddRange(bindings);
                 Selection.SetMany(doomed);
                 AfterStructureChange();
             }));
@@ -899,6 +929,8 @@ public sealed class DesignSurface : Element
         // themselves, or undoing a clear silently strips lock/group state that was never touched.
         var lockedBefore = all.Where(Locked.Contains).ToList();
         var groupsBefore = all.Where(Groups.Contains).ToList();
+        var wires = EventWires.ToList();
+        var bindings = ControlBindings.ToList();
 
         Commands.Execute(new DelegateCommand(
             "New document",
@@ -911,6 +943,8 @@ public sealed class DesignSurface : Element
                     Locked.Remove(c);
                     Groups.Remove(c);
                 }
+                EventWires.Clear();
+                ControlBindings.Clear();
                 AfterStructureChange();
             },
             () =>
@@ -923,6 +957,8 @@ public sealed class DesignSurface : Element
                     if (groupsBefore.Contains(c))
                         Groups.Add(c);
                 }
+                EventWires.AddRange(wires);
+                ControlBindings.AddRange(bindings);
                 AfterStructureChange();
             }));
     }

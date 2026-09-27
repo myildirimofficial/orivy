@@ -885,6 +885,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                 return;
 
             _location = value;
+            if (IsAncestorSiteInDesignMode)
+                _hasRenderLocationOverride = false;
             SyncAnchorFromBounds();
 
             if (CommonProperties.GetNeedsDockLayout(this) || AutoSize)
@@ -5002,7 +5004,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     private static SKPoint GetChildOverflowLocation(SKRect bounds, ElementBase child)
     {
         if (!child.Visible || !UsesAnchorOverflowLayout(child))
-            return child.GetRenderLocation();
+            return child.Location;
 
         var anchor = child.Anchor;
         var location = child.Location;

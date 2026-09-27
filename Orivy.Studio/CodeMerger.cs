@@ -21,7 +21,7 @@ public static class CodeMerger
 {
     private static readonly string[] TrackedProperties = { "Location", "Size", "Dock", "Anchor", "Text", "Visible" };
 
-    public static string Apply(string? original, DesignSurface surface, string className)
+    public static string Apply(string? original, DesignSurface surface, string className, string? filePath = null)
     {
         if (string.IsNullOrWhiteSpace(original))
             return CodeGenerator.Generate(surface, className);
@@ -46,11 +46,12 @@ public static class CodeMerger
         var deleted = new HashSet<string>(surface.DeletedControlNames, StringComparer.Ordinal);
 
         var rewriter = new DesignSourceRewriter(live, deleted, added, surface.DesignRoot);
-        var rewritten = rewriter.Visit(root);
-        if (rewritten == null || !rewriter.Changed)
+        var rewritten = rewriter.Visit(root) ?? root;
+        var synced = DesignInteractions.Sync(rewritten, surface, out var interactionsChanged, filePath);
+        if (!rewriter.Changed && !interactionsChanged)
             return original;
 
-        return rewritten.ToFullString();
+        return synced.ToFullString();
     }
 
     private static string? ResolveTargetName(ExpressionSyntax expression) => expression switch

@@ -21,7 +21,8 @@ public class NumericUpDown : ElementBase
     private readonly SKPaint _fillPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _borderPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke };
     private readonly SKPaint _textPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
-    private readonly SKPaint _glyphPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round };
+    private readonly SKPaint _glyphPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Butt, StrokeJoin = SKStrokeJoin.Miter };
+    private readonly SKPath _chevronPath = new();
     private readonly Timer _repeatTimer;
     private readonly TextBox _textBox;
 
@@ -491,6 +492,7 @@ public class NumericUpDown : ElementBase
             _borderPaint.Dispose();
             _textPaint.Dispose();
             _glyphPaint.Dispose();
+            _chevronPath.Dispose();
         }
 
         base.Dispose(disposing);
@@ -582,16 +584,19 @@ public class NumericUpDown : ElementBase
 
         _fillPaint.Color = ColorScheme.SurfaceContainer;
         _borderPaint.Color = ColorScheme.Outline.WithAlpha(80);
-        _borderPaint.StrokeWidth = Math.Max(1f, ScaleFactor);
+        _borderPaint.StrokeWidth = Math.Max(1f, MathF.Round(ScaleFactor));
+        _borderPaint.IsAntialias = false;
 
-        canvas.DrawRoundRect(buttons, 8f * ScaleFactor, 8f * ScaleFactor, _fillPaint);
-        canvas.DrawLine(buttons.Left, buttons.MidY, buttons.Right, buttons.MidY, _borderPaint);
+        var radius = MathF.Round(6f * ScaleFactor);
+        canvas.DrawRoundRect(buttons, radius, radius, _fillPaint);
+        var mid = MathF.Round(buttons.MidY);
+        canvas.DrawLine(buttons.Left, mid, buttons.Right, mid, _borderPaint);
+        _borderPaint.IsAntialias = true;
 
         if (_hoverPart != ButtonPart.None || _pressedPart != ButtonPart.None)
             DrawPartOverlay(canvas, _pressedPart != ButtonPart.None ? _pressedPart : _hoverPart, up, down);
 
-        _glyphPaint.Color = Enabled ? ColorScheme.ForeColor.WithAlpha(180) : ColorScheme.Outline;
-        _glyphPaint.StrokeWidth = Math.Max(1.7f, 1.8f * ScaleFactor);
+        _glyphPaint.Color = Enabled ? ColorScheme.ForeColor.WithAlpha(220) : ColorScheme.Outline;
         DrawChevron(canvas, up, up: true);
         DrawChevron(canvas, down, up: false);
     }
@@ -605,19 +610,27 @@ public class NumericUpDown : ElementBase
 
     private void DrawChevron(SKCanvas canvas, SKRect rect, bool up)
     {
-        var cx = rect.MidX;
-        var cy = rect.MidY;
-        var size = 4.5f * ScaleFactor;
+        var cx = MathF.Round(rect.MidX);
+        var cy = MathF.Round(rect.MidY);
+        var half = MathF.Round(Math.Max(3f, 4f * ScaleFactor));
+        var rise = MathF.Round(Math.Max(2f, half * 0.55f));
+
+        _glyphPaint.StrokeWidth = Math.Max(1f, MathF.Round(ScaleFactor));
+        _chevronPath.Rewind();
         if (up)
         {
-            canvas.DrawLine(cx - size, cy + size * 0.35f, cx, cy - size * 0.35f, _glyphPaint);
-            canvas.DrawLine(cx, cy - size * 0.35f, cx + size, cy + size * 0.35f, _glyphPaint);
+            _chevronPath.MoveTo(cx - half, cy + rise);
+            _chevronPath.LineTo(cx, cy - rise);
+            _chevronPath.LineTo(cx + half, cy + rise);
         }
         else
         {
-            canvas.DrawLine(cx - size, cy - size * 0.35f, cx, cy + size * 0.35f, _glyphPaint);
-            canvas.DrawLine(cx, cy + size * 0.35f, cx + size, cy - size * 0.35f, _glyphPaint);
+            _chevronPath.MoveTo(cx - half, cy - rise);
+            _chevronPath.LineTo(cx, cy + rise);
+            _chevronPath.LineTo(cx + half, cy - rise);
         }
+
+        canvas.DrawPath(_chevronPath, _glyphPaint);
     }
 
     private void DrawAnimatedValue(SKCanvas canvas, SKRect rect)
@@ -695,9 +708,12 @@ public class NumericUpDown : ElementBase
 
     private SKRect GetButtonsRect(SKRect rect)
     {
-        var width = Math.Max(24f, 28f * ScaleFactor);
-        var inset = Math.Max(2f, 3f * ScaleFactor);
-        return new SKRect(rect.Right - width - inset, rect.Top + 4f * ScaleFactor, rect.Right - inset, rect.Bottom - 4f * ScaleFactor);
+        var width = MathF.Round(Math.Max(24f, 28f * ScaleFactor));
+        var inset = MathF.Round(Math.Max(2f, 3f * ScaleFactor));
+        var top = MathF.Round(rect.Top + 4f * ScaleFactor);
+        var bottom = MathF.Round(rect.Bottom - 4f * ScaleFactor);
+        var right = MathF.Round(rect.Right - inset);
+        return new SKRect(right - width, top, right, bottom);
     }
 
     private decimal NormalizeValue(decimal value)

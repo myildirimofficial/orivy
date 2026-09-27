@@ -790,9 +790,12 @@ internal partial class DefaultLayout : LayoutEngine
         anchorInfo.Bottom -= parentDisplayRect.Top;
  
         AnchorStyles anchor = GetAnchor(element);
+        // A designer move is the new baseline. Reusing the old negative margin here put the
+        // control back where it started as soon as the parent laid out again.
+        var keepOverflowMargin = element is not ElementBase designed || !designed.IsAncestorSiteInDesignMode;
         if (IsAnchored(anchor, AnchorStyles.Right))
         {
-            if ((anchorInfo.Right - parentWidth > 0) && (oldAnchorInfo.Right < 0))
+            if (keepOverflowMargin && (anchorInfo.Right - parentWidth > 0) && (oldAnchorInfo.Right < 0))
             {
                 // Parent was resized to fit its parent, or screen, we need to reuse old anchors info to prevent losing control beyond right edge.
                 anchorInfo.Right = oldAnchorInfo.Right;
@@ -820,7 +823,7 @@ internal partial class DefaultLayout : LayoutEngine
  
         if (IsAnchored(anchor, AnchorStyles.Bottom))
         {
-            if ((anchorInfo.Bottom - parentHeight > 0) && (oldAnchorInfo.Bottom < 0))
+            if (keepOverflowMargin && (anchorInfo.Bottom - parentHeight > 0) && (oldAnchorInfo.Bottom < 0))
             {
                 // The parent was resized to fit its parent or the screen, we need to reuse the old anchors info
                 // to prevent positioning the control beyond the bottom edge.
