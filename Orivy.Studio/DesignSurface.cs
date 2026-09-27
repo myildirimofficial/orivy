@@ -992,6 +992,16 @@ public sealed class DesignSurface : Element
     /// <summary>Records an already-applied property edit (from the inspector) as undoable.</summary>
     public void CommitPropertyEdit(System.ComponentModel.PropertyDescriptor descriptor, object component, object? oldValue)
     {
+        if (component is ElementBase element
+            && descriptor.Name == "Size"
+            && oldValue is SKSize before
+            && descriptor.GetValue(component) is SKSize after)
+        {
+            var clamped = DesignDockLayout.ClampSize(element.Dock, after, before);
+            if (clamped != after)
+                TrySetValue(descriptor, component, clamped);
+        }
+
         object? newValue;
         try { newValue = descriptor.GetValue(component); }
         catch { return; }
@@ -1408,7 +1418,7 @@ public sealed class DesignSurface : Element
                 {
                     var bounds = ToOverlay(items[0]);
                     _fill.Color = ColorScheme.Surface;
-                    foreach (var (_, rect) in EnumerateGrips(bounds))
+                    foreach (var (_, rect) in EnumerateGrips(bounds, items[0].Dock))
                     {
                         canvas.DrawRect(rect, _fill);
                         canvas.DrawRect(rect, _stroke);
@@ -1553,7 +1563,7 @@ public sealed class DesignSurface : Element
             // Resize grips (single selection only).
             if (_s.Selection.Items.Count == 1 && !_s.Locked.Contains(_s.Selection.Items[0]))
             {
-                var grip = HitGrip(ToOverlay(_s.Selection.Items[0]), e.Location);
+                var grip = HitGrip(ToOverlay(_s.Selection.Items[0]), e.Location, _s.Selection.Items[0].Dock);
                 if (grip != Grip.None)
                 {
                     BeginBoundsDrag(grip, e.Location);
@@ -1606,7 +1616,8 @@ public sealed class DesignSurface : Element
             // Do not capture the mouse for a plain selection click. A click that does not move
             // should remain a click: starting a body drag (and Win32 capture) here can leave the
             // Studio's inspector/layers panels unable to receive the following mouse-up.
-            if (_s.Selection.Contains(hit) && !_s.Locked.Contains(hit))
+            if (_s.Selection.Contains(hit) && !_s.Locked.Contains(hit)
+                && _s.Selection.Items.All(c => DesignDockLayout.AllowsLocation(c.Dock)))
             {
                 _pendingBodyDrag = true;
                 _pendingBodyDragStart = e.Location;
@@ -2023,6 +2034,19 @@ public sealed class DesignSurface : Element
                 if (R - L < MinControlSize) { if (_mode is Grip.Left or Grip.TopLeft or Grip.BottomLeft) L = R - MinControlSize; else R = L + MinControlSize; }
                 if (Bt - T < MinControlSize) { if (_mode is Grip.Top or Grip.TopLeft or Grip.TopRight) T = Bt - MinControlSize; else Bt = T + MinControlSize; }
 
+                var dock = control.Dock;
+                if (!DesignDockLayout.AllowsWidth(dock))
+                {
+                    L = b.Left;
+                    R = b.Right;
+                }
+
+                if (!DesignDockLayout.AllowsHeight(dock))
+                {
+                    T = b.Top;
+                    Bt = b.Bottom;
+                }
+
                 control.Location = new SKPoint(L, T);
                 control.Size = new SKSize(R - L, Bt - T);
             }
@@ -2279,7 +2303,8 @@ public sealed class DesignSurface : Element
 
             if (_s.Selection.Items.Count == 1)
             {
-                cursor = HitGrip(ToOverlay(_s.Selection.Items[0]), p) switch
+                var dock = _s.Selection.Items[0].Dock;
+                cursor = HitGrip(ToOverlay(_s.Selection.Items[0]), p, dock) switch
                 {
                     Grip.TopLeft or Grip.BottomRight => Cursors.SizeNWSE,
                     Grip.TopRight or Grip.BottomLeft => Cursors.SizeNESW,
@@ -2621,13 +2646,38 @@ public sealed class DesignSurface : Element
             yield return (Grip.BottomRight, SKRect.Create(b.Right - h, b.Bottom - h, GripSize, GripSize));
         }
 
-        private static Grip HitGrip(SKRect bounds, SKPoint p)
+        private static IEnumerable<(Grip Grip, SKRect Rect)> EnumerateGrips(SKRect b, DockStyle dock)
         {
-            foreach (var (grip, rect) in EnumerateGrips(bounds))
+            foreach (var pair in EnumerateGrips(b))
+            {
+                if (AllowsResizeGrip(pair.Grip, dock))
+                    yield return pair;
+            }
+        }
+
+        private static bool AllowsResizeGrip(Grip grip, DockStyle dock)
+        {
+            if (dock == DockStyle.None)
+                return true;
+            if (dock == DockStyle.Fill)
+                return false;
+            if (dock is DockStyle.Top or DockStyle.Bottom)
+                return grip is Grip.Top or Grip.Bottom;
+            return grip is Grip.Left or Grip.Right;
+        }
+
+        private static Grip HitGrip(SKRect bounds, SKPoint p, DockStyle dock)
+        {
+            foreach (var (grip, rect) in EnumerateGrips(bounds, dock))
+            {
                 if (SKRect.Inflate(rect, 2f, 2f).Contains(p))
                     return grip;
+            }
+
             return Grip.None;
         }
+
+        private static Grip HitGrip(SKRect bounds, SKPoint p) => HitGrip(bounds, p, DockStyle.None);
 
         /// <summary>Only the right/bottom/corner grips are meaningful for the root — growing it any
         /// other direction would mean moving its Location, which has no clear meaning for "the form"

@@ -186,8 +186,8 @@ public sealed class LayoutHelperBar : Element
 
         surface.Commands.Execute(new DelegateCommand(
             $"Dock = {newDock}",
-            () => { target.Dock = newDock; surface.RelayoutRoot(); },
-            () => { target.Dock = oldDock; surface.RelayoutRoot(); }));
+            () => { target.Dock = newDock; surface.RelayoutRoot(); surface.NotifyStructureChanged(); },
+            () => { target.Dock = oldDock; surface.RelayoutRoot(); surface.NotifyStructureChanged(); }));
         Refresh();
     }
 

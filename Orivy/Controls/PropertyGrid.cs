@@ -476,6 +476,13 @@ public class PropertyGrid : GridList
 
     #region Public API
 
+    /// <summary>
+    /// When this returns true, the property stays visible but cannot be edited inline
+    /// (designer rules such as dock-owned axes).
+    /// </summary>
+    [Browsable(false)]
+    public Func<object, PropertyDescriptor, bool>? IsEditingBlocked { get; set; }
+
     /// <summary>Gets or sets the object whose properties are displayed and edited.</summary>
     [Browsable(false)]
     public object? SelectedObject
@@ -667,6 +674,7 @@ public class PropertyGrid : GridList
 
     private PropNode CreatePropertyNode(PropertyDescriptor pd, object component, int depth)
     {
+        var blocked = IsEditingBlocked?.Invoke(component, pd) == true;
         var node = new PropNode
         {
             Descriptor = pd,
@@ -676,7 +684,7 @@ public class PropertyGrid : GridList
             Depth = depth,
             ValueType = pd.PropertyType,
             Getter = () => pd.GetValue(component),
-            Setter = pd.IsReadOnly ? null : v => pd.SetValue(component, v)
+            Setter = pd.IsReadOnly || blocked ? null : v => pd.SetValue(component, v)
         };
 
         node.Expandable = IsExpandable(node.ValueType, node.GetValue());

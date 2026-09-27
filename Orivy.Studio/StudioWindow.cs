@@ -550,6 +550,9 @@ public sealed class StudioWindow : Window
             RecentProjects.Add(path);
         };
 
+        _inspector.IsEditingBlocked = static (component, descriptor) =>
+            component is ElementBase element && DesignDockLayout.BlocksPropertyEdit(element, descriptor);
+
         _inspector.PropertyValueChanged += (_, e) =>
         {
             if (!_suppressInspectorCommit && e.ChangedItem != null && _inspector.SelectedObject != null)
