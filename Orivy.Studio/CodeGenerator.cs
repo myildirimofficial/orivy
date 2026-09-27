@@ -41,7 +41,7 @@ public static class CodeGenerator
         sb.AppendLine("    {");
         sb.AppendLine(string.Format(inv,
             "        ClientSize = new SKSize({0}, {1});",
-            (int)root.Width, (int)root.Height));
+            DesignSourceFormat.Pixel(root.Width), DesignSourceFormat.Pixel(root.Height)));
         sb.AppendLine();
 
         foreach (var control in controls)
@@ -90,12 +90,12 @@ public static class CodeGenerator
             sb.AppendLine($"            Text = \"{Escape(control.Text)}\",");
         sb.AppendLine(string.Format(inv,
             "            Location = new SKPoint({0}, {1}),",
-            (int)control.Location.X, (int)control.Location.Y));
+            DesignSourceFormat.Pixel(control.Location.X), DesignSourceFormat.Pixel(control.Location.Y)));
         sb.AppendLine(string.Format(inv,
             "            Size = new SKSize({0}, {1}),",
-            (int)control.Width, (int)control.Height));
-        sb.AppendLine($"            Dock = {FormatDock(control.Dock)},");
-        sb.AppendLine($"            Anchor = {FormatAnchor(control.Anchor)},");
+            DesignSourceFormat.Pixel(control.Width), DesignSourceFormat.Pixel(control.Height)));
+        sb.AppendLine($"            Dock = {DesignSourceFormat.Dock(control.Dock)},");
+        sb.AppendLine($"            Anchor = {DesignSourceFormat.Anchor(control.Anchor)},");
         if (!control.Visible)
             sb.AppendLine("            Visible = false,");
         sb.AppendLine("        };");
@@ -118,19 +118,6 @@ public static class CodeGenerator
             if (binding.ControlName == controlName)
                 sb.AppendLine(DesignInteractions.FormatBinding(surface, binding));
         }
-    }
-
-    private static string FormatDock(DockStyle dock) => $"DockStyle.{dock}";
-
-    private static string FormatAnchor(AnchorStyles anchor)
-    {
-        if (anchor == AnchorStyles.None)
-            return "AnchorStyles.None";
-
-        var flags = Enum.GetValues<AnchorStyles>()
-            .Where(f => f != AnchorStyles.None && anchor.HasFlag(f))
-            .Select(f => $"AnchorStyles.{f}");
-        return string.Join(" | ", flags);
     }
 
     private static void AppendAddCalls(StringBuilder sb, ElementBase control, string parentControlsExpression)

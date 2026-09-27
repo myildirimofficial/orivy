@@ -348,7 +348,7 @@ public static class CodeMerger
         {
             var text = string.IsNullOrEmpty(control.Text) ? string.Empty : $", Text = \"{Escape(control.Text)}\"";
             var visible = control.Visible ? string.Empty : ", Visible = false";
-            return $"        {control.Name} = new {control.GetType().Name} {{ Name = \"{Escape(control.Name)}\"{text}, Location = new SKPoint({F(control.Location.X)}, {F(control.Location.Y)}), Size = new SKSize({F(control.Width)}, {F(control.Height)}), Dock = DockStyle.{control.Dock}, Anchor = {FormatAnchor(control.Anchor)}{visible} }};";
+            return $"        {control.Name} = new {control.GetType().Name} {{ Name = \"{Escape(control.Name)}\"{text}, Location = new SKPoint({DesignSourceFormat.Pixel(control.Location.X)}, {DesignSourceFormat.Pixel(control.Location.Y)}), Size = new SKSize({DesignSourceFormat.Pixel(control.Width)}, {DesignSourceFormat.Pixel(control.Height)}), Dock = {DesignSourceFormat.Dock(control.Dock)}, Anchor = {DesignSourceFormat.Anchor(control.Anchor)}{visible} }};";
         }
 
         private string BuildAdd(ElementBase control)
@@ -369,7 +369,7 @@ public static class CodeMerger
                 "Dock" => existing is MemberAccessExpressionSyntax { Name.Identifier.Text: var name }
                     && name == control.Dock.ToString(),
                 "Anchor" => string.Equals(existing.ToString().Replace(" ", string.Empty),
-                    FormatAnchor(control.Anchor).Replace(" ", string.Empty), StringComparison.Ordinal),
+                    DesignSourceFormat.Anchor(control.Anchor).Replace(" ", string.Empty), StringComparison.Ordinal),
                 "Text" => existing is LiteralExpressionSyntax { Token.Value: string text }
                     && text == (control.Text ?? string.Empty),
                 "Visible" => (existing.IsKind(SyntaxKind.TrueLiteralExpression) && control.Visible)
@@ -423,8 +423,8 @@ public static class CodeMerger
             {
                 "Location" => SizeExpression(existing, control.Location.X, control.Location.Y, "SKPoint"),
                 "Size" => SizeExpression(existing, control.Width, control.Height, "SKSize"),
-                "Dock" => MemberUpdate(existing, "DockStyle", control.Dock.ToString()),
-                "Anchor" => SyntaxFactory.ParseExpression(FormatAnchor(control.Anchor)),
+                "Dock" => SyntaxFactory.ParseExpression(DesignSourceFormat.Dock(control.Dock)),
+                "Anchor" => SyntaxFactory.ParseExpression(DesignSourceFormat.Anchor(control.Anchor)),
                 "Text" => SyntaxFactory.LiteralExpression(SyntaxKind.StringLiteralExpression, SyntaxFactory.Literal(control.Text ?? string.Empty)),
                 "Visible" => SyntaxFactory.ParseExpression(control.Visible ? "true" : "false"),
                 _ => existing
@@ -436,42 +436,16 @@ public static class CodeMerger
             // Keep the existing `new Type` / `new()` node and only replace its arguments. Building a
             // fresh ObjectCreationExpression drops the space trivia after `new`, so ToFullString()
             // emits `newSKSize(...)`.
-            var argumentList = SyntaxFactory.ParseArgumentList($"({F(a)}, {F(b)})");
+            var argumentList = SyntaxFactory.ParseArgumentList(
+                $"({DesignSourceFormat.Pixel(a)}, {DesignSourceFormat.Pixel(b)})");
             return existing switch
             {
                 ImplicitObjectCreationExpressionSyntax implicitCreation =>
                     implicitCreation.WithArgumentList(argumentList.WithTriviaFrom(implicitCreation.ArgumentList)),
                 ObjectCreationExpressionSyntax creation =>
                     creation.WithArgumentList(argumentList.WithTriviaFrom(creation.ArgumentList)),
-                _ => SyntaxFactory.ParseExpression($"new {fallbackType}({F(a)}, {F(b)})")
+                _ => SyntaxFactory.ParseExpression($"new {fallbackType}({DesignSourceFormat.Pixel(a)}, {DesignSourceFormat.Pixel(b)})")
             };
-        }
-
-        private static ExpressionSyntax MemberUpdate(ExpressionSyntax existing, string typeName, string member)
-        {
-            if (existing is MemberAccessExpressionSyntax access)
-                return access.WithName(SyntaxFactory.IdentifierName(member));
-
-            return SyntaxFactory.ParseExpression($"{typeName}.{member}");
-        }
-
-        private static string FormatAnchor(AnchorStyles anchor)
-        {
-            if (anchor == AnchorStyles.None)
-                return "AnchorStyles.None";
-
-            var flags = Enum.GetValues<AnchorStyles>()
-                .Where(flag => flag != AnchorStyles.None && anchor.HasFlag(flag))
-                .Select(flag => $"AnchorStyles.{flag}");
-            return string.Join(" | ", flags);
-        }
-
-        private static string F(float value)
-        {
-            var rounded = MathF.Round(value);
-            return Math.Abs(value - rounded) < 0.01f
-                ? ((int)rounded).ToString(CultureInfo.InvariantCulture)
-                : value.ToString("0.##", CultureInfo.InvariantCulture);
         }
 
         private static string Escape(string value) =>
