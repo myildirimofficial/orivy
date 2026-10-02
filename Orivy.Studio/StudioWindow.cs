@@ -337,12 +337,20 @@ public sealed class StudioWindow : Window
         _sidebar.Border = new Thickness(0);
         _sidebar.Radius = new Radius(0);
         _sidebar.BackColor = SKColors.Transparent;
+        _sidebar.ConfigureTabStyle(style => style.Header(header => header.Background(SKColors.Transparent).Border(SKColors.Transparent)));
         _toolboxPage.Controls.Add(_toolbox);
         _explorerPage.Controls.Add(_explorer);
         _sidebar.Controls.Add(_explorerPage);
         _sidebar.Controls.Add(_toolboxPage);
         RefreshSidebarIcons();
-        ColorScheme.ThemeChanged += (_, _) => RefreshSidebarIcons();
+        var sidebarIconsDark = ColorScheme.IsDarkMode;
+        ColorScheme.ThemeChanged += (_, _) =>
+        {
+            if (sidebarIconsDark == ColorScheme.IsDarkMode)
+                return;
+            sidebarIconsDark = ColorScheme.IsDarkMode;
+            RefreshSidebarIcons();
+        };
 
         outerSplit.Panel1.Controls.Add(_sidebar);
 
@@ -555,9 +563,8 @@ public sealed class StudioWindow : Window
 
         _inspector.PropertyValueChanged += (_, e) =>
         {
-            if (!_suppressInspectorCommit && e.ChangedItem != null && _inspector.SelectedObject != null)
-                _active.CommitPropertyEdit(e.ChangedItem, _inspector.SelectedObject, e.OldValue);
-            _active.RelayoutRoot();
+            if (!_suppressInspectorCommit && e.PersistedItem != null && _inspector.SelectedObject != null)
+                _active.CommitPropertyEdit(e.PersistedItem, _inspector.SelectedObject, e.PersistedOldValue);
             _layers.Rebuild();
             RefreshSelectionDependentUi();
             UpdateStatus();
@@ -793,7 +800,7 @@ public sealed class StudioWindow : Window
     /// is selected.</summary>
     private void RefreshSelectionDependentUi()
     {
-        _layoutBar.Refresh();
+        _layoutBar.Reload();
         _gridToolsGroup.Visible = _active.Selection.Primary is Grid;
     }
 

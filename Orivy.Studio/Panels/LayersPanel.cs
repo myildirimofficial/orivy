@@ -72,7 +72,14 @@ public sealed class LayersPanel : Element
         Controls.Add(buttons);
 
         RefreshColumnIcons();
-        ColorScheme.ThemeChanged += (_, _) => RefreshColumnIcons();
+        var columnIconsDark = ColorScheme.IsDarkMode;
+        ColorScheme.ThemeChanged += (_, _) =>
+        {
+            if (columnIconsDark == ColorScheme.IsDarkMode)
+                return;
+            columnIconsDark = ColorScheme.IsDarkMode;
+            RefreshColumnIcons();
+        };
 
         _list.SelectionChanged += (_, _) =>
         {
@@ -169,7 +176,7 @@ public sealed class LayersPanel : Element
         item.Cells.Add(new GridListCell { CheckState = _surface.Locked.Contains(control) ? CheckState.Checked : CheckState.Unchecked });
         _list.Items.Add(item);
 
-        var children = control.Controls.OfType<ElementBase>().Where(c => c is not ScrollBar).OrderByDescending(c => c.ZOrder);
+        var children = control.Controls.OfType<ElementBase>().Where(c => c is not ScrollBar && _surface.IsEditableInThisDocument(c)).OrderByDescending(c => c.ZOrder);
         foreach (var child in children)
             AddRow(child, depth + 1);
     }

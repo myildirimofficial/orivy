@@ -81,7 +81,7 @@ public sealed class LayoutHelperBar : Element
         Controls.Add(anchorRow);
         Controls.Add(dockRow);
 
-        Refresh();
+        Reload();
     }
 
     private NumericUpDown GridPlacementField(string label, Element row)
@@ -107,7 +107,7 @@ public sealed class LayoutHelperBar : Element
     }
 
     /// <summary>Reloads the editors from the current primary selection.</summary>
-    public void Refresh()
+    public void Reload()
     {
         _syncing = true;
         try
@@ -188,7 +188,7 @@ public sealed class LayoutHelperBar : Element
             $"Dock = {newDock}",
             () => { target.Dock = newDock; surface.RelayoutRoot(); surface.NotifyStructureChanged(); },
             () => { target.Dock = oldDock; surface.RelayoutRoot(); surface.NotifyStructureChanged(); }));
-        Refresh();
+        Reload();
     }
 
     private void ApplyAnchor()

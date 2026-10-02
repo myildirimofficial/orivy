@@ -30,8 +30,8 @@ internal static class DesignNameValidator
 
     private static string Sanitize(string? candidate, string typeName)
     {
-        if (IsValidIdentifier(candidate) && !Keywords.Contains(candidate))
-            return candidate!;
+        if (candidate != null && IsValidIdentifier(candidate) && !Keywords.Contains(candidate))
+            return candidate;
 
         // Falls back to the same "lowercase-first-letter of the type name" convention
         // DesignSurface.AddControl already uses for interactively placed controls.

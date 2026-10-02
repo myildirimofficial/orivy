@@ -6,6 +6,7 @@ using Orivy.Studio.Toolbox;
 using SkiaSharp;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 
@@ -21,8 +22,16 @@ public static class CodeMerger
 {
     private static readonly string[] TrackedProperties = { "Location", "Size", "Dock", "Anchor", "Text", "Visible" };
 
-    public static string Apply(string? original, DesignSurface surface, string className, string? filePath = null)
+    public static string Apply(
+        string? original,
+        DesignSurface surface,
+        string className,
+        string? filePath = null,
+        bool mergeLiveEdits = true)
     {
+        if (!mergeLiveEdits && !string.IsNullOrWhiteSpace(original))
+            return original;
+
         if (string.IsNullOrWhiteSpace(original))
             return CodeGenerator.Generate(surface, className);
 
@@ -35,8 +44,10 @@ public static class CodeMerger
         var live = new Dictionary<string, ElementBase>(StringComparer.Ordinal);
         foreach (var control in surface.AllDesignedControls)
         {
-            if (!string.IsNullOrEmpty(control.Name))
-                live[control.Name] = control;
+            if (string.IsNullOrEmpty(control.Name) || !surface.IsEditableInThisDocument(control))
+                continue;
+
+            live[control.Name] = control;
         }
 
         var added = surface.AllDesignedControls
@@ -48,7 +59,8 @@ public static class CodeMerger
         var rewriter = new DesignSourceRewriter(live, deleted, added, surface.DesignRoot);
         var rewritten = rewriter.Visit(root) ?? root;
         var synced = DesignInteractions.Sync(rewritten, surface, out var interactionsChanged, filePath);
-        if (!rewriter.Changed && !interactionsChanged)
+        synced = DesignPropertySync.Sync(synced, live, surface.DesignRoot, surface, filePath, out var propertiesChanged);
+        if (!rewriter.Changed && !interactionsChanged && !propertiesChanged)
             return original;
 
         return synced.ToFullString();
@@ -189,6 +201,9 @@ public static class CodeMerger
             {
                 if (SamePair(visited.Right, _root.Width, _root.Height))
                     return visited;
+                if (!DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(_root, "Size"))
+                    return visited;
+
                 Changed = true;
                 return visited.WithRight(SizeExpression(visited.Right, _root.Width, _root.Height).WithTriviaFrom(visited.Right));
             }
@@ -199,12 +214,41 @@ public static class CodeMerger
             if (SameProperty(visited.Right, control, property))
                 return visited;
 
+            if (!DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(control, property))
+                return visited;
+
             var replacement = PropertyExpression(visited.Right, control, property);
             if (replacement.IsEquivalentTo(visited.Right))
                 return visited;
 
             Changed = true;
             return visited.WithRight(replacement.WithTriviaFrom(visited.Right));
+        }
+
+        public override SyntaxNode? VisitInitializerExpression(InitializerExpressionSyntax node)
+        {
+            var expressions = new List<ExpressionSyntax>(node.Expressions.Count);
+            var listChanged = false;
+
+            foreach (var expression in node.Expressions)
+            {
+                var visited = Visit(expression);
+                if (visited is not ExpressionSyntax kept)
+                {
+                    listChanged = true;
+                    continue;
+                }
+
+                if (!ReferenceEquals(kept, expression))
+                    listChanged = true;
+                expressions.Add(kept);
+            }
+
+            if (!listChanged)
+                return node;
+
+            Changed = true;
+            return node.WithExpressions(SyntaxFactory.SeparatedList(expressions));
         }
 
         private bool TryRewriteAddRange(ExpressionStatementSyntax node, out StatementSyntax? rewritten)
@@ -346,9 +390,31 @@ public static class CodeMerger
 
         private string BuildCreation(ElementBase control)
         {
-            var text = string.IsNullOrEmpty(control.Text) ? string.Empty : $", Text = \"{Escape(control.Text)}\"";
-            var visible = control.Visible ? string.Empty : ", Visible = false";
-            return $"        {control.Name} = new {control.GetType().Name} {{ Name = \"{Escape(control.Name)}\"{text}, Location = new SKPoint({DesignSourceFormat.Pixel(control.Location.X)}, {DesignSourceFormat.Pixel(control.Location.Y)}), Size = new SKSize({DesignSourceFormat.Pixel(control.Width)}, {DesignSourceFormat.Pixel(control.Height)}), Dock = {DesignSourceFormat.Dock(control.Dock)}, Anchor = {DesignSourceFormat.Anchor(control.Anchor)}{visible} }};";
+            var parts = new List<string> { $"Name = \"{Escape(control.Name)}\"" };
+
+            if (DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(control, "Text")
+                && !string.IsNullOrEmpty(control.Text))
+                parts.Add($"Text = \"{Escape(control.Text)}\"");
+
+            if (DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(control, "Location"))
+            {
+                var loc = DesignSourceFormat.PersistedLocation(control);
+                parts.Add($"Location = new SKPoint({DesignSourceFormat.Pixel(loc.X)}, {DesignSourceFormat.Pixel(loc.Y)})");
+            }
+
+            if (DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(control, "Size"))
+                parts.Add($"Size = new SKSize({DesignSourceFormat.Pixel(control.Width)}, {DesignSourceFormat.Pixel(control.Height)})");
+
+            if (DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(control, "Dock"))
+                parts.Add($"Dock = {DesignSourceFormat.Dock(control.Dock)}");
+
+            if (DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(control, "Anchor"))
+                parts.Add($"Anchor = {DesignSourceFormat.Anchor(control.Anchor)}");
+
+            if (DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(control, "Visible") && !control.Visible)
+                parts.Add("Visible = false");
+
+            return $"        {control.Name} = new {control.GetType().Name} {{ {string.Join(", ", parts)} }};";
         }
 
         private string BuildAdd(ElementBase control)
@@ -364,12 +430,11 @@ public static class CodeMerger
         {
             return property switch
             {
-                "Location" => SamePair(existing, control.Location.X, control.Location.Y),
+                "Location" => SamePair(existing, DesignSourceFormat.PersistedLocation(control).X, DesignSourceFormat.PersistedLocation(control).Y),
                 "Size" => SamePair(existing, control.Width, control.Height),
                 "Dock" => existing is MemberAccessExpressionSyntax { Name.Identifier.Text: var name }
                     && name == control.Dock.ToString(),
-                "Anchor" => string.Equals(existing.ToString().Replace(" ", string.Empty),
-                    DesignSourceFormat.Anchor(control.Anchor).Replace(" ", string.Empty), StringComparison.Ordinal),
+                "Anchor" => DesignSourceFormat.SameAnchorExpression(existing.ToString(), control.Anchor),
                 "Text" => existing is LiteralExpressionSyntax { Token.Value: string text }
                     && text == (control.Text ?? string.Empty),
                 "Visible" => (existing.IsKind(SyntaxKind.TrueLiteralExpression) && control.Visible)
@@ -421,7 +486,7 @@ public static class CodeMerger
         {
             return property switch
             {
-                "Location" => SizeExpression(existing, control.Location.X, control.Location.Y, "SKPoint"),
+                "Location" => SizeExpression(existing, DesignSourceFormat.PersistedLocation(control).X, DesignSourceFormat.PersistedLocation(control).Y, "SKPoint"),
                 "Size" => SizeExpression(existing, control.Width, control.Height, "SKSize"),
                 "Dock" => SyntaxFactory.ParseExpression(DesignSourceFormat.Dock(control.Dock)),
                 "Anchor" => SyntaxFactory.ParseExpression(DesignSourceFormat.Anchor(control.Anchor)),
@@ -441,12 +506,15 @@ public static class CodeMerger
             return existing switch
             {
                 ImplicitObjectCreationExpressionSyntax implicitCreation =>
-                    implicitCreation.WithArgumentList(argumentList.WithTriviaFrom(implicitCreation.ArgumentList)),
+                    implicitCreation.WithArgumentList(WithTriviaFrom(implicitCreation.ArgumentList, argumentList)),
                 ObjectCreationExpressionSyntax creation =>
-                    creation.WithArgumentList(argumentList.WithTriviaFrom(creation.ArgumentList)),
+                    creation.WithArgumentList(WithTriviaFrom(creation.ArgumentList, argumentList)),
                 _ => SyntaxFactory.ParseExpression($"new {fallbackType}({DesignSourceFormat.Pixel(a)}, {DesignSourceFormat.Pixel(b)})")
             };
         }
+
+        private static ArgumentListSyntax WithTriviaFrom(ArgumentListSyntax? previous, ArgumentListSyntax next) =>
+            previous != null ? next.WithTriviaFrom(previous) : next;
 
         private static string Escape(string value) =>
             value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", string.Empty);

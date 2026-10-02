@@ -50,23 +50,18 @@ public class Button : ElementBase
                 .Base(baseStyle => baseStyle
                     .Background(ColorScheme.Primary)
                     .Foreground(SKColors.White)
-                    .Border(1)
-                    .BorderColor(ColorScheme.Primary.Brightness(-0.18f))
                     .Radius(8)
                     .Shadow(new BoxShadow(0f, 2f, 4f, 0, ColorScheme.ShadowColor.WithAlpha(26))))
                 .OnHover(rule => rule
                     .Background(ColorScheme.Primary.Brightness(0.06f))
-                    .BorderColor(ColorScheme.Primary.Brightness(-0.08f))
                     .Shadow(new BoxShadow(0f, 4f, 8f, 0, ColorScheme.Primary.WithAlpha(34))))
                 .OnPressed(rule => rule
                     .Background(ColorScheme.Primary.Brightness(-0.08f))
-                    .BorderColor(ColorScheme.Primary.Brightness(-0.24f))
                     .Opacity(0.94f)
                     .Shadow(new BoxShadow(0f, 3f, 10f, 0, ColorScheme.Primary.WithAlpha(22))))
                 .OnChecked(rule => rule
                     .Background(ColorScheme.Primary.Brightness(-0.04f))
                     .Foreground(SKColors.White)
-                    .BorderColor(ColorScheme.Primary.Brightness(-0.2f))
                     .Shadow(new BoxShadow(0f, 3f, 10f, 0, ColorScheme.Primary.WithAlpha(28))))
                 .OnFocused(rule => rule
                     .Border(2)
@@ -74,7 +69,6 @@ public class Button : ElementBase
                 .OnDisabled(rule => rule
                     .Background(ColorScheme.SurfaceVariant)
                     .Foreground(ColorScheme.ForeColor.WithAlpha(170))
-                    .BorderColor(ColorScheme.Outline.WithAlpha(140))
                     .Opacity(0.8f)
                     .Shadow(BoxShadow.None));
         });

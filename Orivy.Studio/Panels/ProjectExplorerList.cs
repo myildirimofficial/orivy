@@ -65,7 +65,14 @@ public sealed class ProjectExplorerList : Element
         Controls.Add(_tree);
 
         RefreshIcons();
-        ColorScheme.ThemeChanged += (_, _) => { RefreshIcons(); Rescan(); };
+        var iconsDark = ColorScheme.IsDarkMode;
+        ColorScheme.ThemeChanged += (_, _) =>
+        {
+            if (iconsDark == ColorScheme.IsDarkMode)
+                return;
+            iconsDark = ColorScheme.IsDarkMode;
+            RefreshIcons();
+        };
     }
 
     protected override bool HandlesMouseWheelInput => true;

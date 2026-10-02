@@ -178,6 +178,42 @@ public static class DesignInteractions
         return EnsureHandlerMethods(result, surface, filePath, ref changed);
     }
 
+    internal static int PropertyInsertionIndex(IReadOnlyList<StatementSyntax> statements, string controlName)
+    {
+        if (controlName.Length == 0)
+            return FormPropertyInsertionIndex(statements);
+
+        return InsertionIndex(statements, controlName);
+    }
+
+    private static int FormPropertyInsertionIndex(IReadOnlyList<StatementSyntax> statements)
+    {
+        var lastFormSetup = -1;
+        for (var i = 0; i < statements.Count; i++)
+        {
+            if (statements[i] is not ExpressionStatementSyntax { Expression: AssignmentExpressionSyntax assign })
+                continue;
+            if (!DesignPersistableProperties.TryParseAssignmentTarget(assign, out var controlName, out _)
+                || !string.IsNullOrEmpty(controlName))
+                continue;
+
+            lastFormSetup = i;
+        }
+
+        if (lastFormSetup >= 0)
+            return lastFormSetup + 1;
+
+        for (var i = statements.Count - 1; i >= 0; i--)
+        {
+            if (IsResumeLayout(statements[i]))
+                return i;
+        }
+
+        return statements.Count;
+    }
+
+    internal static StatementSyntax ParseStatement(string text) => Statement(text);
+
     /// <summary>
     /// Index of the first line after this control's creation or last property assignment.
     /// An <c>Add</c> call is the fallback when the control has no initializer in this method.

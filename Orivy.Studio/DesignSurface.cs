@@ -45,6 +45,120 @@ public sealed class DesignSurface : Element
     /// to be missing from the opened source.</summary>
     public HashSet<string> AddedControlNames { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>Inspector edits on controls already in the file. Save emits these even when the property was absent from source.</summary>
+    internal HashSet<(string ControlKey, string Property)> EditedProperties { get; } = new();
+
+    /// <summary>Control names referenced or declared in this file's <c>InitializeComponent</c> (and
+    /// field initializers). Save may patch these; see <see cref="ExternallyComposedControlNames"/>.</summary>
+    internal HashSet<string> FilePersistedControlNames { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Named controls loaded from another type's <c>.Designer.cs</c> (for persist scope).</summary>
+    internal HashSet<string> ExternallyComposedControlNames { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Live elements composed in another document — not selectable or persistable here.</summary>
+    internal HashSet<ElementBase> ExternallyComposedElements { get; } = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>Project custom-control instances hosted in this document; their child tree is read-only here.</summary>
+    internal HashSet<ElementBase> ForeignCompositionHosts { get; } = new(ReferenceEqualityComparer.Instance);
+
+    internal string? OpenDocumentClassName { get; set; }
+
+    internal static void MarkForeignSubtree(DesignSurface surface, ElementBase control)
+    {
+        if (!surface.ExternallyComposedElements.Add(control))
+            return;
+
+        if (!string.IsNullOrEmpty(control.Name))
+            surface.ExternallyComposedControlNames.Add(control.Name);
+
+        control.Selectable = false;
+
+        foreach (var child in control.Controls)
+        {
+            if (child is ElementBase element)
+                MarkForeignSubtree(surface, element);
+        }
+    }
+
+    /// <summary>Controls owned by another type's designer — visible but not selectable or editable in this document.</summary>
+    internal bool IsEditableInThisDocument(ElementBase control)
+    {
+        if (ReferenceEquals(control, _root))
+            return true;
+
+        if (ExternallyComposedElements.Contains(control))
+            return false;
+
+        for (var parent = control.Parent as ElementBase; parent != null && !ReferenceEquals(parent, _root); parent = parent.Parent as ElementBase)
+        {
+            if (ForeignCompositionHosts.Contains(parent))
+                return false;
+            if (ExternallyComposedElements.Contains(parent))
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Hosted custom-control roots can be selected/moved here, but not receive new children from this document.</summary>
+    internal bool CanAcceptNewChildrenInThisDocument(ElementBase target)
+    {
+        if (ReferenceEquals(target, _root))
+            return true;
+
+        if (ForeignCompositionHosts.Contains(target))
+            return false;
+
+        return IsEditableInThisDocument(target);
+    }
+
+    /// <summary>Nesting target for toolbox drops and reparent — never into a foreign composition subtree.</summary>
+    internal ElementBase? FindDropTargetAt(SKPoint logicalPoint, ElementBase? excluding = null)
+    {
+        var target = FindNestingTargetAt(logicalPoint, excluding);
+        if (target == null)
+            return null;
+
+        if (ForeignCompositionHosts.Contains(target))
+        {
+            for (var parent = target.Parent as ElementBase; parent != null; parent = parent.Parent as ElementBase)
+            {
+                if (CanAcceptNewChildrenInThisDocument(parent))
+                    return parent;
+            }
+
+            return _root;
+        }
+
+        return CanAcceptNewChildrenInThisDocument(target) ? target : _root;
+    }
+
+    internal ElementBase ResolveEditableTarget(ElementBase control)
+    {
+        if (IsEditableInThisDocument(control))
+            return control;
+
+        for (var parent = control.Parent as ElementBase; parent != null && !ReferenceEquals(parent, _root); parent = parent.Parent as ElementBase)
+        {
+            if (IsEditableInThisDocument(parent))
+                return parent;
+        }
+
+        return _root;
+    }
+
+    internal void PurgeNonEditableSelection()
+    {
+        var editable = Selection.Items.Where(IsEditableInThisDocument).ToList();
+        if (editable.Count == Selection.Count)
+            return;
+
+        if (editable.Count == 0)
+            Selection.Clear();
+        else
+            Selection.SetMany(editable);
+    }
+
     /// <summary><c>name.Event += handler</c> lines edited from the Events page.</summary>
     public List<EventWire> EventWires { get; } = new();
 
@@ -79,7 +193,7 @@ public sealed class DesignSurface : Element
 
         _root = new DesignRootCanvas(this)
         {
-            Name = "designRoot",
+            Name = string.Empty,
             Text = string.Empty,
             Location = new SKPoint(48, 40),
             Size = new SKSize(640, 440),
@@ -115,7 +229,11 @@ public sealed class DesignSurface : Element
         Controls.Add(_overlay);
         SyncOverlayBounds();
 
-        Selection.Changed += () => { Invalidate(); };
+        Selection.Changed += () =>
+        {
+            PurgeNonEditableSelection();
+            Invalidate();
+        };
     }
 
     // ── Viewport ─────────────────────────────────────────────────────────────
@@ -314,12 +432,16 @@ public sealed class DesignSurface : Element
             _previewMode = value;
             _overlay.Visible = !value;
             if (value)
+            {
                 Selection.Clear();
+                RelayoutRoot();
+            }
             Invalidate();
         }
     }
 
-    public ElementBase ActiveObject => Selection.Primary ?? _root;
+    public ElementBase ActiveObject =>
+        Selection.Primary is { } primary ? ResolveEditableTarget(primary) : _root;
 
     public IReadOnlyList<ElementBase> DesignedControls
     {
@@ -426,7 +548,7 @@ public sealed class DesignSurface : Element
     {
         var size = entry.CreateInstance().Size; // default size to center the drop under the cursor
         var logical = ToLogical(clientPoint);
-        var target = FindNestingTargetAt(logical);
+        var target = FindDropTargetAt(logical);
         var location = DropTargetLocation(logical, size, target);
         var gridPlacement = target is Grid grid ? grid.HitTestCell(LocalPointIn(logical, grid)) : (GridPlacement?)null;
         ClearDropPreview();
@@ -465,7 +587,7 @@ public sealed class DesignSurface : Element
         // what actually landed on release.
         var size = entry.CreateInstance().Size;
         var logical = ToLogical(clientPoint);
-        var target = FindNestingTargetAt(logical);
+        var target = FindDropTargetAt(logical);
         var location = DropTargetLocation(logical, size, target);
         _previewEntry = entry;
         _previewGroup = target;
@@ -519,7 +641,7 @@ public sealed class DesignSurface : Element
         // overflow-mapped point made the same control move opposite the mouse.
         foreach (var child in AllDesignedControls)
         {
-            if (!child.Visible || Locked.Contains(child))
+            if (!child.Visible || Locked.Contains(child) || !IsEditableInThisDocument(child))
                 continue;
             if (excluding != null && (ReferenceEquals(child, excluding) || IsDescendantOf(child, excluding)))
                 continue;
@@ -538,7 +660,48 @@ public sealed class DesignSurface : Element
             }
         }
 
-        return best;
+        return best ?? ResolveHostTargetAt(logicalPoint, excluding);
+    }
+
+    /// <summary>When the hit is inside a foreign subtree, select the nearest editable host (e.g. custom <c>Container</c> on the form).</summary>
+    private ElementBase? ResolveHostTargetAt(SKPoint logicalPoint, ElementBase? excluding)
+    {
+        var rootRel = new SKPoint(logicalPoint.X - _root.Location.X, logicalPoint.Y - _root.Location.Y);
+        ElementBase? deepest = null;
+        var bestDepth = -1;
+        var bestZ = int.MinValue;
+
+        foreach (var child in AllDesignedControls)
+        {
+            if (!child.Visible || Locked.Contains(child))
+                continue;
+            if (excluding != null && (ReferenceEquals(child, excluding) || IsDescendantOf(child, excluding)))
+                continue;
+            if (!GetDesignSpaceBounds(child).Contains(rootRel))
+                continue;
+
+            var depth = 0;
+            for (var parent = child.Parent; parent != null && !ReferenceEquals(parent, _root); parent = parent.Parent)
+                depth++;
+
+            if (depth > bestDepth || (depth == bestDepth && child.ZOrder >= bestZ))
+            {
+                deepest = child;
+                bestDepth = depth;
+                bestZ = child.ZOrder;
+            }
+        }
+
+        if (deepest == null || IsEditableInThisDocument(deepest))
+            return null;
+
+        for (var host = deepest.Parent as ElementBase; host != null && !ReferenceEquals(host, _root); host = host.Parent as ElementBase)
+        {
+            if (IsEditableInThisDocument(host))
+                return host;
+        }
+
+        return null;
     }
 
     private static IEnumerable<ElementBase> NestedDesignedChildrenOf(ElementBase control)
@@ -582,6 +745,15 @@ public sealed class DesignSurface : Element
 
     internal SKRect GetDesignSpaceBounds(ElementBase control) =>
         SKRect.Create(GetDesignSpaceLocation(control), control.Size);
+
+    /// <summary>
+    /// Sets <see cref="ElementBase.Location"/> so <see cref="ElementBase.VisualLocation"/> ends up at
+    /// <paramref name="visualLocation"/> — needed when layout storage and paint position differ.
+    /// </summary>
+    internal static void SetDesignLocationFromVisual(ElementBase control, SKPoint visualLocationInParent)
+    {
+        control.Location = visualLocationInParent;
+    }
 
     internal void RegisterAdded(ElementBase control)
     {
@@ -629,7 +801,7 @@ public sealed class DesignSurface : Element
         if (Locked.Contains(control))
             return false;
 
-        var newParent = FindNestingTargetAt(logicalDropPoint, excluding: control) ?? _root;
+        var newParent = FindDropTargetAt(logicalDropPoint, excluding: control) ?? _root;
         var currentParent = control.Parent ?? _root;
         if (ReferenceEquals(newParent, currentParent))
             return false;
@@ -966,7 +1138,7 @@ public sealed class DesignSurface : Element
     /// <summary>Records an already-applied bounds change (drag/resize) so it can be undone.</summary>
     internal void CommitBoundsChange(string label, Dictionary<ElementBase, SKRect> before)
     {
-        var after = before.Keys.ToDictionary(c => c, c => SKRect.Create(c.Location, c.Size));
+        var after = before.Keys.ToDictionary(c => c, c => SKRect.Create(c.VisualLocation, c.Size));
         if (before.All(kv => kv.Value == after[kv.Key]))
             return;
 
@@ -981,7 +1153,7 @@ public sealed class DesignSurface : Element
     {
         foreach (var (control, rect) in bounds)
         {
-            control.Location = new SKPoint(rect.Left, rect.Top);
+            SetDesignLocationFromVisual(control, new SKPoint(rect.Left, rect.Top));
             control.Size = new SKSize(rect.Width, rect.Height);
         }
 
@@ -1006,11 +1178,40 @@ public sealed class DesignSurface : Element
         try { newValue = descriptor.GetValue(component); }
         catch { return; }
 
-        RelayoutRoot();
+        NoteInspectorEdit(component, descriptor.Name);
+        ApplyAfterPropertyEdit(component, descriptor.Name);
         Commands.Push(new DelegateCommand(
             $"Edit {descriptor.Name}",
-            () => { TrySetValue(descriptor, component, newValue); RelayoutRoot(); AfterStructureChange(); },
-            () => { TrySetValue(descriptor, component, oldValue); RelayoutRoot(); AfterStructureChange(); }));
+            () => { TrySetValue(descriptor, component, newValue); ApplyAfterPropertyEdit(component, descriptor.Name); AfterStructureChange(); },
+            () => { TrySetValue(descriptor, component, oldValue); ApplyAfterPropertyEdit(component, descriptor.Name); AfterStructureChange(); }));
+    }
+
+    /// <summary>
+    /// Only geometry-affecting properties rerun dock/anchor layout. Others (e.g. MinimumSize) must not —
+    /// a full relayout can shrink anchored controls when MinimumSize drops to zero even though Size did not change.
+    /// </summary>
+    private static bool RequiresDesignRelayout(string propertyName) =>
+        propertyName is "Location" or "Size" or "Dock" or "Anchor" or "Visible"
+            or "Width" or "Height" or "Bounds" or "AutoSize" or "AutoSizeMode";
+
+    private void NoteInspectorEdit(object component, string propertyName)
+    {
+        if (component is not ElementBase element)
+            return;
+
+        var key = ReferenceEquals(element, _root) ? string.Empty : element.Name ?? string.Empty;
+        if (key.Length == 0 && !ReferenceEquals(element, _root))
+            return;
+
+        EditedProperties.Add((key, propertyName));
+    }
+
+    private void ApplyAfterPropertyEdit(object component, string propertyName)
+    {
+        if (RequiresDesignRelayout(propertyName))
+            RelayoutRoot();
+        else if (component is ElementBase element)
+            element.Invalidate();
     }
 
     /// <summary>
@@ -1028,6 +1229,81 @@ public sealed class DesignSurface : Element
     {
         _root.ApplyStoredDesignLayout();
         Invalidate();
+    }
+
+    /// <summary>Maps canvas positions into parent-local <see cref="ElementBase.Location"/> for merge.</summary>
+    internal void PrepareForPersist()
+    {
+        foreach (var control in AllDesignedControls)
+        {
+            var parent = control.Parent as ElementBase;
+            if (parent == null || ReferenceEquals(parent, _root))
+            {
+                SetDesignLocationFromVisual(control, GetDesignSpaceLocation(control));
+                continue;
+            }
+
+            var rootRel = GetDesignSpaceLocation(control);
+            var parentRel = GetDesignSpaceLocation(parent);
+            SetDesignLocationFromVisual(
+                control,
+                new SKPoint(rootRel.X - parentRel.X, rootRel.Y - parentRel.Y));
+        }
+    }
+
+    /// <summary>
+    /// Syncs canvas positions into anchor storage, then runs dock/anchor layout like RSBot
+    /// (<c>PerformLayout</c> after <c>InitializeComponent</c>).
+    /// </summary>
+    internal void CommitRuntimeLayoutForMerge()
+    {
+        PrepareForPersist();
+        RelayoutRoot();
+    }
+
+    internal Dictionary<string, SKRect> CaptureDesignedBounds()
+    {
+        var map = new Dictionary<string, SKRect>(StringComparer.Ordinal);
+        foreach (var control in AllDesignedControls)
+        {
+            if (string.IsNullOrEmpty(control.Name))
+                continue;
+            map[control.Name] = SKRect.Create(control.Location, control.Size);
+        }
+
+        return map;
+    }
+
+    internal void RestoreDesignedBounds(IReadOnlyDictionary<string, SKRect> snapshot)
+    {
+        foreach (var control in AllDesignedControls)
+        {
+            if (string.IsNullOrEmpty(control.Name) || !snapshot.TryGetValue(control.Name, out var rect))
+                continue;
+
+            control.Location = rect.Location;
+            control.Size = rect.Size;
+        }
+
+        Invalidate();
+    }
+
+    /// <summary>
+    /// Lays out like runtime, merges source, optionally restores pre-layout canvas (Code tab preview).
+    /// </summary>
+    internal string MergeSourceAfterRuntimeLayout(bool keepLayoutOnSurface, Func<string> merge)
+    {
+        var snapshot = keepLayoutOnSurface ? null : CaptureDesignedBounds();
+        CommitRuntimeLayoutForMerge();
+        try
+        {
+            return merge();
+        }
+        finally
+        {
+            if (snapshot != null)
+                RestoreDesignedBounds(snapshot);
+        }
     }
 
     public new void BringToFront(ElementBase control)
@@ -1401,7 +1677,7 @@ public sealed class DesignSurface : Element
             }
 
             // Selection adorners.
-            var items = _s.Selection.Items;
+            var items = _s.Selection.Items.Where(_s.IsEditableInThisDocument).ToList();
             if (items.Count > 0)
             {
                 _stroke.Color = ColorScheme.Primary;
@@ -1572,6 +1848,8 @@ public sealed class DesignSurface : Element
             }
 
             var hit = HitControl(e.Location);
+            if (hit != null)
+                hit = _s.ResolveEditableTarget(hit);
 
             // Designed controls receive no input of their own in design mode (this overlay owns
             // every mouse event instead), so a TabView's own tab strip — normally how you'd switch
@@ -1639,7 +1917,9 @@ public sealed class DesignSurface : Element
                 return;
 
             var hit = HitControl(e.Location);
-            if (hit == null || _s.Locked.Contains(hit))
+            if (hit != null)
+                hit = _s.ResolveEditableTarget(hit);
+            if (hit == null || _s.Locked.Contains(hit) || !_s.IsEditableInThisDocument(hit))
                 return;
 
             if (hit.GetType() != typeof(Element) && hit.GetType() != typeof(Badge) && hit.GetType() != typeof(Button))
@@ -1790,6 +2070,7 @@ public sealed class DesignSurface : Element
                     if (_resizingRoot)
                     {
                         _s.CommitBoundsChange("Resize form", new Dictionary<ElementBase, SKRect> { [Root] = _rootDragBefore });
+                        _s.RelayoutRoot();
                     }
                     else if (_dragBefore != null)
                     {
@@ -1802,7 +2083,11 @@ public sealed class DesignSurface : Element
                             && _s.TryReparentOnDrop(_s.Selection.Items[0], e.Location, _dragBefore[_s.Selection.Items[0]]);
 
                         if (!reparented)
+                        {
+                            foreach (var control in _dragBefore.Keys)
+                                DesignSurface.SetDesignLocationFromVisual(control, control.VisualLocation);
                             _s.CommitBoundsChange(_mode == Grip.Body ? "Move" : "Resize", _dragBefore);
+                        }
                     }
                     _dragBefore = null;
                     _resizingRoot = false;
@@ -1872,7 +2157,7 @@ public sealed class DesignSurface : Element
                     e.Handled = true;
                     break;
                 case Keys.A when e.Control:
-                    _s.Selection.SetMany(_s.DesignedControls);
+                    _s.Selection.SetMany(_s.AllDesignedControls.Where(c => _s.IsEditableInThisDocument(c)));
                     e.Handled = true;
                     break;
                 case Keys.G when e.Control && e.Shift:
@@ -1898,7 +2183,7 @@ public sealed class DesignSurface : Element
             _mode = grip;
             _dragStart = mouse;
             _dragBefore = _s.Selection.Items
-                .Where(c => !_s.Locked.Contains(c))
+                .Where(c => !_s.Locked.Contains(c) && _s.IsEditableInThisDocument(c))
                 .ToDictionary(c => c, c => SKRect.Create(c.VisualLocation, c.Size));
             _ctrlDragDuplicated = false;
             Capture();
@@ -2011,7 +2296,7 @@ public sealed class DesignSurface : Element
                 var fy = snapped.Top - pb.Top;
 
                 foreach (var (control, before) in _dragBefore)
-                    control.Location = new SKPoint(before.Left + fx, before.Top + fy);
+                    DesignSurface.SetDesignLocationFromVisual(control, new SKPoint(before.Left + fx, before.Top + fy));
 
                 // Live nesting-target highlight while dragging an existing control, mirroring the
                 // toolbox-drop preview — only meaningful for a single selected item, since a
@@ -2117,7 +2402,7 @@ public sealed class DesignSurface : Element
 
             var before = movable.ToDictionary(c => c, c => SKRect.Create(c.VisualLocation, c.Size));
             foreach (var c in movable)
-                c.Location = new SKPoint(c.VisualLocation.X + dx, c.VisualLocation.Y + dy);
+                DesignSurface.SetDesignLocationFromVisual(c, new SKPoint(c.VisualLocation.X + dx, c.VisualLocation.Y + dy));
             _s.CommitBoundsChange("Nudge", before);
             Invalidate();
         }
@@ -2128,8 +2413,9 @@ public sealed class DesignSurface : Element
                 _marquee.Left - Root.Location.X, _marquee.Top - Root.Location.Y,
                 _marquee.Right - Root.Location.X, _marquee.Bottom - Root.Location.Y);
 
-            var hits = _s.DesignedControls
-                .Where(c => c.Visible && !_s.Locked.Contains(c) && rootRel.IntersectsWith(_s.GetDesignSpaceBounds(c)))
+            var hits = _s.AllDesignedControls
+                .Where(c => c.Visible && !_s.Locked.Contains(c) && _s.IsEditableInThisDocument(c)
+                            && rootRel.IntersectsWith(_s.GetDesignSpaceBounds(c)))
                 .ToList();
 
             if ((ModifierKeys & Keys.Control) == Keys.Control)
@@ -2223,7 +2509,7 @@ public sealed class DesignSurface : Element
             }
             else
             {
-                menu.AddItem(new MenuItem("Select all", (_, _) => _s.Selection.SetMany(_s.DesignedControls)) { ShortcutKeys = Keys.Control | Keys.A });
+                menu.AddItem(new MenuItem("Select all", (_, _) => _s.Selection.SetMany(_s.AllDesignedControls.Where(c => _s.IsEditableInThisDocument(c)))) { ShortcutKeys = Keys.Control | Keys.A });
                 menu.AddItem(new MenuItem("Fit to view", (_, _) => _s.FitToView()));
             }
 

@@ -39,10 +39,13 @@ public static class CodeGenerator
         sb.AppendLine();
         sb.AppendLine("    private void InitializeComponent()");
         sb.AppendLine("    {");
-        sb.AppendLine(string.Format(inv,
-            "        ClientSize = new SKSize({0}, {1});",
-            DesignSourceFormat.Pixel(root.Width), DesignSourceFormat.Pixel(root.Height)));
-        sb.AppendLine();
+        if (DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(root, "Size"))
+        {
+            sb.AppendLine(string.Format(inv,
+                "        ClientSize = new SKSize({0}, {1});",
+                DesignSourceFormat.Pixel(root.Width), DesignSourceFormat.Pixel(root.Height)));
+            sb.AppendLine();
+        }
 
         foreach (var control in controls)
             AppendInitializer(sb, control, inv, surface);
@@ -86,17 +89,29 @@ public static class CodeGenerator
         sb.AppendLine($"        {control.Name} = new {control.GetType().Name}");
         sb.AppendLine("        {");
         sb.AppendLine($"            Name = \"{Escape(control.Name)}\",");
-        if (!string.IsNullOrEmpty(control.Text))
+        if (DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(control, "Text")
+            && !string.IsNullOrEmpty(control.Text))
             sb.AppendLine($"            Text = \"{Escape(control.Text)}\",");
-        sb.AppendLine(string.Format(inv,
-            "            Location = new SKPoint({0}, {1}),",
-            DesignSourceFormat.Pixel(control.Location.X), DesignSourceFormat.Pixel(control.Location.Y)));
-        sb.AppendLine(string.Format(inv,
-            "            Size = new SKSize({0}, {1}),",
-            DesignSourceFormat.Pixel(control.Width), DesignSourceFormat.Pixel(control.Height)));
-        sb.AppendLine($"            Dock = {DesignSourceFormat.Dock(control.Dock)},");
-        sb.AppendLine($"            Anchor = {DesignSourceFormat.Anchor(control.Anchor)},");
-        if (!control.Visible)
+        if (DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(control, "Location"))
+        {
+            var loc = DesignSourceFormat.PersistedLocation(control);
+            sb.AppendLine(string.Format(inv,
+                "            Location = new SKPoint({0}, {1}),",
+                DesignSourceFormat.Pixel(loc.X), DesignSourceFormat.Pixel(loc.Y)));
+        }
+
+        if (DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(control, "Size"))
+        {
+            sb.AppendLine(string.Format(inv,
+                "            Size = new SKSize({0}, {1}),",
+                DesignSourceFormat.Pixel(control.Width), DesignSourceFormat.Pixel(control.Height)));
+        }
+
+        if (DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(control, "Dock"))
+            sb.AppendLine($"            Dock = {DesignSourceFormat.Dock(control.Dock)},");
+        if (DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(control, "Anchor"))
+            sb.AppendLine($"            Anchor = {DesignSourceFormat.Anchor(control.Anchor)},");
+        if (DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(control, "Visible") && !control.Visible)
             sb.AppendLine("            Visible = false,");
         sb.AppendLine("        };");
         AppendControlInteractions(sb, surface, control.Name);

@@ -494,6 +494,13 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             UpdateCurrentDpiFromParent();
             NeedsRedraw = true;
 
+            if (_parent != null)
+            {
+                if (CommonProperties.GetNeedsAnchorLayout(this))
+                    _forceAnchorCalculations = true;
+                SyncAnchorFromBounds();
+            }
+
             if (!ReferenceEquals(previousContext, DataContext))
                 OnDataContextChanged(EventArgs.Empty);
         }
@@ -1643,21 +1650,6 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         {
             if (_name == value) return;
             _name = value;
-        }
-    }
-
-    private bool _useVisualStyleBackColor = true;
-
-    [Category("Appearance")]
-    [DefaultValue(true)]
-    public virtual bool UseVisualStyleBackColor
-    {
-        get => _useVisualStyleBackColor;
-        set
-        {
-            if (_useVisualStyleBackColor == value) return;
-            _useVisualStyleBackColor = value;
-            Invalidate();
         }
     }
 
@@ -4952,9 +4944,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     public virtual void  OnLayout(LayoutEventArgs e)
     {
         Layout?.Invoke(this, e);
-        // Showing the design page again calls ForceDescendantsLayout. Dock/anchor would then
-        // rewrite every designed control back to the margins captured before the edit, so the
-        // canvas and the code generated immediately afterwards both look like the old file.
+        // Spontaneous layout in design mode re-applies stale anchor margins and snaps drags back
+        // (especially Top|Right controls such as toolbar buttons). WYSIWYG refresh uses
+        // ApplyStoredDesignLayout / RelayoutRoot after import, preview, or dock/anchor edits.
         if (!IsAncestorSiteInDesignMode || s_explicitDesignLayout > 0)
             Orivy.Layout.DefaultLayout.Instance.Layout(this, e);
         ResolveChildOverflowLocations();
@@ -5014,14 +5006,15 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             (anchor & AnchorStyles.Left) != AnchorStyles.Left &&
             location.X < 0f)
         {
-            resolved.X = bounds.Right - child.Width - location.X;
+            // Negative Location.X is distance from the parent's right edge (WinForms anchor storage).
+            resolved.X = bounds.Right - child.Width + location.X;
         }
 
         if ((anchor & AnchorStyles.Bottom) == AnchorStyles.Bottom &&
             (anchor & AnchorStyles.Top) != AnchorStyles.Top &&
             location.Y < 0f)
         {
-            resolved.Y = bounds.Bottom - child.Height - location.Y;
+            resolved.Y = bounds.Bottom - child.Height + location.Y;
         }
 
         return resolved;

@@ -230,7 +230,7 @@ internal partial class DefaultLayout : LayoutEngine
                 anchorInfo.Bottom += growOrShrink;
             }
         }
- 
+
         return SkiaSharp.SKRect.Create(anchorInfo.Left, anchorInfo.Top, width, height);
     }
  
@@ -354,11 +354,10 @@ internal partial class DefaultLayout : LayoutEngine
             {
                 continue;
             }
- 
-            if (GetAnchorInfo(element) is null)
-            {
-                UpdateAnchorInfo(element);
-            }
+
+            UpdateAnchorInfo(element);
+            if (element is ElementBase cleared)
+                cleared._forceAnchorCalculations = false;
 
             Debug.Assert(GetAnchorInfo(element) is not null, "AnchorInfo should be initialized before LayoutAnchorControls().");
             SetCachedBounds(element, GetAnchorDestination(element, displayRectangle, measureOnly: false));
@@ -745,7 +744,8 @@ internal partial class DefaultLayout : LayoutEngine
     }
  
     /// <summary>
-    ///  Updates the control's anchors information based on the control's current bounds.
+    ///  Stores anchor margins from the control's current bounds (WinForms AnchorLayoutV2 / ComputeAnchorInfo).
+    ///  Must stay aligned with <see cref="ComputeAnchoredBoundsV2"/>.
     /// </summary>
     internal static void UpdateAnchorInfo(IArrangedElement element)
     {
@@ -763,93 +763,16 @@ internal partial class DefaultLayout : LayoutEngine
             SetAnchorInfo(element, anchorInfo);
         }
 
-        SkiaSharp.SKRect cachedBounds = GetCachedBounds(element);
-        AnchorInfo oldAnchorInfo = new()
-        {
-            Left = anchorInfo.Left,
-            Top = anchorInfo.Top,
-            Right = anchorInfo.Right,
-            Bottom = anchorInfo.Bottom
-        };
-
+        SkiaSharp.SKRect displayRectangle = element.Container.DisplayRectangle;
         SkiaSharp.SKRect elementBounds = element.Bounds;
+        var xInDisplay = elementBounds.Left - displayRectangle.Left;
+        var yInDisplay = elementBounds.Top - displayRectangle.Top;
+
+        anchorInfo.DisplayRectangle = displayRectangle;
         anchorInfo.Left = elementBounds.Left;
         anchorInfo.Top = elementBounds.Top;
-        anchorInfo.Right = elementBounds.Right;
-        anchorInfo.Bottom = elementBounds.Bottom;
-
-        SkiaSharp.SKRect parentDisplayRect = element.Container.DisplayRectangle;
-        var parentWidth = parentDisplayRect.Width;
-        var parentHeight = parentDisplayRect.Height;
- 
-        // The anchors is relative to the parent DisplayRectangle, so offset the anchors
-        // by the DisplayRect origin
-        anchorInfo.Left -= parentDisplayRect.Left;
-        anchorInfo.Top -= parentDisplayRect.Top;
-        anchorInfo.Right -= parentDisplayRect.Left;
-        anchorInfo.Bottom -= parentDisplayRect.Top;
- 
-        AnchorStyles anchor = GetAnchor(element);
-        // A designer move is the new baseline. Reusing the old negative margin here put the
-        // control back where it started as soon as the parent laid out again.
-        var keepOverflowMargin = element is not ElementBase designed || !designed.IsAncestorSiteInDesignMode;
-        if (IsAnchored(anchor, AnchorStyles.Right))
-        {
-            if (keepOverflowMargin && (anchorInfo.Right - parentWidth > 0) && (oldAnchorInfo.Right < 0))
-            {
-                // Parent was resized to fit its parent, or screen, we need to reuse old anchors info to prevent losing control beyond right edge.
-                anchorInfo.Right = oldAnchorInfo.Right;
-                if (!IsAnchored(anchor, AnchorStyles.Left))
-                {
-                    // Control might have been resized, update Left anchors.
-                    anchorInfo.Left = oldAnchorInfo.Right - cachedBounds.Width;
-                }
-            }
-            else
-            {
-                anchorInfo.Right -= parentWidth;
- 
-                if (!IsAnchored(anchor, AnchorStyles.Left))
-                {
-                    anchorInfo.Left -= parentWidth;
-                }
-            }
-        }
-        else if (!IsAnchored(anchor, AnchorStyles.Left))
-        {
-            anchorInfo.Right -= parentWidth / 2;
-            anchorInfo.Left -= parentWidth / 2;
-        }
- 
-        if (IsAnchored(anchor, AnchorStyles.Bottom))
-        {
-            if (keepOverflowMargin && (anchorInfo.Bottom - parentHeight > 0) && (oldAnchorInfo.Bottom < 0))
-            {
-                // The parent was resized to fit its parent or the screen, we need to reuse the old anchors info
-                // to prevent positioning the control beyond the bottom edge.
-                anchorInfo.Bottom = oldAnchorInfo.Bottom;
- 
-                if (!IsAnchored(anchor, AnchorStyles.Top))
-                {
-                    // The control might have been resized, update the Top anchor.
-                    anchorInfo.Top = oldAnchorInfo.Bottom - cachedBounds.Height;
-                }
-            }
-            else
-            {
-                anchorInfo.Bottom -= parentHeight;
- 
-                if (!IsAnchored(anchor, AnchorStyles.Top))
-                {
-                    anchorInfo.Top -= parentHeight;
-                }
-            }
-        }
-        else if (!IsAnchored(anchor, AnchorStyles.Top))
-        {
-            anchorInfo.Bottom -= parentHeight / 2;
-            anchorInfo.Top -= parentHeight / 2;
-        }
+        anchorInfo.Right = displayRectangle.Width - (xInDisplay + elementBounds.Width);
+        anchorInfo.Bottom = displayRectangle.Height - (yInDisplay + elementBounds.Height);
     }
  
     /// <summary>
@@ -899,27 +822,9 @@ internal partial class DefaultLayout : LayoutEngine
             // we skip updating anchors for the control.
             return;
         }
- 
-        if (anchorInfo is null)
-        {
-            anchorInfo = new AnchorInfo();
-            SetAnchorInfo(control, anchorInfo);
-        }
- 
-        // Reset parent flag as we now ready to iterate over all children requiring AnchorInfo calculation.
-        parent._childControlsNeedAnchorLayout = false;
 
-        SkiaSharp.SKRect displayRectangle = control.Parent!.DisplayRectangle;
-        SkiaSharp.SKRect elementBounds = GetCachedBounds(control);
-        var x = elementBounds.Left;
-        var y = elementBounds.Top;
- 
-        anchorInfo.DisplayRectangle = displayRectangle;
-        anchorInfo.Left = x;
-        anchorInfo.Top = y;
- 
-        anchorInfo.Right = displayRectangle.Width - (x + elementBounds.Width);
-        anchorInfo.Bottom = displayRectangle.Height - (y + elementBounds.Height);
+        parent._childControlsNeedAnchorLayout = false;
+        UpdateAnchorInfo(control);
     }
  
     public static AnchorStyles GetAnchor(IArrangedElement element) => CommonProperties.xGetAnchor(element);

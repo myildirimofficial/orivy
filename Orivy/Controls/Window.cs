@@ -903,11 +903,20 @@ public partial class Window : WindowBase
         }
     }
 
+    private bool? _nativeThemeDark;
+
     private void OnThemeChanged(object? sender, EventArgs e)
     {
-        QueueNativeThemeApply();
-        NeedsFullChildRedraw = true;
-        InvalidateRenderTree();
+        // The background lerp raises ThemeChanged every frame. Reapplying the DWM backdrop and
+        // walking the whole child tree on each tick flashes a large window. Controls already
+        // invalidate themselves; native chrome only changes when light/dark actually flips.
+        var dark = ColorScheme.IsDarkMode;
+        if (_nativeThemeDark != dark)
+        {
+            _nativeThemeDark = dark;
+            QueueNativeThemeApply();
+        }
+
         Invalidate();
     }
 

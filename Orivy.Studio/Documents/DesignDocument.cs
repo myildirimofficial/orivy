@@ -40,7 +40,14 @@ public sealed class DesignDocument : Container, IStudioDocument
     public DesignDocument(string title)
     {
         _documentName = title;
-        _themeChangedHandler = (_, _) => RefreshSwitcherIcons();
+        var switcherIconsDark = ColorScheme.IsDarkMode;
+        _themeChangedHandler = (_, _) =>
+        {
+            if (switcherIconsDark == ColorScheme.IsDarkMode)
+                return;
+            switcherIconsDark = ColorScheme.IsDarkMode;
+            RefreshSwitcherIcons();
+        };
         Surface = new DesignSurface { Dock = DockStyle.Fill };
         Surface.Commands.Changed += () =>
         {
@@ -52,6 +59,7 @@ public sealed class DesignDocument : Container, IStudioDocument
                 _dirty = true;
                 UpdateTabText();
                 DirtyChanged?.Invoke();
+                RefreshCodeIfVisible();
             }
         };
 
@@ -131,11 +139,8 @@ public sealed class DesignDocument : Container, IStudioDocument
     public string? FilePath { get; set; }
 
     /// <summary>The exact text this document was loaded from (or last saved as) — null for a document
-    /// that was never backed by a file. <see cref="RefreshCode"/> shows this verbatim while the
-    /// document is clean, rather than <see cref="CodeGenerator"/>'s regenerated output: the generator
-    /// only knows about what the visual model tracks, so re-running it on a file nobody has touched
-    /// yet — just to show the Code tab — could visibly differ from (or silently discard parts of) the
-    /// actual file on disk, e.g. custom hand-written code or constructs the importer doesn't model.</summary>
+    /// that was never backed by a file. <see cref="RefreshCode"/> always runs <see cref="GetPersistedSource"/>
+    /// so the Code tab reflects live canvas edits via <see cref="CodeMerger"/>.</summary>
     public string? OriginalSourceText { get; set; }
 
     public bool IsDirty => _dirty;
@@ -159,10 +164,8 @@ public sealed class DesignDocument : Container, IStudioDocument
         if (FilePath == null)
             throw new InvalidOperationException("This document has no file path to save to yet.");
 
-        // A design has no proprietary save format of its own — it saves as the exact same Designer
-        // C# code Export produces, so the file on disk is always a plain, valid, hand-editable .cs
-        // file rather than a hidden project format only Orivy.Studio understands.
-        var code = GetPersistedSource();
+        Surface.PrepareForPersist();
+        var code = GetMergedSource();
         File.WriteAllText(FilePath, code);
         OriginalSourceText = code;
         MarkClean();
@@ -174,9 +177,12 @@ public sealed class DesignDocument : Container, IStudioDocument
     /// </summary>
     public string GetPersistedSource()
     {
-        var className = string.IsNullOrWhiteSpace(DocumentName) ? "MyWindow" : DocumentName;
-        return CodeMerger.Apply(OriginalSourceText, Surface, className, FilePath);
+        Surface.PrepareForPersist();
+        return GetMergedSource();
     }
+
+    private string GetMergedSource() =>
+        CodeMerger.Apply(OriginalSourceText, Surface, className: string.IsNullOrWhiteSpace(DocumentName) ? "MyWindow" : DocumentName, FilePath, mergeLiveEdits: _dirty);
 
     public void MarkClean()
     {
@@ -209,12 +215,6 @@ public sealed class DesignDocument : Container, IStudioDocument
 
     private void RefreshCode()
     {
-        if (!_dirty && OriginalSourceText != null)
-        {
-            _codeView.Text = OriginalSourceText;
-            return;
-        }
-
         _codeView.Text = GetPersistedSource();
     }
 

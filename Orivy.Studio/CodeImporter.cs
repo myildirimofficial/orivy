@@ -139,6 +139,10 @@ public static class CodeImporter
 
         ProcessCompilationUnit(compilationUnit, knownTypeNames, declaredFields, declaredFieldTypes, nodes, declarationOrder, addEdges, ref clientSize, eventWires, controlBindings);
 
+        var filePersistedControlNames = CollectFilePersistedControlNames(compilationUnit, knownTypeNames, declaredFields, declaredFieldTypes);
+        var formName = TryReadFormNameFromInitializeComponent(compilationUnit);
+        var owningClassName = compilationUnit.DescendantNodes().OfType<ClassDeclarationSyntax>().FirstOrDefault()?.Identifier.Text;
+
         if (declarationOrder.Count == 0)
             throw new InvalidOperationException("No control declarations found — is this Designer code Orivy Studio generated?");
 
@@ -156,7 +160,7 @@ public static class CodeImporter
                 localBaseTypeOf[classDecl.Identifier.Text] = GetSimpleTypeName(baseType.Type);
         }
 
-        return Rebuild(surface, clientSize, nodes, declarationOrder, addEdges, localBaseTypeOf, projectClasses, eventWires, controlBindings);
+        return Rebuild(surface, clientSize, nodes, declarationOrder, addEdges, localBaseTypeOf, projectClasses, eventWires, controlBindings, filePath, filePersistedControlNames, formName, owningClassName, knownTypeNames);
     }
 
     private sealed record ProjectClassInfo(string? BaseType, string? FilePath, string? DesignerPath);
@@ -234,6 +238,17 @@ public static class CodeImporter
                     }
                 }
                 catch { }
+            }
+
+            foreach (var key in result.Keys.ToList())
+            {
+                var info = result[key];
+                if (!string.IsNullOrEmpty(info.DesignerPath) || string.IsNullOrEmpty(info.FilePath))
+                    continue;
+
+                var candidate = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(info.FilePath)!, $"{key}.Designer.cs");
+                if (System.IO.File.Exists(candidate))
+                    result[key] = new ProjectClassInfo(info.BaseType, info.FilePath, candidate);
             }
         }
         catch { }
@@ -629,6 +644,139 @@ public static class CodeImporter
         }
     }
 
+    /// <summary>Names this designer file declares or touches — the only controls Save may emit.</summary>
+    private static HashSet<string> CollectFilePersistedControlNames(
+        CompilationUnitSyntax compilationUnit,
+        HashSet<string> knownTypeNames,
+        HashSet<string> declaredFields,
+        Dictionary<string, string> declaredFieldTypes)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var field in compilationUnit.DescendantNodes().OfType<FieldDeclarationSyntax>())
+        {
+            var fieldTypeName = GetSimpleTypeName(field.Declaration.Type);
+            foreach (var variable in field.Declaration.Variables)
+            {
+                if (variable.Initializer?.Value is not (ObjectCreationExpressionSyntax or ImplicitObjectCreationExpressionSyntax))
+                    continue;
+
+                var hasInitializerMembers = variable.Initializer.Value switch
+                {
+                    ObjectCreationExpressionSyntax { Initializer: { Expressions.Count: > 0 } } => true,
+                    ImplicitObjectCreationExpressionSyntax { Initializer: { Expressions.Count: > 0 } } => true,
+                    _ => false,
+                };
+
+                if (!hasInitializerMembers)
+                    continue;
+
+                var creationType = variable.Initializer.Value switch
+                {
+                    ObjectCreationExpressionSyntax oce => GetSimpleTypeName(oce.Type),
+                    ImplicitObjectCreationExpressionSyntax => fieldTypeName,
+                    _ => null,
+                };
+
+                if (creationType != null && IsCatalogTypeName(creationType, knownTypeNames))
+                    names.Add(variable.Identifier.Text);
+            }
+        }
+
+        var initMethod = compilationUnit.DescendantNodes()
+            .OfType<MethodDeclarationSyntax>()
+            .FirstOrDefault(m => m.Identifier.Text == "InitializeComponent");
+        if (initMethod?.Body == null)
+            return names;
+
+        foreach (var statement in EnumerateDesignStatements(initMethod.Body))
+        {
+            if (statement is LocalDeclarationStatementSyntax localDeclaration)
+            {
+                foreach (var variable in localDeclaration.Declaration.Variables)
+                {
+                    var hasInitializerMembers = variable.Initializer?.Value switch
+                    {
+                        ObjectCreationExpressionSyntax { Initializer: { Expressions.Count: > 0 } } => true,
+                        ImplicitObjectCreationExpressionSyntax { Initializer: { Expressions.Count: > 0 } } => true,
+                        _ => false,
+                    };
+
+                    if (hasInitializerMembers)
+                        names.Add(variable.Identifier.Text);
+                }
+
+                continue;
+            }
+
+            if (statement is not ExpressionStatementSyntax { Expression: var expression })
+                continue;
+
+            switch (expression)
+            {
+                case AssignmentExpressionSyntax assign
+                    when DesignPersistableProperties.TryParseAssignmentTarget(assign, out var controlName, out _):
+                    if (!string.IsNullOrEmpty(controlName))
+                        names.Add(controlName);
+                    break;
+
+                case AssignmentExpressionSyntax { Left: var declLeft, Right: var creation }
+                    when ResolveTargetName(declLeft) is { } declName:
+                    if (creation switch
+                        {
+                            ObjectCreationExpressionSyntax { Initializer: { Expressions.Count: > 0 } } => true,
+                            ImplicitObjectCreationExpressionSyntax { Initializer: { Expressions.Count: > 0 } } => true,
+                            _ => false,
+                        })
+                        names.Add(declName);
+                    break;
+
+                case AssignmentExpressionSyntax { Left: MemberAccessExpressionSyntax memberLeft, Right: var _ }
+                    when ResolveTargetName(memberLeft.Expression) is { } targetName:
+                    names.Add(targetName);
+                    break;
+
+                case InvocationExpressionSyntax
+                {
+                    Expression: MemberAccessExpressionSyntax { Name.Identifier.Text: "Add" or "AddRange" } invokeTarget,
+                }
+                    when invokeTarget.Expression is MemberAccessExpressionSyntax { Name.Identifier.Text: var collectionMember } ownerAccess
+                         && collectionMember != "Controls"
+                         && ResolveTargetName(ownerAccess.Expression) is { } collectionOwner:
+                    names.Add(collectionOwner);
+                    break;
+            }
+        }
+
+        return names;
+    }
+
+    private static string? TryReadFormNameFromInitializeComponent(CompilationUnitSyntax compilationUnit)
+    {
+        var method = compilationUnit.DescendantNodes()
+            .OfType<MethodDeclarationSyntax>()
+            .FirstOrDefault(m => m.Identifier.Text == "InitializeComponent");
+        if (method?.Body == null)
+            return null;
+
+        foreach (var statement in EnumerateDesignStatements(method.Body))
+        {
+            if (statement is not ExpressionStatementSyntax { Expression: AssignmentExpressionSyntax assign })
+                continue;
+
+            if (!DesignPersistableProperties.TryParseAssignmentTarget(assign, out var controlName, out var propertyName))
+                continue;
+
+            if (!string.IsNullOrEmpty(controlName) || !string.Equals(propertyName, "Name", StringComparison.Ordinal))
+                continue;
+
+            if (assign.Right is LiteralExpressionSyntax { Token.Value: string name })
+                return name;
+        }
+
+        return null;
+    }
+
     private static void ImportLocalDeclaration(
         LocalDeclarationStatementSyntax localDeclaration,
         HashSet<string> knownTypeNames,
@@ -791,10 +939,47 @@ public static class CodeImporter
     /// <c>SKColor</c>, <c>SKSize</c>, <c>SKPoint</c>, ...). Returns false for anything else (a method
     /// call, a variable reference, ...) rather than guessing — the property is then just left at
     /// whatever the control's own constructor default is, same as before this existed.</summary>
-    private static bool TryConvertValue(ExpressionSyntax expr, Type targetType, out object? value, Func<string, object?>? objectLookup = null)
+    /// <summary>WinForms-style <c>(Icon)resources.GetObject("key")</c> or bare <c>resources.GetObject("key")</c>.</summary>
+    private static bool TryParseResourceGetObject(ExpressionSyntax expr, out string? resourceKey)
+    {
+        resourceKey = null;
+        var core = expr is CastExpressionSyntax cast ? cast.Expression : expr;
+        if (core is not InvocationExpressionSyntax
+            {
+                Expression: MemberAccessExpressionSyntax
+                {
+                    Name.Identifier.Text: "GetObject",
+                    Expression: IdentifierNameSyntax { Identifier.Text: "resources" }
+                },
+                ArgumentList.Arguments.Count: 1
+            } invocation)
+            return false;
+
+        if (invocation.ArgumentList.Arguments[0].Expression is not LiteralExpressionSyntax { Token.Value: string key })
+            return false;
+
+        resourceKey = key;
+        return true;
+    }
+
+    internal static bool TryReadPropertyValue(ExpressionSyntax expr, Type targetType, out object? value, string? designerFilePath = null) =>
+        TryConvertValue(expr, targetType, out value, null, designerFilePath);
+
+    internal static bool TryEvaluatePropertyExpression(ExpressionSyntax expr, Type targetType, out object? value, string? designerFilePath = null) =>
+        TryEvaluateGeneric(expr, targetType, out value, null, designerFilePath);
+
+    private static bool TryConvertValue(ExpressionSyntax expr, Type targetType, out object? value, Func<string, object?>? objectLookup = null, string? designerFilePath = null)
     {
         var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
         value = null;
+
+        if (TryParseResourceGetObject(expr, out var resourceKey)
+            && resourceKey != null
+            && DesignResourceLoader.TryGetObject(designerFilePath, resourceKey, underlying) is { } resourceValue)
+        {
+            value = resourceValue;
+            return true;
+        }
 
         if (objectLookup != null && expr is IdentifierNameSyntax id && objectLookup(id.Identifier.Text) is { } resolved)
         {
@@ -816,7 +1001,7 @@ public static class CodeImporter
 
         if (expr is PrefixUnaryExpressionSyntax { RawKind: (int)SyntaxKind.UnaryMinusExpression } unary)
         {
-            if (!TryConvertValue(unary.Operand, underlying, out var inner, objectLookup) || inner == null || !IsNumericType(underlying))
+            if (!TryConvertValue(unary.Operand, underlying, out var inner, objectLookup, designerFilePath) || inner == null || !IsNumericType(underlying))
                 return false;
             try { value = Convert.ChangeType(-Convert.ToDouble(inner, CultureInfo.InvariantCulture), underlying, CultureInfo.InvariantCulture); return true; }
             catch { return false; }
@@ -859,7 +1044,7 @@ public static class CodeImporter
                 return false;
 
             case BinaryExpressionSyntax { RawKind: (int)SyntaxKind.BitwiseOrExpression } flags when underlying.IsEnum:
-                if (TryConvertValue(flags.Left, underlying, out var leftFlag, objectLookup) && TryConvertValue(flags.Right, underlying, out var rightFlag, objectLookup))
+                if (TryConvertValue(flags.Left, underlying, out var leftFlag, objectLookup, designerFilePath) && TryConvertValue(flags.Right, underlying, out var rightFlag, objectLookup, designerFilePath))
                 {
                     value = Enum.ToObject(underlying, Convert.ToInt64(leftFlag) | Convert.ToInt64(rightFlag));
                     return true;
@@ -1037,9 +1222,9 @@ public static class CodeImporter
     /// (<c>new GridListColumn { Name = ..., Text = ... }</c>, a parameterless ctor plus per-property
     /// assignments, as opposed to <see cref="TryConstruct"/>'s constructor-argument struct shape) and
     /// array literals (<c>new[] { "Alpha", "1" }</c>, a GridList row's cell values).</summary>
-    private static bool TryEvaluateGeneric(ExpressionSyntax expr, Type targetType, out object? value, Func<string, object?>? objectLookup = null)
+    private static bool TryEvaluateGeneric(ExpressionSyntax expr, Type targetType, out object? value, Func<string, object?>? objectLookup = null, string? designerFilePath = null)
     {
-        if (TryConvertValue(expr, targetType, out value, objectLookup))
+        if (TryConvertValue(expr, targetType, out value, objectLookup, designerFilePath))
             return true;
 
         switch (expr)
@@ -1104,7 +1289,7 @@ public static class CodeImporter
         return true;
     }
 
-    private static void ApplyExtraPropertiesToObject(object target, NodeInfo info, Func<string, object?>? objectLookup = null)
+    private static void ApplyExtraPropertiesToObject(object target, NodeInfo info, Func<string, object?>? objectLookup = null, string? designerFilePath = null)
     {
         var properties = TypeDescriptor.GetProperties(target);
         foreach (var (propName, expr) in info.ExtraProperties)
@@ -1112,12 +1297,28 @@ public static class CodeImporter
             var descriptor = properties[propName];
             if (descriptor == null || descriptor.IsReadOnly)
                 continue;
-            if (TryConvertValue(expr, descriptor.PropertyType, out var value, objectLookup))
+            if (TryConvertValue(expr, descriptor.PropertyType, out var value, objectLookup, designerFilePath))
             {
                 try { descriptor.SetValue(target, value); }
                 catch { }
             }
         }
+
+        if (target is ElementBase element)
+            ApplyDesignTimeLayoutDefaults(element, info);
+    }
+
+    /// <summary>
+    /// Constructor defaults (e.g. TextBox MinimumSize 120×28) are not in the .Designer.cs file — clear
+    /// them so the property grid and layout do not treat them as user assignments. File-specified values
+    /// remain via <see cref="NodeInfo.ExtraProperties"/>.
+    /// </summary>
+    private static void ApplyDesignTimeLayoutDefaults(ElementBase control, NodeInfo info)
+    {
+        if (!info.ExtraProperties.ContainsKey("MinimumSize"))
+            control.MinimumSize = new SKSize(0, 0);
+        if (!info.ExtraProperties.ContainsKey("MaximumSize"))
+            control.MaximumSize = SKSize.Empty;
     }
 
     private static string ResolveProjectAncestorType(
@@ -1147,12 +1348,50 @@ public static class CodeImporter
         return ResolveKnownAncestorType(current, localBaseTypeOf, catalog);
     }
 
+    private static bool TryGetHostedDesignerPath(
+        string typeName,
+        string? owningClassName,
+        string? currentDesignerPath,
+        Dictionary<string, ProjectClassInfo> projectClasses,
+        HashSet<string> catalogTypeNames,
+        out string designerPath)
+    {
+        designerPath = string.Empty;
+        if (string.Equals(typeName, owningClassName, StringComparison.Ordinal))
+            return false;
+
+        if (projectClasses.TryGetValue(typeName, out var classInfo))
+        {
+            if (TypeAuthoredByOpenDocument(classInfo, typeName, currentDesignerPath, owningClassName))
+                return false;
+
+            if (!string.IsNullOrEmpty(classInfo.DesignerPath) && System.IO.File.Exists(classInfo.DesignerPath))
+            {
+                designerPath = classInfo.DesignerPath;
+                return true;
+            }
+
+            return false;
+        }
+
+        if (!ShouldTreatAsForeignCompositionHost(typeName, owningClassName, catalogTypeNames)
+            || !TryFindDesignerPathForType(currentDesignerPath, typeName, out designerPath))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     private static void LoadChildControlsFromDesigner(
         ElementBase parentControl,
         string designerPath,
         Dictionary<string, ControlEntry> catalog,
         HashSet<string> knownTypeNames,
-        HashSet<string> usedNames)
+        HashSet<string> usedNames,
+        DesignSurface surface,
+        Dictionary<string, ProjectClassInfo> projectClasses,
+        Dictionary<string, string> localBaseTypeOf)
     {
         try
         {
@@ -1171,7 +1410,25 @@ public static class CodeImporter
             foreach (var name in subOrder)
             {
                 var info = subNodes[name];
-                if (!catalog.TryGetValue(info.Type, out var entry))
+                ControlEntry? entry = null;
+                if (catalog.TryGetValue(info.Type, out var directEntry))
+                {
+                    entry = directEntry;
+                }
+                else
+                {
+                    var resolvedName = ResolveKnownAncestorType(info.Type, localBaseTypeOf, catalog);
+                    if (catalog.TryGetValue(resolvedName, out var ancestorEntry))
+                        entry = ancestorEntry;
+                    else if (projectClasses.TryGetValue(info.Type, out var pci) && pci.BaseType != null)
+                    {
+                        var projectResolved = ResolveProjectAncestorType(pci.BaseType, projectClasses, localBaseTypeOf, catalog);
+                        if (catalog.TryGetValue(projectResolved, out var projEntry))
+                            entry = projEntry;
+                    }
+                }
+
+                if (entry == null)
                     continue;
 
                 var child = entry.CreateInstance(seedPlaceholderContent: false);
@@ -1183,7 +1440,7 @@ public static class CodeImporter
                 child.Dock = info.Dock;
                 child.Anchor = info.Anchor;
                 child.Visible = info.Visible;
-                ApplyExtraPropertiesToObject(child, info, key => subInstances.TryGetValue(key, out var ci) ? ci : null);
+                ApplyExtraPropertiesToObject(child, info, key => subInstances.TryGetValue(key, out var ci) ? ci : null, designerPath);
                 subInstances[name] = child;
             }
 
@@ -1202,7 +1459,7 @@ public static class CodeImporter
             }
             finally
             {
-                parentControl.ResumeLayout(false);
+                parentControl.ResumeLayout(true);
             }
 
             foreach (var (name, child) in subInstances)
@@ -1218,6 +1475,173 @@ public static class CodeImporter
         catch { }
     }
 
+    /// <summary>
+    /// Any project custom type instantiated in this file (not the document's own class) is a hosted
+    /// composition root: its inner tree belongs to that type's designer, not this one.
+    /// </summary>
+    private static void ApplyForeignCompositionPolicy(
+        DesignSurface surface,
+        string? currentDesignerPath,
+        string? owningClassName,
+        Dictionary<string, ProjectClassInfo> projectClasses,
+        Dictionary<string, NodeInfo> nodes,
+        Dictionary<string, ElementBase> instances,
+        HashSet<string> catalogTypeNames,
+        Dictionary<string, ControlEntry> catalog,
+        HashSet<string> knownTypeNames,
+        HashSet<string> usedNames,
+        Dictionary<string, string> localBaseTypeOf)
+    {
+        foreach (var (name, control) in instances)
+        {
+            if (!nodes.TryGetValue(name, out var info))
+                continue;
+
+            if (string.Equals(info.Type, owningClassName, StringComparison.Ordinal))
+                continue;
+
+            if (catalogTypeNames.Contains(info.Type))
+                continue;
+
+            ProjectClassInfo classInfo;
+            if (!projectClasses.TryGetValue(info.Type, out classInfo!))
+            {
+                if (!ShouldTreatAsForeignCompositionHost(info.Type, owningClassName, catalogTypeNames)
+                    || !TryFindDesignerPathForType(currentDesignerPath, info.Type, out var guessedDesigner))
+                {
+                    continue;
+                }
+
+                classInfo = new ProjectClassInfo(null, null, guessedDesigner);
+            }
+
+            if (TypeAuthoredByOpenDocument(classInfo, info.Type, currentDesignerPath, owningClassName))
+                continue;
+
+            if (!string.IsNullOrEmpty(classInfo.DesignerPath)
+                && System.IO.File.Exists(classInfo.DesignerPath)
+                && control.Controls.Count == 0)
+            {
+                LoadChildControlsFromDesigner(
+                    control, classInfo.DesignerPath, catalog, knownTypeNames, usedNames, surface, projectClasses, localBaseTypeOf);
+            }
+
+            surface.ForeignCompositionHosts.Add(control);
+            MarkForeignDescendants(surface, control);
+        }
+    }
+
+    private static bool ShouldTreatAsForeignCompositionHost(
+        string typeName,
+        string? owningClassName,
+        HashSet<string> catalogTypeNames)
+    {
+        if (string.Equals(typeName, owningClassName, StringComparison.Ordinal))
+            return false;
+
+        if (catalogTypeNames.Contains(typeName))
+            return false;
+
+        return typeName is not ("Container" or "Element" or "UserControl" or "Panel" or "Form" or "Window" or "MenuItem");
+    }
+
+    private static bool TryFindDesignerPathForType(string? anchorFilePath, string typeName, out string designerPath)
+    {
+        designerPath = string.Empty;
+        if (string.IsNullOrEmpty(anchorFilePath))
+            return false;
+
+        var startDir = System.IO.Path.GetDirectoryName(anchorFilePath);
+        if (startDir == null)
+            return false;
+
+        var searchRoot = startDir;
+        var current = startDir;
+        for (var i = 0; i < 4; i++)
+        {
+            if (current == null)
+                break;
+            try
+            {
+                if (System.IO.Directory.EnumerateFiles(current, "*.csproj").Any())
+                {
+                    searchRoot = current;
+                    break;
+                }
+            }
+            catch { }
+
+            current = System.IO.Path.GetDirectoryName(current);
+        }
+
+        try
+        {
+            foreach (var file in System.IO.Directory.EnumerateFiles(searchRoot, $"{typeName}.Designer.cs", System.IO.SearchOption.AllDirectories))
+            {
+                if (file.Contains("\\bin\\", StringComparison.OrdinalIgnoreCase)
+                    || file.Contains("/bin/", StringComparison.OrdinalIgnoreCase)
+                    || file.Contains("\\obj\\", StringComparison.OrdinalIgnoreCase)
+                    || file.Contains("/obj/", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                designerPath = file;
+                return true;
+            }
+        }
+        catch { }
+
+        return false;
+    }
+
+    private static void MarkForeignDescendants(DesignSurface surface, ElementBase host)
+    {
+        foreach (var child in host.Controls)
+        {
+            if (child is ElementBase element)
+                DesignSurface.MarkForeignSubtree(surface, element);
+        }
+    }
+
+    private static bool TypeAuthoredByOpenDocument(
+        ProjectClassInfo classInfo,
+        string typeName,
+        string? currentDesignerPath,
+        string? owningClassName)
+    {
+        if (string.Equals(typeName, owningClassName, StringComparison.Ordinal))
+            return true;
+
+        if (string.IsNullOrEmpty(currentDesignerPath))
+            return false;
+
+        if (!string.IsNullOrEmpty(classInfo.DesignerPath)
+            && PathsReferToSameFile(classInfo.DesignerPath, currentDesignerPath))
+            return true;
+
+        if (!string.IsNullOrEmpty(classInfo.FilePath)
+            && PathsReferToSameFile(classInfo.FilePath, currentDesignerPath))
+            return true;
+
+        return false;
+    }
+
+    private static bool PathsReferToSameFile(string a, string b)
+    {
+        try
+        {
+            return string.Equals(
+                System.IO.Path.GetFullPath(a),
+                System.IO.Path.GetFullPath(b),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
     private static IReadOnlyList<string> Rebuild(
         DesignSurface surface,
         SKSize? clientSize,
@@ -1227,7 +1651,12 @@ public static class CodeImporter
         Dictionary<string, string> localBaseTypeOf,
         Dictionary<string, ProjectClassInfo> projectClasses,
         List<EventWire> eventWires,
-        List<ControlBinding> controlBindings)
+        List<ControlBinding> controlBindings,
+        string? designerFilePath,
+        IReadOnlyCollection<string> filePersistedControlNames,
+        string? formNameFromSource,
+        string? owningClassName,
+        HashSet<string> catalogTypeNames)
     {
         var skipped = new List<string>();
         var catalog = ControlCatalog.Discover().ToDictionary(e => e.DisplayName, StringComparer.Ordinal);
@@ -1251,7 +1680,7 @@ public static class CodeImporter
                 menuItem.Visible = info.Visible;
                 if (info.W > 0 && info.H > 0)
                     menuItem.Size = new SKSize(info.W, info.H);
-                ApplyExtraPropertiesToObject(menuItem, info, LookupObject);
+                ApplyExtraPropertiesToObject(menuItem, info, LookupObject, designerFilePath);
                 nonElementObjects[name] = menuItem;
                 continue;
             }
@@ -1261,7 +1690,7 @@ public static class CodeImporter
             {
                 var cms = new ContextMenuStrip();
                 cms.Name = DesignNameValidator.Normalize(info.Name, info.Type, usedNames);
-                ApplyExtraPropertiesToObject(cms, info, LookupObject);
+                ApplyExtraPropertiesToObject(cms, info, LookupObject, designerFilePath);
                 nonElementObjects[name] = cms;
                 continue;
             }
@@ -1315,14 +1744,11 @@ public static class CodeImporter
             control.Anchor = info.Anchor;
             control.Visible = info.Visible;
 
-            ApplyExtraPropertiesToObject(control, info, LookupObject);
+            ApplyExtraPropertiesToObject(control, info, LookupObject, designerFilePath);
 
-            // If the custom control has its own .Designer.cs file in the project, load its inner child controls!
-            if (projectClasses.TryGetValue(info.Type, out var classInfo)
-                && !string.IsNullOrEmpty(classInfo.DesignerPath)
-                && System.IO.File.Exists(classInfo.DesignerPath))
+            if (TryGetHostedDesignerPath(info.Type, owningClassName, designerFilePath, projectClasses, catalogTypeNames, out var hostedDesignerPath))
             {
-                LoadChildControlsFromDesigner(control, classInfo.DesignerPath, catalog, knownTypeNames, usedNames);
+                LoadChildControlsFromDesigner(control, hostedDesignerPath, catalog, knownTypeNames, usedNames, surface, projectClasses, localBaseTypeOf);
             }
 
             instances[name] = control;
@@ -1349,6 +1775,14 @@ public static class CodeImporter
         surface.Groups.Clear();
         surface.DeletedControlNames.Clear();
         surface.AddedControlNames.Clear();
+        surface.EditedProperties.Clear();
+        surface.FilePersistedControlNames.Clear();
+        foreach (var name in filePersistedControlNames)
+            surface.FilePersistedControlNames.Add(name);
+        surface.ExternallyComposedControlNames.Clear();
+        surface.ExternallyComposedElements.Clear();
+        surface.ForeignCompositionHosts.Clear();
+        surface.OpenDocumentClassName = owningClassName;
         surface.EventWires.Clear();
         surface.ControlBindings.Clear();
         surface.EventWires.AddRange(eventWires);
@@ -1356,6 +1790,9 @@ public static class CodeImporter
 
         if (clientSize is { Width: > 0, Height: > 0 })
             surface.DesignRoot.Size = clientSize.Value;
+
+        if (!string.IsNullOrEmpty(formNameFromSource))
+            surface.DesignRoot.Name = formNameFromSource;
 
         surface.DesignRoot.SuspendLayout();
         try
@@ -1394,6 +1831,10 @@ public static class CodeImporter
                 control.Size = new SKSize(info.W, info.H);
         }
 
+        ApplyForeignCompositionPolicy(
+            surface, designerFilePath, owningClassName, projectClasses, nodes, instances, catalogTypeNames, catalog, knownTypeNames, usedNames, localBaseTypeOf);
+
+        surface.RelayoutRoot();
         surface.Commands.Clear();
         surface.NotifyStructureChanged();
         return skipped;

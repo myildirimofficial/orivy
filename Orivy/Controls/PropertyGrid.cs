@@ -68,6 +68,8 @@ public class PropertyGrid : GridList
     private SKPoint _scrubStart;
     private decimal _scrubStartValue;
     private object? _scrubOriginalValue;
+    private PropertyDescriptor? _scrubPersistedItem;
+    private object? _scrubPersistedOld;
     private Type _scrubType = typeof(object);
     private bool _scrubActive;
     private bool _suppressNextClick;
@@ -603,6 +605,7 @@ public class PropertyGrid : GridList
     private sealed class PropNode
     {
         public PropertyDescriptor? Descriptor;   // null for collection-element rows
+        public PropNode? Parent;
         public object? Component;                 // owner of Descriptor (or the collection for elements)
         public string Label = string.Empty;
         public string Category = "Misc";
@@ -752,6 +755,7 @@ public class PropertyGrid : GridList
                         Setter = canEditElement ? v => list![elementIndex] = v : null
                     };
                     child.Expandable = IsExpandable(runtimeType, captured);
+                    child.Parent = node;
                     node.Children.Add(child);
                     index++;
                 }
@@ -799,6 +803,7 @@ public class PropertyGrid : GridList
                          .OrderBy(p => p.DisplayName, StringComparer.CurrentCultureIgnoreCase))
             {
                 var child = CreatePropertyNode(pd, value, node.Depth + 1);
+                child.Parent = node;
                 if (isValueTypeBox && child.Setter != null && node.Setter != null)
                 {
                     var mutateBox = child.Setter;
@@ -871,7 +876,7 @@ public class PropertyGrid : GridList
 
         foreach (var node in _rootNodes)
             if (NodeMatchesSearch(node))
-                AppendRow(node, node.Category);
+                AppendRow(node, node.Category, forceChildren: false);
 
         Invalidate();
     }
@@ -902,7 +907,7 @@ public class PropertyGrid : GridList
         return node.Children.Any(NodeMatchesSearch);
     }
 
-    private void AppendRow(PropNode node, string rootCategory)
+    private void AppendRow(PropNode node, string rootCategory, bool forceChildren)
     {
         var item = new GridListItem { Tag = node, Name = node.Descriptor?.Name ?? node.Label };
 
@@ -922,14 +927,19 @@ public class PropertyGrid : GridList
 
         // While actively searching, auto-expand every expandable node (up to MaxSearchDepth) so
         // nested matches are reachable without the user having to manually drill in first.
+        var labelMatches = string.IsNullOrEmpty(_searchFilter)
+            || node.Label.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase);
         var autoExpandForSearch = !string.IsNullOrEmpty(_searchFilter) && node.Depth < MaxSearchDepth;
-        var effectivelyExpanded = node.Expanded || autoExpandForSearch;
+        var effectivelyExpanded = node.Expanded || autoExpandForSearch || forceChildren;
         if (node.Expandable && effectivelyExpanded)
         {
             EnsureChildren(node);
+            var includeAllChildren = forceChildren || labelMatches;
             foreach (var child in node.Children)
-                if (NodeMatchesSearch(child))
-                    AppendRow(child, rootCategory);
+            {
+                if (includeAllChildren || NodeMatchesSearch(child))
+                    AppendRow(child, rootCategory, includeAllChildren);
+            }
         }
     }
 
@@ -1187,9 +1197,10 @@ public class PropertyGrid : GridList
             return;
 
         var oldValue = node.GetValue();
+        CapturePersist(node, out var persisted, out var persistedOld);
         try { node.Setter(image); }
         catch { return; }
-        RaiseValueChanged(node, oldValue);
+        RaiseValueChanged(node, oldValue, persisted, persistedOld);
     }
 
     /// <summary>Opens <see cref="FontDialog"/> pre-filled with the current font and applies the result
@@ -1208,9 +1219,10 @@ public class PropertyGrid : GridList
             return;
 
         var oldValue = node.GetValue();
+        CapturePersist(node, out var persisted, out var persistedOld);
         try { node.Setter(dialog.Font); }
         catch { return; }
-        RaiseValueChanged(node, oldValue);
+        RaiseValueChanged(node, oldValue, persisted, persistedOld);
     }
 
     /// <summary>Flips a bool property in place — no editor/dropdown needed for a two-state value.</summary>
@@ -1221,11 +1233,12 @@ public class PropertyGrid : GridList
 
         var oldValue = node.GetValue();
         var next = !(oldValue is bool current && current);
+        CapturePersist(node, out var persisted, out var persistedOld);
 
         try { node.Setter(next); }
         catch { return; }
 
-        RaiseValueChanged(node, oldValue);
+        RaiseValueChanged(node, oldValue, persisted, persistedOld);
     }
 
     private void ShowDateEditor(PropNode node, SKRect bounds)
@@ -1344,8 +1357,9 @@ public class PropertyGrid : GridList
             var oldValue = node.GetValue();
             if (!Equals(converted, oldValue))
             {
+                CapturePersist(node, out var persisted, out var persistedOld);
                 node.Setter(converted);
-                RaiseValueChanged(node, oldValue);
+                RaiseValueChanged(node, oldValue, persisted, persistedOld);
             }
         }
         catch { /* ignore invalid choice */ }
@@ -1487,8 +1501,9 @@ public class PropertyGrid : GridList
                 var oldValue = node.GetValue();
                 if (!Equals(converted, oldValue))
                 {
+                    CapturePersist(node, out var persistedItem, out var persistedOld);
                     node.Setter(converted);
-                    RaiseValueChanged(node, oldValue);
+                    RaiseValueChanged(node, oldValue, persistedItem, persistedOld);
                 }
             }
         }
@@ -1500,7 +1515,18 @@ public class PropertyGrid : GridList
         CloseEditor();
     }
 
-    private void RaiseValueChanged(PropNode node, object? oldValue)
+    private static void CapturePersist(PropNode node, out PropertyDescriptor? item, out object? previous)
+    {
+        var root = node;
+        while (root.Parent != null)
+            root = root.Parent;
+
+        item = root.Descriptor ?? node.Descriptor;
+        try { previous = root.GetValue(); }
+        catch { previous = null; }
+    }
+
+    private void RaiseValueChanged(PropNode node, object? oldValue, PropertyDescriptor? persistedItem = null, object? persistedOldValue = null)
     {
         if (_editingItem is { } item && item.Cells.Count > ValueColumn)
         {
@@ -1510,7 +1536,7 @@ public class PropertyGrid : GridList
         else
             RefreshValues();
 
-        PropertyValueChanged?.Invoke(this, new PropertyValueChangedEventArgs(node.Descriptor, oldValue));
+        PropertyValueChanged?.Invoke(this, new PropertyValueChangedEventArgs(node.Descriptor, oldValue, persistedItem, persistedOldValue));
         Invalidate();
     }
 
@@ -1592,6 +1618,7 @@ public class PropertyGrid : GridList
         _scrubItem = hit.Item;
         _scrubType = t;
         _scrubOriginalValue = current;
+        CapturePersist(node, out _scrubPersistedItem, out _scrubPersistedOld);
         _scrubStartValue = Convert.ToDecimal(current, CultureInfo.InvariantCulture);
         _scrubStart = location;
         _scrubActive = false;
@@ -1643,7 +1670,7 @@ public class PropertyGrid : GridList
             if (wasActive)
             {
                 _suppressNextClick = true;
-                RaiseValueChanged(node, original);
+                RaiseValueChanged(node, original, _scrubPersistedItem, _scrubPersistedOld);
                 base.OnMouseUp(e);
                 return;
             }
