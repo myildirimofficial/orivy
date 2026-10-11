@@ -17,7 +17,6 @@ public class CheckBox : ElementBase
     private readonly SKPaint _boxBorderPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke };
     private readonly SKPaint _checkPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round };
     private readonly SKPaint _textPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
-    private readonly SKPaint _highlightPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
 
     private CheckState _checkState;
     private bool _keyboardPressArmed;
@@ -35,10 +34,9 @@ public class CheckBox : ElementBase
         CheckAlign = ContentAlignment.MiddleLeft;
         MinimumSize = new SKSize(24, 24);
         Size = new SKSize(120, 28);
-        Padding = new Thickness(0);
+        // Half-stroke inset room so the box edge is not clipped by the paint bounds.
+        Padding = new Thickness(2, 2, 6, 2);
         Border = new Thickness(0);
-        BackColor = SKColors.Transparent;
-        ForeColor = ColorScheme.ForeColor;
 
         _checkAnimation = new AnimationManager(true)
         {
@@ -157,46 +155,8 @@ public class CheckBox : ElementBase
             return;
 
         var boxRect = GetCheckBoxRect(content);
-        DrawStateHighlight(canvas, GetHighlightRect(content, boxRect));
         DrawCheckBox(canvas, boxRect);
         DrawCheckBoxText(canvas, content, boxRect);
-    }
-
-    /// <summary>
-    /// The hover/checked/pressed tint is confined to the glyph+label content instead of the full
-    /// element bounds. A CheckBox is frequently given a wider fixed Width than its content needs
-    /// (form alignment, grid columns); painting the highlight across the whole box then leaves a
-    /// highlighted dead strip stuck to one side whenever the control is wider than its content.
-    /// </summary>
-    private SKRect GetHighlightRect(SKRect content, SKRect boxRect)
-    {
-        if (string.IsNullOrEmpty(Text))
-            return SKRect.Inflate(boxRect, 3f, 3f);
-
-        using var font = CreateRenderFont(Font);
-        var textWidth = font.MeasureText(Text);
-        var gap = GetTextGap();
-
-        var textRect = boxRect.MidX <= content.MidX
-            ? SKRect.Create(boxRect.Right + gap, content.Top, textWidth, content.Height)
-            : SKRect.Create(boxRect.Left - gap - textWidth, content.Top, textWidth, content.Height);
-
-        return SKRect.Inflate(SKRect.Union(boxRect, textRect), 6f, 3f);
-    }
-
-    private void DrawStateHighlight(SKCanvas canvas, SKRect rect)
-    {
-        if (!Enabled)
-            return;
-
-        SKColor color;
-        if (IsPressed) color = ColorScheme.Primary.WithAlpha(24);
-        else if (Checked) color = ColorScheme.Primary.WithAlpha(18);
-        else if (IsPointerOver) color = ColorScheme.Primary.WithAlpha(14);
-        else return;
-
-        _highlightPaint.Color = color;
-        canvas.DrawRoundRect(rect, 8f, 8f, _highlightPaint);
     }
 
     public override void  OnKeyDown(KeyEventArgs e)
@@ -257,7 +217,6 @@ public class CheckBox : ElementBase
             _boxBorderPaint.Dispose();
             _checkPaint.Dispose();
             _textPaint.Dispose();
-            _highlightPaint.Dispose();
         }
 
         base.Dispose(disposing);
@@ -323,12 +282,18 @@ public class CheckBox : ElementBase
         var fillColor = LerpColor(ColorScheme.Surface, Enabled ? ColorScheme.Primary : ColorScheme.SurfaceVariant, progress);
         var borderColor = LerpColor(ColorScheme.Outline, Enabled ? ColorScheme.Primary : ColorScheme.Outline.WithAlpha(150), progress);
 
+        var stroke = Math.Max(1f, ScaleFactor);
         _boxFillPaint.Color = fillColor;
         _boxBorderPaint.Color = borderColor;
-        _boxBorderPaint.StrokeWidth = Math.Max(1f, ScaleFactor);
+        _boxBorderPaint.StrokeWidth = stroke;
 
+        // Fill the full box; stroke is centered on the path so inset it by half width.
         canvas.DrawRoundRect(rect, radius, radius, _boxFillPaint);
-        canvas.DrawRoundRect(rect, radius, radius, _boxBorderPaint);
+        var strokeRect = SKRect.Inflate(rect, -stroke * 0.5f, -stroke * 0.5f);
+        if (strokeRect.Width >= 4f && strokeRect.Height >= 4f)
+            canvas.DrawRoundRect(strokeRect, radius, radius, _boxBorderPaint);
+        else
+            canvas.DrawRoundRect(rect, radius, radius, _boxBorderPaint);
 
         if (progress <= 0.001f)
             return;
@@ -393,9 +358,6 @@ public class CheckBox : ElementBase
 
     private void ConfigureDefaultVisualStyles()
     {
-        // Background is intentionally left out of the hover/pressed/checked rules — that highlight
-        // is painted by hand in OnPaint, confined to the glyph+label content (see DrawStateHighlight),
-        // instead of the full element bounds which a wider-than-content Width would leave stranded.
         ConfigureVisualStyles(styles => styles
             .DefaultTransition(TimeSpan.FromMilliseconds(140), AnimationType.CubicEaseOut)
             .Base(baseStyle => baseStyle

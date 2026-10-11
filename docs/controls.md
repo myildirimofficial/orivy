@@ -97,7 +97,10 @@ See `Orivy/Controls/ElementBase.cs` for exact dispatch code (`OnMouseDown`, `OnM
   - Supports keyboard activation (Enter/Space) via `OnKeyDown`/`OnKeyUp` overrides and `PerformClick()`.
   - Supports toggle behavior through `CheckOnClick`, `Checked`, and `CheckedChanged`.
   - Configures default visual styles in the constructor, including the `OnChecked(...)` state.
-  - `ButtonGroup<TValue>` is a `Container` that watches its child buttons, reads each button value from `Tag`, aligns buttons with `ContentAlignment`, supports horizontal/vertical `Orientation`, and keeps a single checked item for segmented/radio-like toolbars. Set `Gap = 0` for joined Bootstrap/Tailwind-style button groups.
+  - `ButtonGroup<TValue>` is a `Container` that watches its child buttons, reads each button value from `Tag`, aligns buttons with `ContentAlignment`, supports horizontal/vertical `Orientation`, and keeps a single checked item for segmented/radio-like toolbars. Set `Gap = 0` for joined Bootstrap/Tailwind-style button groups. The non-generic `ButtonGroup` is `ButtonGroup<string>` for Studio toolbox placement.
+
+- `TabView` (`Orivy/Controls/TabView.cs`)
+  - `Controls.Insert(pageIndex, page)` and `InsertPage(pageIndex, page)` use **page** index (first tab = 0), not the raw `Controls` slot. Auto-scroll bars live in `Controls` too; inserting at collection index `1` used to land between scroll bars and become the first tab.
   - Split dropdown buttons use `DropDownMenu`, `ShowDropDownArrow`, and `SplitDropDownButton`. With split mode enabled, the main button area raises `Click`; the chevron area opens the context menu and is separated by a divider.
 
 - `DatePicker` and `TimePicker` (`Orivy/Controls/DatePicker.cs`, `Orivy/Controls/TimePicker.cs`)

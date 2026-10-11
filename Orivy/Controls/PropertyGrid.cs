@@ -503,6 +503,9 @@ public class PropertyGrid : GridList
         }
     }
 
+    /// <summary>Optional extra filter (Studio uses persist-aligned <c>ShouldShowInInspector</c>).</summary>
+    public Func<PropertyDescriptor, bool>? FilterProperty { get; set; }
+
     /// <summary>Gets or sets whether properties are categorized, alphabetized, or unsorted.</summary>
     [DefaultValue(PropertySort.Categorized)]
     public PropertySort PropertySort
@@ -660,19 +663,48 @@ public class PropertyGrid : GridList
     private static bool IsNoiseProperty(PropertyDescriptor pd) =>
         pd.IsReadOnly && pd.PropertyType == typeof(bool) && pd.Name.StartsWith("Is", StringComparison.Ordinal);
 
+    private static readonly string[] CategoryOrder =
+    {
+        "Appearance", "Layout", "Behavior", "Data", "Window", "Design", "Animation", "Misc"
+    };
+
     private IEnumerable<PropertyDescriptor> GetProperties(object component)
     {
         var props = TypeDescriptor.GetProperties(component).Cast<PropertyDescriptor>()
-            .Where(p => p.IsBrowsable && !IsNoiseProperty(p));
+            .Where(ShouldIncludeProperty);
 
         return _propertySort switch
         {
             PropertySort.Alphabetical => props.OrderBy(p => p.DisplayName, StringComparer.CurrentCultureIgnoreCase),
             PropertySort.Categorized => props
-                .OrderBy(p => CategoryOf(p), StringComparer.CurrentCultureIgnoreCase)
+                .OrderBy(p => CategoryRank(CategoryOf(p)))
+                .ThenBy(p => CategoryOf(p), StringComparer.CurrentCultureIgnoreCase)
                 .ThenBy(p => p.DisplayName, StringComparer.CurrentCultureIgnoreCase),
             _ => props
         };
+    }
+
+    private bool ShouldIncludeProperty(PropertyDescriptor property)
+    {
+        if (FilterProperty != null)
+            return FilterProperty(property);
+
+        if (!property.IsBrowsable || IsNoiseProperty(property))
+            return false;
+        if (property.SerializationVisibility == DesignerSerializationVisibility.Hidden)
+            return false;
+        return true;
+    }
+
+    private static int CategoryRank(string category)
+    {
+        for (var i = 0; i < CategoryOrder.Length; i++)
+        {
+            if (string.Equals(CategoryOrder[i], category, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+
+        return CategoryOrder.Length;
     }
 
     private PropNode CreatePropertyNode(PropertyDescriptor pd, object component, int depth)
@@ -897,7 +929,7 @@ public class PropertyGrid : GridList
         if (string.IsNullOrEmpty(_searchFilter))
             return true;
 
-        if (node.Label.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase))
+        if (NodeSelfMatchesSearch(node))
             return true;
 
         if (!node.Expandable || node.Depth >= MaxSearchDepth)
@@ -905,6 +937,18 @@ public class PropertyGrid : GridList
 
         EnsureChildren(node);
         return node.Children.Any(NodeMatchesSearch);
+    }
+
+    private bool NodeSelfMatchesSearch(PropNode node)
+    {
+        if (node.Label.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (!string.IsNullOrEmpty(node.Category)
+            && node.Category.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase))
+            return true;
+        var description = node.Descriptor?.Description;
+        return !string.IsNullOrEmpty(description)
+            && description.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase);
     }
 
     private void AppendRow(PropNode node, string rootCategory, bool forceChildren)
@@ -925,20 +969,20 @@ public class PropertyGrid : GridList
         item.Cells.Add(new GridListCell { Text = FormatValue(node), Icon = GetValueIcon(node) });
         Items.Add(item);
 
-        // While actively searching, auto-expand every expandable node (up to MaxSearchDepth) so
-        // nested matches are reachable without the user having to manually drill in first.
-        var labelMatches = string.IsNullOrEmpty(_searchFilter)
-            || node.Label.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase);
-        var autoExpandForSearch = !string.IsNullOrEmpty(_searchFilter) && node.Depth < MaxSearchDepth;
+        var searching = !string.IsNullOrEmpty(_searchFilter);
+        var autoExpandForSearch = searching
+            && node.Depth < MaxSearchDepth
+            && node.Expandable
+            && !NodeSelfMatchesSearch(node)
+            && NodeMatchesSearch(node);
         var effectivelyExpanded = node.Expanded || autoExpandForSearch || forceChildren;
         if (node.Expandable && effectivelyExpanded)
         {
             EnsureChildren(node);
-            var includeAllChildren = forceChildren || labelMatches;
             foreach (var child in node.Children)
             {
-                if (includeAllChildren || NodeMatchesSearch(child))
-                    AppendRow(child, rootCategory, includeAllChildren);
+                if (!searching || NodeMatchesSearch(child))
+                    AppendRow(child, rootCategory, forceChildren);
             }
         }
     }

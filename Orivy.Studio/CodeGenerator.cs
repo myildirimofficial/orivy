@@ -113,6 +113,8 @@ public static class CodeGenerator
             sb.AppendLine($"            Anchor = {DesignSourceFormat.Anchor(control.Anchor)},");
         if (DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(control, "Visible") && !control.Visible)
             sb.AppendLine("            Visible = false,");
+        if (!control.AutoSize)
+            sb.AppendLine("            AutoSize = false,");
         sb.AppendLine("        };");
         AppendControlInteractions(sb, surface, control.Name);
 

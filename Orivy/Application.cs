@@ -71,6 +71,37 @@ public class Application
     }
 
     /// <summary>
+    /// Posts <paramref name="action"/> to a live window's UI thread. Theme transitions tick off
+    /// the message loop after <c>ConfigureAwait(false)</c>; subscribers must not write styles or
+    /// paints from that pool thread. With no HWND yet the action runs inline.
+    /// </summary>
+    internal static void PostToUiThread(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        var window = _activeForm;
+        if (window == null || !window.IsHandleCreated)
+        {
+            for (var i = 0; i < _openForms.Count; i++)
+            {
+                if (_openForms[i].IsHandleCreated)
+                {
+                    window = _openForms[i];
+                    break;
+                }
+            }
+        }
+
+        if (window == null || !window.IsHandleCreated)
+        {
+            action();
+            return;
+        }
+
+        window.BeginInvoke(action);
+    }
+
+    /// <summary>
     /// Sets the process DPI awareness to Per-Monitor V2 (Win10 1703+),
     /// falling back to Per-Monitor (Win8.1+).
     /// Call before creating any windows.

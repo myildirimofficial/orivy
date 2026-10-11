@@ -54,7 +54,14 @@ follows the cursor and the control drops where you release.
 
 **Inspector** — Orivy's own `PropertyGrid` edits the live control (color→ColorPicker,
 enum→drop-down, number→NumericUpDown, date→DatePicker), plus a quick **Dock/Anchor** helper bar.
-Every edit relayouts the canvas and is recorded as an undoable command.
+Rows follow persistable properties only (`Handle` / `ClientSize` / runtime junk stay hidden).
+Categories are Appearance → Layout → Behavior → Data → Window → Design. Search matches name,
+category, and description. Every edit relayouts the canvas and is recorded as an undoable command.
+
+**Window chrome** — a designed `Window` shows an opaque surface and a title strip with the same
+top padding as runtime, so Dock/Fill and anchors line up with the real app. `AutoSize = false`
+is written so a Button you sized on the canvas does not grow again at runtime. `ColorScheme.*`
+assignments in Designer C# are applied on import.
 
 **History** — full undo/redo (Ctrl+Z / Ctrl+Y) over every add, delete, move, resize, reorder,
 dock/anchor and property edit.

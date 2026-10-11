@@ -17,6 +17,7 @@ public class Button : ElementBase
     private readonly SKPaint _dropDownChevronPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round };
     private readonly SKPaint _dropDownDividerPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round };
     private readonly SKPath _dropDownChevronPath = new();
+    [Category("Behavior")]
     public DialogResult DialogResult { get; set; }
 
     public Button()
@@ -74,9 +75,11 @@ public class Button : ElementBase
         });
     }
 
+    [Category("Behavior")]
     [DefaultValue(false)]
     public bool CheckOnClick { get; set; }
 
+    [Category("Behavior")]
     [DefaultValue(false)]
     public bool Checked
     {
@@ -97,18 +100,23 @@ public class Button : ElementBase
 
     public event EventHandler? DropDownOpening;
 
+    [Category("Behavior")]
     [DefaultValue(false)]
     public bool ShowDropDownArrow { get; set; }
 
+    [Category("Behavior")]
     [DefaultValue(true)]
     public bool OpenDropDownOnClick { get; set; } = true;
 
+    [Category("Behavior")]
     [DefaultValue(true)]
     public bool SplitDropDownButton { get; set; } = true;
 
+    [Category("Behavior")]
     [DefaultValue(true)]
     public bool ShowDropDownDivider { get; set; } = true;
 
+    [Category("Behavior")]
     public ContextMenuStrip? DropDownMenu
     {
         get => _dropDownMenu;

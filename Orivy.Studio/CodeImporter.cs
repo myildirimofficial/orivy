@@ -40,6 +40,11 @@ public static class CodeImporter
         public DockStyle Dock;
         public AnchorStyles Anchor = AnchorStyles.Top | AnchorStyles.Left;
         public bool Visible = true;
+        public bool HasGridPlacement;
+        public int GridRow;
+        public int GridColumn;
+        public int GridRowSpan = 1;
+        public int GridColumnSpan = 1;
 
         // Anything not one of the structural properties above (Margin, Padding, Radius, Border,
         // BackColor, ForeColor, BorderColor, HatchStyle, Maximum, Value, ... — every property a real
@@ -59,6 +64,18 @@ public static class CodeImporter
         // exists — without this, a real Designer.cs's actual items/columns/rows were silently dropped
         // on import, since nothing captured these statements at all.
         public readonly List<(string Member, string Method, List<ExpressionSyntax> Args)> CollectionCalls = new();
+    }
+
+    /// <summary>Self-assignments on the designed type (<c>this.Width</c>, <c>this.Text</c>, …).</summary>
+    private sealed class FormRootImport
+    {
+        public SKSize? Size;
+        public float? Width;
+        public float? Height;
+        public string? Text;
+        public bool? ShowTitle;
+        public float? TitleHeight;
+        public Thickness? Padding;
     }
 
     /// <summary>The name of the <c>partial class</c> the Designer code declares, if any — used to
@@ -109,7 +126,7 @@ public static class CodeImporter
         var addEdges = new List<(string ParentName, string ChildName)>();
         var eventWires = new List<EventWire>();
         var controlBindings = new List<ControlBinding>();
-        SKSize? clientSize = null;
+        var formRoot = new FormRootImport();
 
         // Cross-file inheritance: a Designer.cs whose InitializeComponent only ever touches fields
         // declared on a BASE class in a different file (e.g. a UserControl-style `partial class
@@ -132,12 +149,12 @@ public static class CodeImporter
             {
                 LoadBaseClassChain(
                     filePath, className, knownTypeNames, declaredFields, declaredFieldTypes,
-                    nodes, declarationOrder, addEdges, ref clientSize, eventWires, controlBindings,
+                    nodes, declarationOrder, addEdges, formRoot, eventWires, controlBindings,
                     visited: new HashSet<string>(StringComparer.Ordinal), depthRemaining: 6);
             }
         }
 
-        ProcessCompilationUnit(compilationUnit, knownTypeNames, declaredFields, declaredFieldTypes, nodes, declarationOrder, addEdges, ref clientSize, eventWires, controlBindings);
+        ProcessCompilationUnit(compilationUnit, knownTypeNames, declaredFields, declaredFieldTypes, nodes, declarationOrder, addEdges, formRoot, eventWires, controlBindings);
 
         var filePersistedControlNames = CollectFilePersistedControlNames(compilationUnit, knownTypeNames, declaredFields, declaredFieldTypes);
         var formName = TryReadFormNameFromInitializeComponent(compilationUnit);
@@ -160,7 +177,7 @@ public static class CodeImporter
                 localBaseTypeOf[classDecl.Identifier.Text] = GetSimpleTypeName(baseType.Type);
         }
 
-        return Rebuild(surface, clientSize, nodes, declarationOrder, addEdges, localBaseTypeOf, projectClasses, eventWires, controlBindings, filePath, filePersistedControlNames, formName, owningClassName, knownTypeNames);
+        return Rebuild(surface, formRoot, nodes, declarationOrder, addEdges, localBaseTypeOf, projectClasses, eventWires, controlBindings, filePath, filePersistedControlNames, formName, owningClassName, knownTypeNames);
     }
 
     private sealed record ProjectClassInfo(string? BaseType, string? FilePath, string? DesignerPath);
@@ -273,7 +290,7 @@ public static class CodeImporter
         Dictionary<string, NodeInfo> nodes,
         List<string> declarationOrder,
         List<(string ParentName, string ChildName)> addEdges,
-        ref SKSize? clientSize,
+        FormRootImport formRoot,
         List<EventWire> eventWires,
         List<ControlBinding> controlBindings,
         HashSet<string> visited,
@@ -316,8 +333,8 @@ public static class CodeImporter
                 if (!TryParseClass(file, baseTypeName, out _, out var baseUnit))
                     continue;
 
-                ProcessCompilationUnit(baseUnit!, knownTypeNames, declaredFields, declaredFieldTypes, nodes, declarationOrder, addEdges, ref clientSize, eventWires, controlBindings);
-                LoadBaseClassChain(file, baseTypeName, knownTypeNames, declaredFields, declaredFieldTypes, nodes, declarationOrder, addEdges, ref clientSize, eventWires, controlBindings, visited, depthRemaining - 1);
+                ProcessCompilationUnit(baseUnit!, knownTypeNames, declaredFields, declaredFieldTypes, nodes, declarationOrder, addEdges, formRoot, eventWires, controlBindings);
+                LoadBaseClassChain(file, baseTypeName, knownTypeNames, declaredFields, declaredFieldTypes, nodes, declarationOrder, addEdges, formRoot, eventWires, controlBindings, visited, depthRemaining - 1);
                 return;
             }
         }
@@ -382,7 +399,7 @@ public static class CodeImporter
         Dictionary<string, NodeInfo> nodes,
         List<string> declarationOrder,
         List<(string ParentName, string ChildName)> addEdges,
-        ref SKSize? clientSize,
+        FormRootImport formRoot,
         List<EventWire>? eventWires = null,
         List<ControlBinding>? controlBindings = null)
     {
@@ -480,11 +497,16 @@ public static class CodeImporter
                     var args = sizeExpr is ObjectCreationExpressionSyntax sOce
                         ? sOce.ArgumentList!.Arguments
                         : ((ImplicitObjectCreationExpressionSyntax)sizeExpr).ArgumentList!.Arguments;
-                    clientSize = new SKSize(
+                    formRoot.Size = new SKSize(
                         ParseFloat(args[0].Expression),
                         ParseFloat(args[1].Expression));
                     break;
                 }
+
+                case AssignmentExpressionSyntax { Left: var formLeft, Right: var formRight }
+                    when ResolveTargetName(formLeft) is "Width" or "Height" or "Text" or "ShowTitle" or "TitleHeight" or "Padding":
+                    ApplyFormRootProperty(formRoot, ResolveTargetName(formLeft)!, formRight);
+                    break;
 
                 // A declaration: `x = new Type();` / `this.x = new Type();`, or `x = new();`, with or
                 // without an object initializer.
@@ -560,6 +582,46 @@ public static class CodeImporter
                          && ResolveTargetName(collOwnerAccess.Expression) is { } collOwnerName
                          && nodes.TryGetValue(collOwnerName, out var collOwnerInfo):
                     collOwnerInfo.CollectionCalls.Add((collectionMember, collInvokeTarget.Name.Identifier.Text, collInvokeArgs.Select(a => a.Expression).ToList()));
+                    break;
+
+                case InvocationExpressionSyntax
+                {
+                    Expression: MemberAccessExpressionSyntax { Name.Identifier.Text: "SetPlacement" } placeTarget,
+                    ArgumentList.Arguments: { Count: >= 3 } placeArgs
+                }
+                    when ResolveTargetName(placeArgs[0].Expression) is { } placedChild
+                         && nodes.TryGetValue(placedChild, out var placedInfo)
+                         && TryReadInt(placeArgs[1].Expression, out var placeRow)
+                         && TryReadInt(placeArgs[2].Expression, out var placeColumn):
+                    RememberGridPlacement(
+                        placedInfo,
+                        placeRow,
+                        placeColumn,
+                        placeArgs.Count > 3 && TryReadInt(placeArgs[3].Expression, out var placeRowSpan) ? placeRowSpan : 1,
+                        placeArgs.Count > 4 && TryReadInt(placeArgs[4].Expression, out var placeColumnSpan) ? placeColumnSpan : 1);
+                    break;
+
+                case InvocationExpressionSyntax
+                {
+                    Expression: MemberAccessExpressionSyntax { Name.Identifier.Text: "Add" } gridAdd,
+                    ArgumentList.Arguments: { Count: >= 3 } gridArgs
+                }
+                    when ResolveControlsParentName(gridAdd.Expression) == null
+                         && ResolveTargetName(gridAdd.Expression) is { } gridName
+                         && ResolveTargetName(gridArgs[0].Expression) is { } gridChild
+                         && TryReadInt(gridArgs[1].Expression, out var gridRow)
+                         && TryReadInt(gridArgs[2].Expression, out var gridColumn):
+                    if (!addEdges.Contains((gridName, gridChild)))
+                        addEdges.Add((gridName, gridChild));
+                    if (nodes.TryGetValue(gridChild, out var gridChildInfo))
+                    {
+                        RememberGridPlacement(
+                            gridChildInfo,
+                            gridRow,
+                            gridColumn,
+                            gridArgs.Count > 3 && TryReadInt(gridArgs[3].Expression, out var gridRowSpan) ? gridRowSpan : 1,
+                            gridArgs.Count > 4 && TryReadInt(gridArgs[4].Expression, out var gridColumnSpan) ? gridColumnSpan : 1);
+                    }
                     break;
 
                 case InvocationExpressionSyntax
@@ -869,6 +931,41 @@ public static class CodeImporter
     /// is — <c>""</c> for the design root's own <c>Controls</c>, a control's name for a nested one, or
     /// <c>null</c> if this isn't a <c>Controls</c> access at all. Shared by both call shapes since the
     /// "whose Controls is this" question is identical either way.</summary>
+    private static void RememberGridPlacement(NodeInfo info, int row, int column, int rowSpan, int columnSpan)
+    {
+        info.HasGridPlacement = true;
+        info.GridRow = row;
+        info.GridColumn = column;
+        info.GridRowSpan = Math.Max(1, rowSpan);
+        info.GridColumnSpan = Math.Max(1, columnSpan);
+    }
+
+    private static void ApplyImportedGridPlacements(
+        IReadOnlyDictionary<string, ElementBase> instances,
+        IReadOnlyDictionary<string, NodeInfo> nodes)
+    {
+        foreach (var (name, control) in instances)
+        {
+            if (!nodes.TryGetValue(name, out var info) || !info.HasGridPlacement)
+                continue;
+            if (control.Parent is Grid grid)
+                grid.SetPlacement(control, info.GridRow, info.GridColumn, info.GridRowSpan, info.GridColumnSpan);
+        }
+    }
+
+    private static bool TryReadInt(ExpressionSyntax expression, out int value)
+    {
+        var number = ParseFloat(expression);
+        if (float.IsNaN(number))
+        {
+            value = 0;
+            return false;
+        }
+
+        value = (int)MathF.Round(number);
+        return true;
+    }
+
     private static string? ResolveControlsParentName(ExpressionSyntax controlsAccess) => controlsAccess switch
     {
         IdentifierNameSyntax { Identifier.Text: "Controls" } => "",
@@ -888,6 +985,94 @@ public static class CodeImporter
         IdentifierNameSyntax id => id.Identifier.Text,
         _ => type.ToString(),
     };
+
+    private static void ApplyFormRootProperty(FormRootImport formRoot, string propertyName, ExpressionSyntax right)
+    {
+        switch (propertyName)
+        {
+            case "Width":
+                formRoot.Width = ParseFloat(right);
+                break;
+            case "Height":
+                formRoot.Height = ParseFloat(right);
+                break;
+            case "Text" when right is LiteralExpressionSyntax { Token.Value: string text }:
+                formRoot.Text = text;
+                break;
+            case "ShowTitle":
+                formRoot.ShowTitle = !right.IsKind(SyntaxKind.FalseLiteralExpression);
+                break;
+            case "TitleHeight":
+                formRoot.TitleHeight = ParseFloat(right);
+                break;
+            case "Padding":
+                if (TryConvertValue(right, typeof(Thickness), out var padding) && padding is Thickness thickness)
+                    formRoot.Padding = thickness;
+                break;
+        }
+    }
+
+    private static void ApplyFormRootToSurface(
+        DesignSurface surface,
+        FormRootImport formRoot,
+        string? owningClassName,
+        Dictionary<string, string> localBaseTypeOf,
+        Dictionary<string, ProjectClassInfo> projectClasses)
+    {
+        var width = formRoot.Size?.Width ?? formRoot.Width ?? 0;
+        var height = formRoot.Size?.Height ?? formRoot.Height ?? 0;
+        if (formRoot.Size is { Width: > 0, Height: > 0 } size)
+        {
+            width = size.Width;
+            height = size.Height;
+        }
+
+        if (width > 0 || height > 0)
+        {
+            var current = surface.DesignRoot.Size;
+            surface.DesignRoot.Size = new SKSize(
+                width > 0 ? width : current.Width,
+                height > 0 ? height : current.Height);
+        }
+
+        surface.ConfigureDesignHost(
+            IsWindowLikeHost(owningClassName, localBaseTypeOf, projectClasses),
+            title: formRoot.Text,
+            showTitle: formRoot.ShowTitle,
+            titleHeight: formRoot.TitleHeight,
+            padding: formRoot.Padding);
+    }
+
+    private static bool IsWindowLikeHost(
+        string? className,
+        Dictionary<string, string> localBaseTypeOf,
+        Dictionary<string, ProjectClassInfo> projectClasses)
+    {
+        var current = className;
+        for (var guard = 0; !string.IsNullOrEmpty(current) && guard < 16; guard++)
+        {
+            if (current is "Window" or "WindowBase" or "Form")
+                return true;
+            if (current is "Element" or "Container" or "UserControl" or "Panel")
+                return false;
+
+            if (localBaseTypeOf.TryGetValue(current, out var localBase))
+            {
+                current = localBase;
+                continue;
+            }
+
+            if (projectClasses.TryGetValue(current, out var project) && !string.IsNullOrEmpty(project.BaseType))
+            {
+                current = project.BaseType;
+                continue;
+            }
+
+            break;
+        }
+
+        return className != null && className.EndsWith("Window", StringComparison.Ordinal);
+    }
 
     private static void ApplyProperty(NodeInfo info, string propertyName, ExpressionSyntax right)
     {
@@ -1025,6 +1210,31 @@ public static class CodeImporter
                 when underlying == typeof(SKColor):
                 var field = typeof(SKColors).GetField(colorName, BindingFlags.Public | BindingFlags.Static);
                 if (field?.GetValue(null) is SKColor namedColor) { value = namedColor; return true; }
+                return false;
+
+            case InvocationExpressionSyntax
+            {
+                Expression: MemberAccessExpressionSyntax { Name.Identifier.Text: "WithAlpha" } alphaAccess,
+                ArgumentList.Arguments.Count: 1
+            } invocation when underlying == typeof(SKColor):
+                if (!TryConvertValue(alphaAccess.Expression, typeof(SKColor), out var baseColor, objectLookup, designerFilePath)
+                    || baseColor is not SKColor color)
+                    return false;
+                if (!TryConvertValue(invocation.ArgumentList.Arguments[0].Expression, typeof(byte), out var alphaObj, objectLookup, designerFilePath)
+                    && !TryConvertValue(invocation.ArgumentList.Arguments[0].Expression, typeof(int), out alphaObj, objectLookup, designerFilePath))
+                    return false;
+                value = color.WithAlpha(Convert.ToByte(alphaObj, CultureInfo.InvariantCulture));
+                return true;
+
+            case MemberAccessExpressionSyntax colorSchemeAccess
+                when underlying == typeof(SKColor)
+                     && GetMemberAccessTypeName(colorSchemeAccess.Expression) == nameof(ColorScheme):
+                var schemeProperty = typeof(ColorScheme).GetProperty(colorSchemeAccess.Name.Identifier.Text, BindingFlags.Public | BindingFlags.Static);
+                if (schemeProperty?.GetValue(null) is SKColor schemeColor)
+                {
+                    value = schemeColor;
+                    return true;
+                }
                 return false;
 
             case MemberAccessExpressionSyntax member when underlying.IsEnum:
@@ -1399,12 +1609,12 @@ public static class CodeImporter
             var subNodes = new Dictionary<string, NodeInfo>(StringComparer.Ordinal);
             var subOrder = new List<string>();
             var subEdges = new List<(string ParentName, string ChildName)>();
-            SKSize? subSize = null;
+            var subForm = new FormRootImport();
             var subDeclaredFields = new HashSet<string>(StringComparer.Ordinal);
             var subFieldTypes = new Dictionary<string, string>(StringComparer.Ordinal);
 
             var tree = CSharpSyntaxTree.ParseText(text);
-            ProcessCompilationUnit(tree.GetCompilationUnitRoot(), knownTypeNames, subDeclaredFields, subFieldTypes, subNodes, subOrder, subEdges, ref subSize);
+            ProcessCompilationUnit(tree.GetCompilationUnitRoot(), knownTypeNames, subDeclaredFields, subFieldTypes, subNodes, subOrder, subEdges, subForm);
 
             var subInstances = new Dictionary<string, ElementBase>(StringComparer.Ordinal);
             foreach (var name in subOrder)
@@ -1436,7 +1646,8 @@ public static class CodeImporter
                 child.Name = DesignNameValidator.Normalize(info.Name, info.Type, usedNames);
                 if (info.Text != null) child.Text = info.Text;
                 child.Location = new SKPoint(info.X, info.Y);
-                child.Size = new SKSize(info.W, info.H);
+                if (info.HasSize)
+                    child.Size = new SKSize(info.W, info.H);
                 child.Dock = info.Dock;
                 child.Anchor = info.Anchor;
                 child.Visible = info.Visible;
@@ -1471,6 +1682,8 @@ public static class CodeImporter
                 if (info.HasSize)
                     child.Size = new SKSize(info.W, info.H);
             }
+
+            ApplyImportedGridPlacements(subInstances, subNodes);
         }
         catch { }
     }
@@ -1644,7 +1857,7 @@ public static class CodeImporter
 
     private static IReadOnlyList<string> Rebuild(
         DesignSurface surface,
-        SKSize? clientSize,
+        FormRootImport formRoot,
         Dictionary<string, NodeInfo> nodes,
         List<string> declarationOrder,
         List<(string ParentName, string ChildName)> addEdges,
@@ -1739,7 +1952,8 @@ public static class CodeImporter
                 control.Text = $"[{info.Type}]";
 
             control.Location = new SKPoint(info.X, info.Y);
-            control.Size = new SKSize(info.W, info.H);
+            if (info.HasSize)
+                control.Size = new SKSize(info.W, info.H);
             control.Dock = info.Dock;
             control.Anchor = info.Anchor;
             control.Visible = info.Visible;
@@ -1776,6 +1990,9 @@ public static class CodeImporter
         surface.DeletedControlNames.Clear();
         surface.AddedControlNames.Clear();
         surface.EditedProperties.Clear();
+        surface.EditedGridPlacements.Clear();
+        surface.ZOrderEditedControls.Clear();
+        surface.PendingRenames.Clear();
         surface.FilePersistedControlNames.Clear();
         foreach (var name in filePersistedControlNames)
             surface.FilePersistedControlNames.Add(name);
@@ -1788,11 +2005,13 @@ public static class CodeImporter
         surface.EventWires.AddRange(eventWires);
         surface.ControlBindings.AddRange(controlBindings);
 
-        if (clientSize is { Width: > 0, Height: > 0 })
-            surface.DesignRoot.Size = clientSize.Value;
+        ApplyFormRootToSurface(surface, formRoot, owningClassName, localBaseTypeOf, projectClasses);
 
         if (!string.IsNullOrEmpty(formNameFromSource))
             surface.DesignRoot.Name = formNameFromSource;
+
+        foreach (var control in instances.Values)
+            surface.NoteEditedProperty(control, "AutoSize");
 
         surface.DesignRoot.SuspendLayout();
         try
@@ -1831,8 +2050,19 @@ public static class CodeImporter
                 control.Size = new SKSize(info.W, info.H);
         }
 
+        ApplyImportedGridPlacements(instances, nodes);
+
         ApplyForeignCompositionPolicy(
             surface, designerFilePath, owningClassName, projectClasses, nodes, instances, catalogTypeNames, catalog, knownTypeNames, usedNames, localBaseTypeOf);
+
+        // Importer defaults every control to Visible=true before parenting. TabView.OnControlAdded
+        // syncs pages at Add time, but a later Location/Size restore or nested load can leave
+        // non-selected pages showing — force one pass after the tree is complete.
+        foreach (var control in instances.Values)
+        {
+            if (control is TabView tabView)
+                tabView.SyncPageVisibility();
+        }
 
         surface.RelayoutRoot();
         surface.Commands.Clear();

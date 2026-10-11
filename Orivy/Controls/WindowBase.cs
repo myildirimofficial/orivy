@@ -4,6 +4,7 @@ using Orivy.Native.Windows;
 using SkiaSharp;
 using System;
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
@@ -26,6 +27,7 @@ private IntPtr _hWnd;
     /// <summary>
     /// Gets the window handle associated with this window instance.
     /// </summary>
+    [Browsable(false)]
     public IntPtr Handle => _hWnd;
 
     private FocusManager _focusManager;
@@ -56,11 +58,13 @@ private IntPtr _hWnd;
     /// <remarks>Set this property to indicate how the user closed the window, such as confirming or canceling
     /// an action. This value is typically used by the calling code to determine the outcome of the dialog
     /// interaction.</remarks>
+    [Category("Behavior")]
     public DialogResult DialogResult { get; set; }
 
     /// <summary>
     /// Gets the current position of the mouse cursor relative to the control.
     /// </summary>
+    [Browsable(false)]
     public SKPoint MousePosition { get; private set; }
 
     /// <summary>
@@ -79,6 +83,7 @@ private IntPtr _hWnd;
     /// Enable or disable win10 ver 1809 + mica backdrop effects
     /// </summary>
     private Orivy.WindowThemeType _windowThemeType;
+    [Category("Window")]
     public Orivy.WindowThemeType WindowThemeType
     {
         get => _windowThemeType;
@@ -139,6 +144,7 @@ private IntPtr _hWnd;
     }
 
     private FormStartPosition _formStartPosition = FormStartPosition.WindowsDefaultLocation;
+    [Category("Window")]
     public FormStartPosition StartPosition
     {
         get => _formStartPosition;
@@ -166,6 +172,7 @@ private IntPtr _hWnd;
 
     private FormWindowState _windowState = FormWindowState.Normal;
     protected bool _isHandlingDpiChange = false;  // Flag to prevent double-scaling in OnDpiChanged
+    [Category("Window")]
     public FormWindowState WindowState
     {
         get => _windowState;
@@ -197,6 +204,7 @@ private IntPtr _hWnd;
     /// <summary>
     ///     Modern focus manager for keyboard navigation
     /// </summary>
+    [Browsable(false)]
     public FocusManager FocusManager
     {
         get
@@ -232,9 +240,11 @@ private IntPtr _hWnd;
     /// </summary>
     /// <remarks>A value of -1 typically indicates that the default system margin should be used. Adjusting
     /// this property can affect how window shadows and glass effects are rendered.</remarks>
+    [Category("Window")]
     public int DwmMargin { get; set; } = -1;
 
     private bool _topMost;
+    [Category("Window")]
     public bool TopMost
     {
         get => _topMost;
@@ -249,6 +259,7 @@ private IntPtr _hWnd;
     }
 
     private bool _showInTaskbar = true;
+    [Category("Window")]
     public bool ShowInTaskbar
     {
         get => _showInTaskbar;
@@ -396,6 +407,7 @@ private IntPtr _hWnd;
     /// <summary>
     /// Gets or sets the icon for the window.
     /// </summary>
+    [Category("Window")]
     public Icon Icon
     {
         get => _icon;
@@ -410,6 +422,7 @@ private IntPtr _hWnd;
     /// <summary>
     /// Gets or sets a value indicating whether an icon is displayed in the title bar of the window.
     /// </summary>
+    [Category("Window")]
     public bool ShowIcon
     {
         get => _showIcon;
@@ -431,6 +444,7 @@ private IntPtr _hWnd;
     /// This is useful for implementing global keyboard shortcuts or intercepting keys at the window level.
     /// The event will still be passed to the focused control unless the Handled property is set to true.
     /// </remarks>
+    [Category("Behavior")]
     public bool KeyPreview
     {
         get => _keyPreview;
@@ -584,8 +598,10 @@ private IntPtr _hWnd;
         }
     }
 
+    [Category("Behavior")]
     public Button AcceptButton { get; set; }
 
+    [Category("Behavior")]
     public Button CancelButton { get; set; }
 
     public void CreateHandle()
@@ -1721,7 +1737,7 @@ private IntPtr _hWnd;
         if (!IsHandleCreated || !Orivy.Native.Windows.Helpers.IsModern)
             return;
 
-        bool isDark = ColorScheme.Surface.IsDark();
+        bool isDark = ColorScheme.IsDarkMode;
         Native.Windows.Helpers.UseImmersiveDarkMode(Handle, isDark);
 
         if (!IsHandleCreated)

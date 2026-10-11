@@ -72,12 +72,10 @@ public sealed class LayersPanel : Element
         Controls.Add(buttons);
 
         RefreshColumnIcons();
-        var columnIconsDark = ColorScheme.IsDarkMode;
         ColorScheme.ThemeChanged += (_, _) =>
         {
-            if (columnIconsDark == ColorScheme.IsDarkMode)
+            if (ColorScheme.IsBackgroundTransitioning)
                 return;
-            columnIconsDark = ColorScheme.IsDarkMode;
             RefreshColumnIcons();
         };
 

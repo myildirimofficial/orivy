@@ -8,7 +8,7 @@ using SkiaSharp;
 
 namespace Orivy.Controls;
 
-public sealed class ButtonGroup<TValue> : Container
+public class ButtonGroup<TValue> : Container
 {
     private bool _suppressCheckedChanged;
     private bool _scrollable;
@@ -809,6 +809,12 @@ public sealed class ButtonGroup<TValue> : Container
         value = default!;
         return false;
     }
+}
+
+/// <summary>Toolbox-friendly <see cref="ButtonGroup{TValue}"/> of strings. Prefer the open generic
+/// at runtime when the item type is known; Studio discovers this closed form via Activator.</summary>
+public sealed class ButtonGroup : ButtonGroup<string>
+{
 }
 
 public sealed class ButtonGroupSelectionChangedEventArgs<TValue> : EventArgs

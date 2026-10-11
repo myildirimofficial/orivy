@@ -148,6 +148,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
     private ImageLayout _backgroundImageLayout = ImageLayout.Tile;
+    [Category("Appearance")]
     public ImageLayout BackgroundImageLayout
     {
         get => _backgroundImageLayout;
@@ -162,6 +163,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
     private BackgroundImagePosition _backgroundImagePosition = BackgroundImagePosition.Center;
+    [Category("Appearance")]
     public BackgroundImagePosition BackgroundImagePosition
     {
         get => _backgroundImagePosition;
@@ -176,6 +178,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
     private AutoScaleMode _autoScaleMode = AutoScaleMode.None;
+    [Category("Layout")]
     public AutoScaleMode AutoScaleMode
     {
         get => _autoScaleMode;
@@ -193,6 +196,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     protected ScrollBar? _hScrollBar;
 
     private bool _autoScroll;
+    [Category("Layout")]
     public bool AutoScroll
     {
         get => _autoScroll;
@@ -207,6 +211,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
     private SKSize _autoScrollMargin;
+    [Category("Layout")]
     public SKSize AutoScrollMargin
     {
         get => _autoScrollMargin;
@@ -219,6 +224,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
     private ContentAlignment _imageAlign = ContentAlignment.MiddleCenter;
+    [Category("Appearance")]
     public ContentAlignment ImageAlign
     {
         get => _imageAlign;
@@ -231,6 +237,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
+    [Category("Appearance")]
     public SKImage Image
     {
         get => _image;
@@ -264,6 +271,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
 
+    [Browsable(false)]
     public bool InvokeRequired;
 
     [Browsable(false)]
@@ -271,6 +279,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     [Browsable(false)]
     public bool HasParent => _parent != null;
+
+    [Browsable(false)]
     public object Tag { get; set; }
 
     [Browsable(false)]
@@ -535,6 +545,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
     private SKColor _borderColor = SKColors.Transparent;
+    private bool _stickyBorderColor;
+    private SKColor _stickyBorderColorValue;
 
     [Category("Appearance")]
     public SKColor BorderColor
@@ -542,8 +554,13 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         get => _borderColor == SKColors.Transparent ? ColorScheme.BorderColor : _borderColor;
         set
         {
+            MarkStickyBorderColor(value);
+
             if (_borderColor == value)
+            {
+                SetStyleBaseBorderColor(value);
                 return;
+            }
 
             _borderColor = value;
             SetStyleBaseBorderColor(value);
@@ -1111,6 +1128,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     /// <summary>
     /// Gets or sets the size of the client area in device-independent pixels.
     /// </summary>
+    [Browsable(false)]
     public SKSize ClientSize
     {
         get => Size;
@@ -1179,6 +1197,8 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
     private SKColor _backColor = SKColors.Transparent;
+    private bool _stickyBackColor;
+    private SKColor _stickyBackColorValue;
 
     [Category("Appearance")]
     public virtual SKColor BackColor
@@ -1186,8 +1206,13 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         get => _backColor;
         set
         {
+            MarkStickyBackColor(value);
+
             if (_backColor == value)
+            {
+                SetStyleBaseBackColor(value);
                 return;
+            }
 
             _backColor = value;
             SetStyleBaseBackColor(value);
@@ -1200,14 +1225,22 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
     private SKColor _foreColor = SKColors.Transparent;
+    private bool _stickyForeColor;
+    private SKColor _stickyForeColorValue;
+
     [Category("Appearance")]
     public virtual SKColor ForeColor
     {
         get => _foreColor == SKColors.Transparent ? ColorScheme.ForeColor : _foreColor;
         set
         {
+            MarkStickyForeColor(value);
+
             if (_foreColor == value)
+            {
+                SetStyleBaseForeColor(value);
                 return;
+            }
 
             _foreColor = value;
             SetStyleBaseForeColor(value);
@@ -5050,6 +5083,11 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             (int)MathF.Ceiling(right),
             (int)MathF.Ceiling(bottom));
     }
+
+    /// <summary>Maps a caller-facing <see cref="Collections.ElementCollection.Insert"/> index to a
+    /// raw <c>Controls</c> index. Override when the collection holds infrastructure children (e.g.
+    /// scroll bars) that should not shift the logical insert position.</summary>
+    protected internal virtual int ResolveChildInsertIndex(int index, ElementBase child) => index;
 
     public virtual void  OnControlAdded(ElementEventArgs e)
     {

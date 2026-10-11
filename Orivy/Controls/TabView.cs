@@ -848,15 +848,33 @@ public partial class TabView : ElementBase
 
         element.Dock = DockStyle.Fill;
         SyncPageBounds(element);
-        element.Visible = Count == 1;
 
         if (Count == 1)
             _selectedIndex = 0;
-        else if (element.Visible)
-            CommitSelectedPageVisibility();
 
+        // Always hide non-selected pages. Importers and design hosts often force Visible=true on
+        // every control before parenting; without a full sync here every page stays painted and
+        // their children stack in the content area.
+        CommitSelectedPageVisibility();
+
+        // Keep visual page order aligned with Controls even when the page was Insert()'d
+        // (Add + SetChildIndex) rather than appended — otherwise GetPageAt points at the wrong page.
         if (_pageOrder != null)
-            _pageOrder.Add(element);
+        {
+            _pageOrder.Remove(element);
+            var insertAt = 0;
+            for (var i = 0; i < Controls.Count; i++)
+            {
+                if (Controls[i] is not ElementBase sibling || !IsTabViewPage(sibling))
+                    continue;
+                if (ReferenceEquals(sibling, element))
+                    break;
+                insertAt++;
+            }
+
+            insertAt = Math.Clamp(insertAt, 0, _pageOrder.Count);
+            _pageOrder.Insert(insertAt, element);
+        }
 
         EnsureSelectedVerticalTabVisible();
         ResetTabSelectionAnimation();
@@ -1190,18 +1208,18 @@ public partial class TabView : ElementBase
             var selectedPage = GetPageAt(_selectedIndex);
             var contentViewport = DisplayRectangle;
 
+            // Size the selected page before the Width/Height gate — a freshly Insert()'d page can
+            // still be 0×0 from OnControlAdded (TabView was SuspendLayout / not yet measured).
+            if (selectedPage != null)
+                SyncPageBounds(selectedPage);
+
             for (var i = 0; i < Controls.Count; i++)
             {
                 if (Controls[i] is not ElementBase child || !child.Visible || child.Width <= 0f || child.Height <= 0f)
                     continue;
 
-                if (IsTabViewPage(child))
-                {
-                    if (!ReferenceEquals(child, selectedPage))
-                        continue;
-
-                    SyncPageBounds(child);
-                }
+                if (IsTabViewPage(child) && !ReferenceEquals(child, selectedPage))
+                    continue;
 
                 if (NeedsFullChildRedraw)
                     child.InvalidateRenderTree();
@@ -1407,6 +1425,11 @@ public partial class TabView : ElementBase
         if (!EnableTransitions || TransitionEffect == TabViewTransitionEffect.None)
             return false;
 
+        // Design surface owns input and does not need snapshot fades; animating here also races
+        // with import/host visibility fixes and can leave every page Visible at once.
+        if (IsAncestorSiteInDesignMode)
+            return false;
+
         if (previousSelectedIndex < 0 || nextSelectedIndex < 0 || previousSelectedIndex == nextSelectedIndex)
             return false;
 
@@ -1449,6 +1472,87 @@ public partial class TabView : ElementBase
 
             SyncPageBounds(element);
             element.Visible = ReferenceEquals(element, selectedPage);
+        }
+
+        // Pages added while this TabView was SuspendLayout never laid out their docked children.
+        // Without an explicit tree pass the selected page paints empty until the next tab switch.
+        if (selectedPage != null && selectedPage.Visible && selectedPage.Width > 0f && selectedPage.Height > 0f)
+            EnsurePageContentLaidOut(selectedPage);
+    }
+
+    /// <summary>Shows only the selected tab page and hides the others. Call after import or any
+    /// bulk edit that may have forced <see cref="ElementBase.Visible"/> on every page.</summary>
+    public void SyncPageVisibility()
+    {
+        if (IsTransitioning)
+            StopTransition(commitTargetPage: true);
+        else
+            CommitSelectedPageVisibility();
+
+        InvalidateRenderTree();
+        Invalidate();
+    }
+
+    /// <summary>Inserts a tab page at the given page index (0 = first tab). Prefer this or
+    /// <c>Controls.Insert(pageIndex, page)</c> — both skip non-page children such as scroll bars.</summary>
+    public void InsertPage(int pageIndex, ElementBase page)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        Controls.Insert(pageIndex, page);
+    }
+
+    /// <inheritdoc />
+    protected internal override int ResolveChildInsertIndex(int index, ElementBase child)
+    {
+        if (!IsTabViewPage(child))
+            return index;
+
+        var pageCount = Count;
+        var pageIndex = index;
+        if (pageIndex < 0)
+            pageIndex = 0;
+        if (pageIndex > pageCount)
+            pageIndex = pageCount;
+
+        if (pageIndex < pageCount)
+        {
+            var anchor = GetPageAt(pageIndex);
+            if (anchor != null)
+            {
+                var at = Controls.IndexOf(anchor);
+                if (at >= 0)
+                    return at;
+            }
+        }
+
+        if (pageCount > 0)
+        {
+            var last = GetPageAt(pageCount - 1);
+            if (last != null)
+            {
+                var at = Controls.IndexOf(last);
+                if (at >= 0)
+                    return at + 1;
+            }
+        }
+
+        // No pages yet — sit after leading infrastructure (scroll bars), not at Controls[0].
+        for (var i = 0; i < Controls.Count; i++)
+        {
+            if (Controls[i] is ElementBase el && IsTabViewPage(el))
+                return i;
+        }
+
+        return Controls.Count;
+    }
+
+    private static void EnsurePageContentLaidOut(ElementBase page)
+    {
+        page.PerformLayout();
+        for (var i = 0; i < page.Controls.Count; i++)
+        {
+            if (page.Controls[i] is ElementBase child && child.Visible)
+                EnsurePageContentLaidOut(child);
         }
     }
 
@@ -1578,6 +1682,8 @@ public partial class TabView : ElementBase
 
         var originalVisible = page.Visible;
         page.Visible = true;
+        // Snapshot before the page has ever been shown would capture undocked / 0-size children.
+        EnsurePageContentLaidOut(page);
 
         try
         {
@@ -2125,8 +2231,39 @@ public partial class TabView : ElementBase
         _pageOrder.RemoveAt(fromVisualIndex);
         _pageOrder.Insert(destIndex, page);
         _selectedIndex = destIndex;
+        SyncControlsOrderToPageOrder();
         ResetTabSelectionAnimation();
         CancelTransitionPreservingSelection();
+    }
+
+    /// <summary>Keeps <see cref="ElementBase.Controls"/> page order aligned with visual tab order
+    /// after a drag-reorder so later <c>Controls.Insert(pageIndex, …)</c> matches the strip.</summary>
+    private void SyncControlsOrderToPageOrder()
+    {
+        if (_pageOrder == null || _pageOrder.Count == 0)
+            return;
+
+        for (var pageIndex = 0; pageIndex < _pageOrder.Count; pageIndex++)
+        {
+            var page = _pageOrder[pageIndex];
+            var target = GetControlsIndexForPageSlot(pageIndex);
+            var current = Controls.IndexOf(page);
+            if (current >= 0 && current != target)
+                Controls.SetChildIndex(page, target);
+        }
+    }
+
+    private int GetControlsIndexForPageSlot(int pageIndex)
+    {
+        var leadingNonPages = 0;
+        for (var i = 0; i < Controls.Count; i++)
+        {
+            if (Controls[i] is ElementBase el && IsTabViewPage(el))
+                break;
+            leadingNonPages++;
+        }
+
+        return leadingNonPages + pageIndex;
     }
 
     // =========================================================================
@@ -2148,7 +2285,7 @@ public partial class TabView : ElementBase
         var iconSpacing = TabIconSpacing * ScaleFactor;
         var horizontalPadding = GetTabHorizontalContentPadding();
         var closeButtonSpacing = TabCloseButtonSpacing * ScaleFactor;
-        var isDark = ColorScheme.IsDarkMode;
+        var isDark = ColorScheme.Surface.IsDark();
 
         // --- Unified color palette (unchanged) ---
         SKColor headerBackground, headerBorderColor,
@@ -2588,7 +2725,7 @@ public partial class TabView : ElementBase
         if (rect.Width <= 0 || rect.Height <= 0) return;
 
         var sf = ScaleFactor;
-        var isDark = ColorScheme.IsDarkMode;
+        var isDark = ColorScheme.Surface.IsDark();
         var foreColor = ColorScheme.ForeColor;
 
         // Win11 / Fluent scroll-button style: a soft rounded-rectangle
@@ -3696,7 +3833,7 @@ public partial class TabView : ElementBase
         if (rect.Width <= 0f || rect.Height <= 0f)
             return;
 
-        var isDark = ColorScheme.IsDarkMode;
+        var isDark = ColorScheme.Surface.IsDark();
         var isLightTitle = titleColor != SKColor.Empty && !titleColor.IsDark();
         var sf = ScaleFactor;
 

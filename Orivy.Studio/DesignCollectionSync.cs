@@ -21,7 +21,6 @@ internal static class DesignCollectionSync
         DesignSurface surface,
         string controlKey,
         ElementBase component,
-        string assignmentPrefix,
         string? filePath)
     {
         var changed = false;
@@ -108,14 +107,16 @@ internal static class DesignCollectionSync
                 remove.Add(index);
 
             changed = true;
+            var indent = DetectStatementIndent(statements);
+            var prefix = DetectControlQualifier(statements, controlKey);
             if (formatted.Count == 1)
             {
-                Queue($"        {assignmentPrefix}{memberName}.Add({formatted[0]});");
+                Queue($"{indent}{prefix}{memberName}.Add({formatted[0]});");
             }
             else
             {
                 var arrayType = FormatArrayType(elementType);
-                Queue($"        {assignmentPrefix}{memberName}.AddRange(new {arrayType}[] {{ {string.Join(", ", formatted)} }});");
+                Queue($"{indent}{prefix}{memberName}.AddRange(new {arrayType}[] {{ {string.Join(", ", formatted)} }});");
             }
         }
 
@@ -249,8 +250,53 @@ internal static class DesignCollectionSync
         return typeof(object);
     }
 
-    private static string FormatArrayType(Type elementType) =>
-        elementType == typeof(object) ? "object" : elementType.Name;
+    private static string FormatArrayType(Type elementType)
+    {
+        if (elementType == typeof(object)) return "object";
+        if (elementType == typeof(string)) return "string";
+        if (elementType == typeof(bool)) return "bool";
+        if (elementType == typeof(int)) return "int";
+        if (elementType == typeof(float)) return "float";
+        if (elementType == typeof(double)) return "double";
+
+        return elementType.Namespace switch
+        {
+            "Orivy" or "Orivy.Enums" or "Orivy.Objects" => "Orivy." + elementType.Name,
+            "Orivy.Controls" => "Orivy.Controls." + elementType.Name,
+            _ => elementType.Name,
+        };
+    }
+
+    private static string DetectStatementIndent(IReadOnlyList<StatementSyntax> statements)
+    {
+        foreach (var statement in statements)
+        {
+            var text = statement.GetLeadingTrivia().ToFullString();
+            var start = text.Length;
+            while (start > 0 && text[start - 1] is ' ' or '\t')
+                start--;
+            if (start < text.Length)
+                return text[start..];
+        }
+
+        return "        ";
+    }
+
+    private static string DetectControlQualifier(IReadOnlyList<StatementSyntax> statements, string controlKey)
+    {
+        var withThis = "this." + controlKey + ".";
+        var bare = controlKey + ".";
+        foreach (var statement in statements)
+        {
+            var text = statement.ToString();
+            if (text.Contains(withThis, StringComparison.Ordinal))
+                return withThis;
+            if (text.Contains(bare, StringComparison.Ordinal))
+                return bare;
+        }
+
+        return bare;
+    }
 
     private static void ReindexAfterRemoval(
         Dictionary<(string ControlKey, string CollectionMember), List<int>> map,

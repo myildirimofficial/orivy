@@ -22,6 +22,8 @@ internal static class DesignPersistableProperties
         "Controls", "Parent", "DataContext", "Site", "Handle",
         "Bounds", "ClientRectangle", "DisplayRectangle", "PreferredSize",
         "Properties", "Window", "IsHandleCreated",
+        "MousePosition", "FocusManager", "CanvasSize", "ClientSize",
+        "Tag", "InvokeRequired", "MaximizedBounds",
     };
 
     /// <summary>Same rule as <see cref="PropertyGrid"/> noise rows (read-only <c>Is*</c> booleans).</summary>

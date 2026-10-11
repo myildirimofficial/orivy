@@ -15,8 +15,8 @@ namespace Orivy.Studio;
 /// <summary>
 /// Writes a design back into the file it was opened from. Unlike <see cref="CodeGenerator.Generate"/>
 /// which generates a bare-bones stub from scratch, this patches the existing syntax tree in place:
-/// updating only the modified coordinates, sizes, dock and anchor properties while leaving everything
-/// else (event handlers, custom methods, menu trees, comments, formatting) untouched.
+/// updating Location, Size, Dock, Anchor, Text, and Visible only when the user edited them, while leaving
+/// everything else (event handlers, custom methods, menu trees, comments, formatting) untouched.
 /// </summary>
 public static class CodeMerger
 {
@@ -36,6 +36,17 @@ public static class CodeMerger
             return CodeGenerator.Generate(surface, className);
 
         var root = CSharpSyntaxTree.ParseText(original).GetCompilationUnitRoot();
+        var renamed = false;
+        foreach (var (from, to) in surface.PendingRenames)
+        {
+            var updated = DesignRename.Apply(root, from, to);
+            if (!updated.IsEquivalentTo(root))
+            {
+                root = updated;
+                renamed = true;
+            }
+        }
+
         var initMethod = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
             .FirstOrDefault(m => m.Identifier.Text == "InitializeComponent");
         if (initMethod == null)
@@ -56,11 +67,13 @@ public static class CodeMerger
 
         var deleted = new HashSet<string>(surface.DeletedControlNames, StringComparer.Ordinal);
 
-        var rewriter = new DesignSourceRewriter(live, deleted, added, surface.DesignRoot);
+        var rewriter = new DesignSourceRewriter(live, deleted, added, surface.DesignRoot, surface.EditedProperties);
         var rewritten = rewriter.Visit(root) ?? root;
         var synced = DesignInteractions.Sync(rewritten, surface, out var interactionsChanged, filePath);
         synced = DesignPropertySync.Sync(synced, live, surface.DesignRoot, surface, filePath, out var propertiesChanged);
-        if (!rewriter.Changed && !interactionsChanged && !propertiesChanged)
+        synced = DesignZOrderSync.Sync(synced, surface, out var zOrderChanged);
+        synced = DesignGridSync.Sync(synced, surface, out var gridChanged);
+        if (!renamed && !rewriter.Changed && !interactionsChanged && !propertiesChanged && !zOrderChanged && !gridChanged)
             return original;
 
         return synced.ToFullString();
@@ -79,6 +92,7 @@ public static class CodeMerger
         private readonly HashSet<string> _deleted;
         private readonly List<ElementBase> _added;
         private readonly ElementBase _root;
+        private readonly HashSet<(string ControlKey, string Property)> _edited;
 
         public bool Changed { get; private set; }
 
@@ -86,12 +100,14 @@ public static class CodeMerger
             Dictionary<string, ElementBase> live,
             HashSet<string> deleted,
             List<ElementBase> added,
-            ElementBase root)
+            ElementBase root,
+            HashSet<(string ControlKey, string Property)> edited)
         {
             _live = live;
             _deleted = deleted;
             _added = added;
             _root = root;
+            _edited = edited;
         }
 
         public override SyntaxNode? VisitClassDeclaration(ClassDeclarationSyntax node)
@@ -121,7 +137,7 @@ public static class CodeMerger
             Changed = true;
             var fields = trulyNewFields.Select(control =>
                 (MemberDeclarationSyntax)SyntaxFactory.ParseMemberDeclaration(
-                    $"    private {control.GetType().Name} {control.Name} = null!;{Environment.NewLine}")!);
+                    $"    private {QualifiedTypeName(control)} {control.Name} = null!;{Environment.NewLine}")!);
             return visited.WithMembers(visited.Members.InsertRange(insertAt, fields));
         }
 
@@ -199,6 +215,8 @@ public static class CodeMerger
             var visited = (AssignmentExpressionSyntax)base.VisitAssignmentExpression(node)!;
             if (TryMatchFormSize(visited))
             {
+                if (!_edited.Contains(("", "Size")) && !_edited.Contains(("", "ClientSize")))
+                    return visited;
                 if (SamePair(visited.Right, _root.Width, _root.Height))
                     return visited;
                 if (!DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(_root, "Size"))
@@ -209,6 +227,9 @@ public static class CodeMerger
             }
 
             if (!TryMatchControlProperty(visited, out var control, out var property))
+                return visited;
+
+            if (!WasEdited(control, property))
                 return visited;
 
             if (SameProperty(visited.Right, control, property))
@@ -414,7 +435,30 @@ public static class CodeMerger
             if (DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(control, "Visible") && !control.Visible)
                 parts.Add("Visible = false");
 
-            return $"        {control.Name} = new {control.GetType().Name} {{ {string.Join(", ", parts)} }};";
+            if (!control.AutoSize)
+                parts.Add("AutoSize = false");
+
+            return $"        {control.Name} = new {QualifiedTypeName(control)} {{ {string.Join(", ", parts)} }};";
+        }
+
+        private static string QualifiedTypeName(ElementBase control)
+        {
+            var type = control.GetType();
+            return type.Namespace switch
+            {
+                "Orivy.Controls" => "Orivy.Controls." + type.Name,
+                "Orivy" or "Orivy.Enums" => "Orivy." + type.Name,
+                _ => type.Name,
+            };
+        }
+
+        private bool WasEdited(ElementBase control, string property)
+        {
+            if (_added.Contains(control))
+                return true;
+
+            var key = ReferenceEquals(control, _root) ? string.Empty : control.Name ?? string.Empty;
+            return _edited.Contains((key, property));
         }
 
         private string BuildAdd(ElementBase control)

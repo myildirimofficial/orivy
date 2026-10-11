@@ -40,12 +40,10 @@ public sealed class DesignDocument : Container, IStudioDocument
     public DesignDocument(string title)
     {
         _documentName = title;
-        var switcherIconsDark = ColorScheme.IsDarkMode;
         _themeChangedHandler = (_, _) =>
         {
-            if (switcherIconsDark == ColorScheme.IsDarkMode)
+            if (ColorScheme.IsBackgroundTransitioning)
                 return;
-            switcherIconsDark = ColorScheme.IsDarkMode;
             RefreshSwitcherIcons();
         };
         Surface = new DesignSurface { Dock = DockStyle.Fill };

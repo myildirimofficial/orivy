@@ -290,9 +290,12 @@ internal static class DesignSourceFormat
     }
 
     private static string FormatTypeName(Type type) =>
-        type.Namespace is "Orivy" or "Orivy.Controls" or "Orivy.Enums"
-            ? type.Name
-            : type.Name;
+        type.Namespace switch
+        {
+            "Orivy" or "Orivy.Enums" or "Orivy.Objects" => "Orivy." + type.Name,
+            "Orivy.Controls" => "Orivy.Controls." + type.Name,
+            _ => type.Name,
+        };
 
     private static bool RoundTrip(string expression, Type type, object? expected, string? designerFilePath)
     {
@@ -310,16 +313,51 @@ internal static class DesignSourceFormat
         }
     }
 
-    private static string FormatEnum(object value) =>
-        value.GetType().Namespace switch
+    private static string FormatEnum(object value)
+    {
+        var type = value.GetType();
+        var prefix = type.Namespace is "Orivy" or "Orivy.Controls" or "Orivy.Enums" or "Orivy.Objects"
+            ? "Orivy." + type.Name
+            : type.Name;
+
+        if (!type.IsDefined(typeof(FlagsAttribute), inherit: false))
+            return $"{prefix}.{value}";
+
+        var raw = Convert.ToInt64(value, CultureInfo.InvariantCulture);
+        if (raw == 0 || Enum.IsDefined(type, value))
+            return $"{prefix}.{value}";
+
+        var parts = new List<string>();
+        foreach (var flag in Enum.GetValues(type))
         {
-            "Orivy" or "Orivy.Controls" or "Orivy.Enums" or "Orivy.Objects" =>
-                $"Orivy.{value.GetType().Name}.{value}",
-            _ => $"{value.GetType().Name}.{value}"
-        };
+            var bits = Convert.ToInt64(flag, CultureInfo.InvariantCulture);
+            if (bits == 0 || (bits & (bits - 1)) != 0 || (raw & bits) != bits)
+                continue;
+
+            var name = Enum.GetName(type, flag);
+            if (name == null)
+                continue;
+
+            parts.Add($"{prefix}.{name}");
+            raw &= ~bits;
+        }
+
+        if (raw != 0 || parts.Count == 0)
+            return $"({prefix}){Convert.ToInt64(value, CultureInfo.InvariantCulture)}";
+
+        return string.Join(" | ", parts);
+    }
 
     private static string FormatSKColor(SKColor color)
     {
+        foreach (var property in typeof(ColorScheme).GetProperties(BindingFlags.Public | BindingFlags.Static))
+        {
+            if (property.PropertyType != typeof(SKColor) || property.GetIndexParameters().Length > 0)
+                continue;
+            if (property.GetValue(null) is SKColor token && token == color)
+                return $"ColorScheme.{property.Name}";
+        }
+
         foreach (var field in typeof(SKColors).GetFields(BindingFlags.Public | BindingFlags.Static))
         {
             if (field.FieldType == typeof(SKColor) && field.GetValue(null) is SKColor named && named == color)
@@ -337,9 +375,9 @@ internal static class DesignSourceFormat
         if (thickness.Left == thickness.Top
             && thickness.Top == thickness.Right
             && thickness.Right == thickness.Bottom)
-            return $"new Thickness({Pixel(thickness.Left)})";
+            return $"new Orivy.Thickness({Pixel(thickness.Left)})";
 
-        return $"new Thickness({Pixel(thickness.Left)}, {Pixel(thickness.Top)}, {Pixel(thickness.Right)}, {Pixel(thickness.Bottom)})";
+        return $"new Orivy.Thickness({Pixel(thickness.Left)}, {Pixel(thickness.Top)}, {Pixel(thickness.Right)}, {Pixel(thickness.Bottom)})";
     }
 
     private static string FormatRadius(Radius radius)
@@ -347,11 +385,11 @@ internal static class DesignSourceFormat
         if (radius.TopLeft == radius.TopRight
             && radius.TopRight == radius.BottomLeft
             && radius.BottomLeft == radius.BottomRight)
-            return $"new Radius({Pixel(radius.TopLeft)})";
+            return $"new Orivy.Radius({Pixel(radius.TopLeft)})";
 
-        return $"new Radius({Pixel(radius.TopLeft)}, {Pixel(radius.TopRight)}, {Pixel(radius.BottomLeft)}, {Pixel(radius.BottomRight)})";
+        return $"new Orivy.Radius({Pixel(radius.TopLeft)}, {Pixel(radius.TopRight)}, {Pixel(radius.BottomLeft)}, {Pixel(radius.BottomRight)})";
     }
 
     private static string EscapeString(string value) =>
-        value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", string.Empty);
+        value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n");
 }

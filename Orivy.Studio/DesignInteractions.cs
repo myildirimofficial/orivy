@@ -74,8 +74,6 @@ public static class DesignInteractions
             .Where(wire => !string.IsNullOrWhiteSpace(wire.Handler))
             .ToList();
         var wantedBindings = surface.ControlBindings.ToList();
-        var seenEvents = new HashSet<string>(StringComparer.Ordinal);
-        var seenBindings = new HashSet<string>(StringComparer.Ordinal);
         var next = new List<StatementSyntax>();
         var queued = new Dictionary<string, List<StatementSyntax>>(StringComparer.Ordinal);
         var queueOrder = new List<string>();
@@ -92,6 +90,41 @@ public static class DesignInteractions
             list.Add(Statement(text));
         }
 
+        EventWire? TakeEvent(EventWire wire, bool exactOnly)
+        {
+            var match = wantedEvents.FirstOrDefault(item =>
+                SameEvent(item, wire) && string.Equals(item.Handler, wire.Handler, StringComparison.Ordinal));
+            if (match == null && !exactOnly)
+                match = wantedEvents.FirstOrDefault(item => SameEvent(item, wire));
+            if (match != null)
+                wantedEvents.Remove(match);
+            return match;
+        }
+
+        ControlBinding? TakeBinding(ControlBinding binding, bool exactOnly)
+        {
+            var match = wantedBindings.FirstOrDefault(item => SameBinding(item, binding) && SameBindingText(item, binding));
+            if (match == null && !exactOnly)
+                match = wantedBindings.FirstOrDefault(item => SameBinding(item, binding));
+            if (match != null)
+                wantedBindings.Remove(match);
+            return match;
+        }
+
+        // A handler inside if/try is not a direct statement. Claim an exact wire for it so Save does
+        // not append a second copy, and so a second top-level handler of the same event stays.
+        foreach (var expression in method.Body.DescendantNodes().OfType<ExpressionSyntax>())
+        {
+            var owner = expression.FirstAncestorOrSelf<StatementSyntax>();
+            if (owner == null || owner.Parent == method.Body)
+                continue;
+
+            if (TryReadEvent(expression, out var existingWire))
+                TakeEvent(existingWire, exactOnly: true);
+            if (TryReadBinding(expression, out var existingBinding))
+                TakeBinding(existingBinding, exactOnly: true);
+        }
+
         foreach (var statement in method.Body.Statements)
         {
             if (statement is not ExpressionStatementSyntax { Expression: var expression })
@@ -102,14 +135,13 @@ public static class DesignInteractions
 
             if (TryReadEvent(expression, out var wire))
             {
-                var match = wantedEvents.FirstOrDefault(item => SameEvent(item, wire));
+                var match = TakeEvent(wire, exactOnly: false);
                 if (match == null)
                 {
                     changed = true;
                     continue;
                 }
 
-                seenEvents.Add(Key(wire.ControlName, wire.EventName));
                 if (!string.Equals(match.Handler, wire.Handler, StringComparison.Ordinal))
                 {
                     changed = true;
@@ -125,14 +157,13 @@ public static class DesignInteractions
 
             if (TryReadBinding(expression, out var binding))
             {
-                var match = wantedBindings.FirstOrDefault(item => SameBinding(item, binding));
+                var match = TakeBinding(binding, exactOnly: false);
                 if (match == null)
                 {
                     changed = true;
                     continue;
                 }
 
-                seenBindings.Add(Key(binding.ControlName, binding.TargetProperty));
                 if (!SameBindingText(match, binding))
                 {
                     changed = true;
@@ -150,16 +181,10 @@ public static class DesignInteractions
         }
 
         foreach (var wire in wantedEvents)
-        {
-            if (seenEvents.Add(Key(wire.ControlName, wire.EventName)))
-                Queue(wire.ControlName, FormatEvent(wire));
-        }
+            Queue(wire.ControlName, FormatEvent(wire));
 
         foreach (var binding in wantedBindings)
-        {
-            if (seenBindings.Add(Key(binding.ControlName, binding.TargetProperty)))
-                Queue(binding.ControlName, FormatBinding(surface, binding));
-        }
+            Queue(binding.ControlName, FormatBinding(surface, binding));
 
         SyntaxNode result = root;
         if (queueOrder.Count > 0 || changed)
@@ -468,8 +493,6 @@ public static class DesignInteractions
         && string.Equals(left.SourceControl, right.SourceControl, StringComparison.Ordinal)
         && string.Equals(left.SourceType, right.SourceType, StringComparison.Ordinal)
         && string.Equals(left.SourceProperty, right.SourceProperty, StringComparison.Ordinal);
-
-    private static string Key(string left, string right) => left + "\n" + right;
 
     private static StatementSyntax Statement(string text) =>
         SyntaxFactory.ParseStatement(text + Environment.NewLine);

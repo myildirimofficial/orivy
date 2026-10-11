@@ -35,6 +35,10 @@ Useful APIs:
 
 Notes:
 
+- Setting `IsDarkMode` flips the semantic dark flag immediately. Only `Surface` lerps (~220 ms). Derived containers, status colors, and `ColorScheme.IsDarkMode` checks use the target mode from the first frame so native chrome and controls do not disagree mid-transition.
+- `ThemeChanged` during a background lerp is posted to the UI thread (`Application.PostToUiThread`). Visual-style replay snaps to the current palette each tick (`forceImmediate`) so nested 140 ms eases do not restart on every frame.
+- Native immersive dark mode / DWM backdrop follows `ColorScheme.IsDarkMode`, not `Surface.IsDark()`. Painted chrome (tab headers, hover washes) should follow live `Surface` / `ForeColor` so they do not invert while the lerp is still catching up.
+- Rasterized icons (Studio sidebar, Layers headers) should rebuild when `IsBackgroundTransitioning` is false, using the then-current `ForeColor`.
 - `ForeColor` is derived from the current surface color, so controls usually do not need to hard-code text contrast.
 - `Primary` is seeded independently and can be changed without replacing the whole theme.
 
@@ -145,6 +149,8 @@ Controls with richer appearance often follow this pattern:
 The default `Button` also demonstrates this flow by defining a full visual-style profile in its constructor, including hover, pressed, checked, focused, and disabled states.
 
 For styles configured directly with `ConfigureVisualStyles(...)`, `ElementBase` remembers the builder configuration and replays it on `ColorScheme.ThemeChanged`. This keeps `ColorScheme`-derived colors current across normal, hover, pressed, checked, focused, disabled, hidden, and invalid states. If a control rebuilds styles manually with `clearExisting: true`, the remembered configuration is replaced instead of accumulated.
+
+An explicit `BackColor`, `ForeColor`, or `BorderColor` property assignment (property grid / `InitializeComponent`) is sticky: theme replay does not put the control's style-base palette back on top of it. Hover/pressed fills derive from that assigned background. Theme-following chrome should use `ConfigureVisualStyles` with `ColorScheme` lambdas instead of a one-time property snapshot. Style engine writes do not mark stickiness.
 
 ## 5. Toggle Buttons and Button Groups
 
@@ -279,7 +285,7 @@ Notes:
 - `Acrylic`
 - `Tabbed`
 
-The native host integration uses the current `ColorScheme.Surface` color when applying supported effects. This gives top-level windows a more coherent look when the app theme changes.
+Immersive dark mode follows `ColorScheme.IsDarkMode` (the semantic flag, not `Surface.IsDark()`). Backdrop tints still use the live `ColorScheme.Surface` color so Mica/Acrylic/Tabbed stay aligned with the lerp.
 
 Example:
 

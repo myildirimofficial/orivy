@@ -164,6 +164,7 @@ public sealed class LayoutHelperBar : Element
         if (next == old)
             return;
 
+        surface.NoteGridPlacement(target);
         surface.Commands.Execute(new DelegateCommand(
             $"Grid placement of {target.Name}",
             () => { grid.SetPlacement(target, next.Row, next.Column, next.RowSpan, next.ColumnSpan); surface.RelayoutRoot(); },
@@ -184,6 +185,7 @@ public sealed class LayoutHelperBar : Element
         if (newDock == oldDock)
             return;
 
+        surface.NoteEditedProperty(target, "Dock");
         surface.Commands.Execute(new DelegateCommand(
             $"Dock = {newDock}",
             () => { target.Dock = newDock; surface.RelayoutRoot(); surface.NotifyStructureChanged(); },
@@ -212,6 +214,7 @@ public sealed class LayoutHelperBar : Element
         if (next == old)
             return;
 
+        surface.NoteEditedProperty(target, "Anchor");
         surface.Commands.Execute(new DelegateCommand(
             $"Anchor = {next}",
             () => { target.Anchor = next; surface.RelayoutRoot(); },

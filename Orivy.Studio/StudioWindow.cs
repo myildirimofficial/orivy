@@ -41,6 +41,11 @@ public sealed class StudioWindow : Window
     private readonly ToolbarButton _undoButton = new("undo", "Undo (Ctrl+Z)");
     private readonly ToolbarButton _redoButton = new("redo", "Redo (Ctrl+Y)");
     private readonly ToolbarButton _previewButton = new("play", "Preview");
+    private readonly ToolbarButton _themeToggle = new("moon", "Toggle dark mode", 28f)
+    {
+        CheckOnClick = true,
+        Checked = ColorScheme.IsDarkMode,
+    };
     private readonly Element _zoomLabel;
     private readonly Element _statusHost;
 
@@ -138,6 +143,7 @@ public sealed class StudioWindow : Window
         _active = firstDoc.Surface;
         _layers = new LayersPanel(_active) { Dock = DockStyle.Top, Height = 230, Margin = new Thickness(0, 0, 0, 10) };
         _layoutBar = new LayoutHelperBar(() => _active) { Dock = DockStyle.Top, Height = 92, Margin = new Thickness(0, 0, 0, 10) };
+        _inspector.FilterProperty = DesignPersistableProperties.ShouldShowInInspector;
         _eventHelper = new EventHelper(() => _active) { Dock = DockStyle.Fill };
         _bindingHelper = new BindingHelper(() => _active) { Dock = DockStyle.Fill };
 
@@ -177,7 +183,6 @@ public sealed class StudioWindow : Window
         var gridToggle = new ToolbarButton("grid", "Show grid", 28f) { CheckOnClick = true, Checked = true };
         var snapToggle = new ToolbarButton("snap", "Snap to grid", 28f) { CheckOnClick = true, Checked = true };
         var guidesToggle = new ToolbarButton("guides", "Smart guides", 28f) { CheckOnClick = true, Checked = true };
-        var themeToggle = new ToolbarButton("moon", "Toggle dark mode", 28f) { CheckOnClick = true, Checked = ColorScheme.IsDarkMode };
         var randomizeToggle = new ToolbarButton("shuffle", "Randomize backgrounds", 28f) { CheckOnClick = true };
 
         // Same flat, transparent-until-hovered skin as the icon-only toolbar buttons around them
@@ -266,7 +271,7 @@ public sealed class StudioWindow : Window
         // | file ops | history.
         foreach (var c in new ElementBase[]
         {
-            themeToggle,
+            _themeToggle,
             Divider(),
             randomizeToggle, guidesToggle, snapToggle, gridSizeField, gridToggle,
             Divider(),
@@ -343,12 +348,10 @@ public sealed class StudioWindow : Window
         _sidebar.Controls.Add(_explorerPage);
         _sidebar.Controls.Add(_toolboxPage);
         RefreshSidebarIcons();
-        var sidebarIconsDark = ColorScheme.IsDarkMode;
         ColorScheme.ThemeChanged += (_, _) =>
         {
-            if (sidebarIconsDark == ColorScheme.IsDarkMode)
+            if (ColorScheme.IsBackgroundTransitioning)
                 return;
-            sidebarIconsDark = ColorScheme.IsDarkMode;
             RefreshSidebarIcons();
         };
 
@@ -425,7 +428,7 @@ public sealed class StudioWindow : Window
         snapToggle.CheckedChanged += (_, _) => { _active.SnapToGrid = snapToggle.Checked; _active.Invalidate(); };
         gridSizeField.ValueChanged += (_, _) => _active.GridStep = (float)gridSizeField.Value;
         guidesToggle.CheckedChanged += (_, _) => _active.SmartGuides = guidesToggle.Checked;
-        themeToggle.CheckedChanged += (_, _) => ColorScheme.IsDarkMode = themeToggle.Checked;
+        _themeToggle.CheckedChanged += (_, _) => ColorScheme.IsDarkMode = _themeToggle.Checked;
         randomizeToggle.CheckedChanged += (_, _) => _active.ShowRandomBackgrounds = randomizeToggle.Checked;
         addGridRowButton.Click += (_, _) =>
         {
@@ -512,7 +515,7 @@ public sealed class StudioWindow : Window
         view.AddMenuItem("Zoom Out", (_, _) => _active.Zoom /= 1.25f, Keys.Control | Keys.OemMinus);
         view.AddMenuItem("Fit to View", (_, _) => _active.FitToView(), Keys.Control | Keys.D0);
         view.AddSeparator();
-        view.AddMenuItem("Toggle Dark Mode", (_, _) => ColorScheme.IsDarkMode = !ColorScheme.IsDarkMode);
+        view.AddMenuItem("Toggle Dark Mode", (_, _) => _themeToggle.Checked = !_themeToggle.Checked);
 
         return menu;
     }

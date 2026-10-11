@@ -48,6 +48,15 @@ public sealed class DesignSurface : Element
     /// <summary>Inspector edits on controls already in the file. Save emits these even when the property was absent from source.</summary>
     internal HashSet<(string ControlKey, string Property)> EditedProperties { get; } = new();
 
+    /// <summary>Children whose grid cell the user set this session. Save writes <c>SetPlacement</c> only for these.</summary>
+    internal HashSet<string> EditedGridPlacements { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Controls whose stacking order the user changed this session. Save reorders existing <c>Controls.Add</c> names to match.</summary>
+    internal HashSet<string> ZOrderEditedControls { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Control renames this session, in order, from the name still written in the file to the live name.</summary>
+    internal List<(string From, string To)> PendingRenames { get; } = new();
+
     /// <summary>Control names referenced or declared in this file's <c>InitializeComponent</c> (and
     /// field initializers). Save may patch these; see <see cref="ExternallyComposedControlNames"/>.</summary>
     internal HashSet<string> FilePersistedControlNames { get; } = new(StringComparer.Ordinal);
@@ -124,13 +133,38 @@ public sealed class DesignSurface : Element
             for (var parent = target.Parent as ElementBase; parent != null; parent = parent.Parent as ElementBase)
             {
                 if (CanAcceptNewChildrenInThisDocument(parent))
-                    return parent;
+                    return ResolveTabViewDropTarget(parent);
             }
 
             return _root;
         }
 
-        return CanAcceptNewChildrenInThisDocument(target) ? target : _root;
+        if (!CanAcceptNewChildrenInThisDocument(target))
+            return _root;
+
+        return ResolveTabViewDropTarget(target);
+    }
+
+    /// <summary>TabView pages share the same content bounds; drops must land on the selected page
+    /// (or stay on a control already inside it), never as a sibling of every page.</summary>
+    private static ElementBase ResolveTabViewDropTarget(ElementBase target)
+    {
+        if (target is TabView tabView)
+            return tabView.GetPageAt(tabView.SelectedIndex) ?? tabView;
+
+        for (var current = target; current != null; current = current.Parent as ElementBase)
+        {
+            if (current.Parent is not TabView host || current is not Container)
+                continue;
+
+            var selected = host.GetPageAt(host.SelectedIndex);
+            if (selected != null && !ReferenceEquals(current, selected))
+                return selected;
+
+            return target;
+        }
+
+        return target;
     }
 
     internal ElementBase ResolveEditableTarget(ElementBase control)
@@ -183,6 +217,41 @@ public sealed class DesignSurface : Element
     public event Action? SelectionBoundsChanged;
     public event Action? ZoomChanged;
 
+    /// <summary>When the designed type is a <see cref="Window"/>, the root paints title chrome and
+    /// uses the same top padding as runtime so Dock/Anchor share <c>DisplayRectangle</c>.</summary>
+    internal bool SimulateWindowChrome { get; private set; } = true;
+
+    internal float DesignTitleHeight { get; private set; } = 35f;
+
+    internal bool DesignShowTitle { get; private set; } = true;
+
+    internal void ConfigureDesignHost(
+        bool simulateWindowChrome,
+        string? title = null,
+        bool? showTitle = null,
+        float? titleHeight = null,
+        Thickness? padding = null)
+    {
+        SimulateWindowChrome = simulateWindowChrome;
+        DesignShowTitle = simulateWindowChrome && (showTitle ?? true);
+        if (titleHeight is > 0)
+            DesignTitleHeight = Math.Max(31f, titleHeight.Value);
+        if (title != null)
+            _root.Text = title;
+        ApplyDesignHostChrome(padding);
+    }
+
+    private void ApplyDesignHostChrome(Thickness? importedPadding = null)
+    {
+        var titlePad = DesignShowTitle ? (int)MathF.Ceiling(DesignTitleHeight) : 0;
+        _root.Radius = new Radius(0);
+        _root.Border = new Thickness(1);
+        _root.Padding = importedPadding ?? new Thickness(0, titlePad, 0, 0);
+        _root.ConfigureVisualStyles(styles => styles.Base(b => b
+            .Background(ColorScheme.Surface)
+            .BorderColor(ColorScheme.Outline)), clearExisting: true);
+    }
+
     public DesignSurface()
     {
         Padding = new Thickness(0);
@@ -198,13 +267,11 @@ public sealed class DesignSurface : Element
             Location = new SKPoint(48, 40),
             Size = new SKSize(640, 440),
             Border = new Thickness(1),
-            Radius = new Radius(8),
+            Radius = new Radius(0),
             Padding = new Thickness(0),
             IsAncestorSiteInDesignMode = true,
         };
-        _root.ConfigureVisualStyles(styles => styles.Base(b => b
-            .Background(ColorScheme.Surface.WithAlpha(140))
-            .BorderColor(ColorScheme.Outline.WithAlpha(140))));
+        ApplyDesignHostChrome();
 
         _overlay = new DesignOverlay(this)
         {
@@ -499,7 +566,7 @@ public sealed class DesignSurface : Element
     {
         var control = entry.CreateInstance();
         PrepareForDesign(control);
-        // Deliberately NOT falling back to Text = Name for a control that starts out textless (a
+        // Deliberately NOT falling back to Text = Name for a control that starts out textless (a))
         // plain Container/Grid/FlowLayout etc.) — Text is real content the actual running app (and
         // Preview mode, which renders the live tree exactly as-is) displays, not a design-time-only
         // label; baking the auto-generated name into it leaked "container1"/"grid1"-style names into
@@ -507,6 +574,7 @@ public sealed class DesignSurface : Element
         // Text, and only while this overlay itself is visible) already identifies a selected empty
         // control without touching what it actually renders.
         control.Name = MakeUniqueName(char.ToLowerInvariant(entry.DisplayName[0]) + entry.DisplayName[1..]);
+        NoteEditedProperty(control, "AutoSize");
         if (string.IsNullOrEmpty(control.Text))
             control.Text = control.Name;
 
@@ -522,7 +590,11 @@ public sealed class DesignSurface : Element
             {
                 parentControls.Add(control);
                 if (targetGrid != null && gridPlacement is { } placement)
+                {
                     targetGrid.SetPlacement(control, placement.Row, placement.Column, placement.RowSpan, placement.ColumnSpan);
+                    if (placement != GridPlacement.Default)
+                        NoteGridPlacement(control);
+                }
                 RegisterAdded(control);
                 AfterStructureChange();
                 Selection.SelectOnly(group ?? control);
@@ -643,6 +715,10 @@ public sealed class DesignSurface : Element
         {
             if (!child.Visible || Locked.Contains(child) || !IsEditableInThisDocument(child))
                 continue;
+            // Hidden TabView pages keep their children Visible=true; ignore anything under an
+            // invisible ancestor so hit-testing matches what is actually painted.
+            if (!IsVisibleInDesignTree(child))
+                continue;
             if (excluding != null && (ReferenceEquals(child, excluding) || IsDescendantOf(child, excluding)))
                 continue;
             if (!GetDesignSpaceBounds(child).Contains(rootRel))
@@ -663,6 +739,17 @@ public sealed class DesignSurface : Element
         return best ?? ResolveHostTargetAt(logicalPoint, excluding);
     }
 
+    private static bool IsVisibleInDesignTree(ElementBase control)
+    {
+        for (var parent = control.Parent as ElementBase; parent != null; parent = parent.Parent as ElementBase)
+        {
+            if (!parent.Visible)
+                return false;
+        }
+
+        return true;
+    }
+
     /// <summary>When the hit is inside a foreign subtree, select the nearest editable host (e.g. custom <c>Container</c> on the form).</summary>
     private ElementBase? ResolveHostTargetAt(SKPoint logicalPoint, ElementBase? excluding)
     {
@@ -673,7 +760,7 @@ public sealed class DesignSurface : Element
 
         foreach (var child in AllDesignedControls)
         {
-            if (!child.Visible || Locked.Contains(child))
+            if (!child.Visible || Locked.Contains(child) || !IsVisibleInDesignTree(child))
                 continue;
             if (excluding != null && (ReferenceEquals(child, excluding) || IsDescendantOf(child, excluding)))
                 continue;
@@ -952,6 +1039,9 @@ public sealed class DesignSurface : Element
         if (control.Dock == DockStyle.None)
             control.Anchor = AnchorStyles.Top | AnchorStyles.Left;
         MarkDesignMode(control);
+
+        if (control is TabView tabView)
+            tabView.SyncPageVisibility();
     }
 
     /// <summary>
@@ -1082,6 +1172,7 @@ public sealed class DesignSurface : Element
         ControlCatalog.ApplyDesignDefaults(clone);
         PrepareForDesign(clone);
         clone.Name = MakeUniqueName(source.GetType().Name.ToLowerInvariant());
+        NoteEditedProperty(clone, "AutoSize");
         clone.Text = source.Text;
         clone.Size = source.Size;
         clone.BackColor = source.BackColor;
@@ -1142,6 +1233,15 @@ public sealed class DesignSurface : Element
         if (before.All(kv => kv.Value == after[kv.Key]))
             return;
 
+        foreach (var (control, beforeRect) in before)
+        {
+            var afterRect = after[control];
+            if (beforeRect.Location != afterRect.Location)
+                NoteEditedProperty(control, "Location");
+            if (beforeRect.Size != afterRect.Size)
+                NoteEditedProperty(control, "Size");
+        }
+
         Commands.Push(new DelegateCommand(
             label,
             () => { ApplyBounds(after); },
@@ -1178,12 +1278,105 @@ public sealed class DesignSurface : Element
         try { newValue = descriptor.GetValue(component); }
         catch { return; }
 
+        var oldName = string.Empty;
+        var newName = string.Empty;
+        var renamed = false;
+        if (descriptor.Name == "Name"
+            && component is ElementBase renamedElement
+            && !ReferenceEquals(renamedElement, _root)
+            && oldValue is string fromName
+            && newValue is string toName
+            && fromName.Length > 0
+            && toName.Length > 0
+            && !string.Equals(fromName, toName, StringComparison.Ordinal))
+        {
+            renamed = true;
+            oldName = fromName;
+            newName = toName;
+            RememberRename(oldName, newName);
+        }
+
         NoteInspectorEdit(component, descriptor.Name);
         ApplyAfterPropertyEdit(component, descriptor.Name);
         Commands.Push(new DelegateCommand(
-            $"Edit {descriptor.Name}",
-            () => { TrySetValue(descriptor, component, newValue); ApplyAfterPropertyEdit(component, descriptor.Name); AfterStructureChange(); },
-            () => { TrySetValue(descriptor, component, oldValue); ApplyAfterPropertyEdit(component, descriptor.Name); AfterStructureChange(); }));
+            renamed ? $"Rename {oldName} to {newName}" : $"Edit {descriptor.Name}",
+            () =>
+            {
+                TrySetValue(descriptor, component, newValue);
+                if (renamed)
+                    RememberRename(oldName!, newName!);
+                ApplyAfterPropertyEdit(component, descriptor.Name);
+                AfterStructureChange();
+            },
+            () =>
+            {
+                TrySetValue(descriptor, component, oldValue);
+                if (renamed)
+                    UndoRename(newName!, oldName!);
+                ApplyAfterPropertyEdit(component, descriptor.Name);
+                AfterStructureChange();
+            }));
+    }
+
+    private void RememberRename(string from, string to)
+    {
+        RetargetControlName(from, to);
+        PendingRenames.Add((from, to));
+    }
+
+    private void UndoRename(string from, string to)
+    {
+        RetargetControlName(from, to);
+        for (var i = PendingRenames.Count - 1; i >= 0; i--)
+        {
+            if (PendingRenames[i].From == to && PendingRenames[i].To == from)
+            {
+                PendingRenames.RemoveAt(i);
+                break;
+            }
+        }
+    }
+
+    private void RetargetControlName(string from, string to)
+    {
+        void Move(HashSet<string> names)
+        {
+            if (!names.Remove(from))
+                return;
+            names.Add(to);
+        }
+
+        Move(AddedControlNames);
+        Move(DeletedControlNames);
+        Move(FilePersistedControlNames);
+        Move(ExternallyComposedControlNames);
+        Move(EditedGridPlacements);
+        Move(ZOrderEditedControls);
+
+        foreach (var entry in EditedProperties.Where(item => item.ControlKey == from).ToList())
+        {
+            EditedProperties.Remove(entry);
+            EditedProperties.Add((to, entry.Property));
+        }
+
+        for (var i = 0; i < EventWires.Count; i++)
+        {
+            var wire = EventWires[i];
+            if (wire.ControlName != from)
+                continue;
+            EventWires[i] = new EventWire(to, wire.EventName, wire.Handler);
+        }
+
+        for (var i = 0; i < ControlBindings.Count; i++)
+        {
+            var binding = ControlBindings[i];
+            var controlName = binding.ControlName == from ? to : binding.ControlName;
+            var source = binding.SourceControl == from ? to : binding.SourceControl;
+            if (controlName == binding.ControlName && source == binding.SourceControl)
+                continue;
+            ControlBindings[i] = new ControlBinding(
+                controlName, binding.TargetProperty, source, binding.SourceType, binding.SourceProperty, binding.TwoWay);
+        }
     }
 
     /// <summary>
@@ -1194,16 +1387,33 @@ public sealed class DesignSurface : Element
         propertyName is "Location" or "Size" or "Dock" or "Anchor" or "Visible"
             or "Width" or "Height" or "Bounds" or "AutoSize" or "AutoSizeMode";
 
-    private void NoteInspectorEdit(object component, string propertyName)
+    internal void NoteGridPlacement(ElementBase child)
     {
-        if (component is not ElementBase element)
-            return;
+        if (!string.IsNullOrEmpty(child.Name))
+            EditedGridPlacements.Add(child.Name);
+    }
 
+    internal void NoteZOrderEdited(ElementBase control)
+    {
+        if (!string.IsNullOrEmpty(control.Name))
+            ZOrderEditedControls.Add(control.Name);
+    }
+
+    internal void NoteEditedProperty(ElementBase element, string propertyName)
+    {
         var key = ReferenceEquals(element, _root) ? string.Empty : element.Name ?? string.Empty;
         if (key.Length == 0 && !ReferenceEquals(element, _root))
             return;
 
         EditedProperties.Add((key, propertyName));
+    }
+
+    private void NoteInspectorEdit(object component, string propertyName)
+    {
+        if (component is not ElementBase element)
+            return;
+
+        NoteEditedProperty(element, propertyName);
     }
 
     private void ApplyAfterPropertyEdit(object component, string propertyName)
@@ -1309,6 +1519,7 @@ public sealed class DesignSurface : Element
     public new void BringToFront(ElementBase control)
     {
         var old = control.ZOrder;
+        NoteZOrderEdited(control);
         Commands.Execute(new DelegateCommand(
             "Bring to front",
             () => { control.BringToFront(); Invalidate(); },
@@ -1318,6 +1529,7 @@ public sealed class DesignSurface : Element
     public new void SendToBack(ElementBase control)
     {
         var old = control.ZOrder;
+        NoteZOrderEdited(control);
         Commands.Execute(new DelegateCommand(
             "Send to back",
             () => { control.SendToBack(); Invalidate(); },
@@ -1342,6 +1554,9 @@ public sealed class DesignSurface : Element
         // Bring to front/Send to back), even though nothing about the actual stacking order moved.
         if (newOrderTopmostFirst.OrderByDescending(c => oldZ[c]).SequenceEqual(newOrderTopmostFirst))
             return;
+
+        foreach (var control in newOrderTopmostFirst)
+            NoteZOrderEdited(control);
 
         Commands.Execute(new DelegateCommand(
             "Reorder layers",
@@ -1462,6 +1677,9 @@ public sealed class DesignSurface : Element
     {
         private readonly DesignSurface _s;
         private readonly SKPaint _grid = new() { IsAntialias = false, Style = SKPaintStyle.Stroke };
+        private readonly SKPaint _chromeFill = new() { IsAntialias = false, Style = SKPaintStyle.Fill };
+        private readonly SKPaint _chromeStroke = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round };
+        private readonly SKPaint _chromeText = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
 
         public DesignRootCanvas(DesignSurface surface) => _s = surface;
 
@@ -1470,6 +1688,7 @@ public sealed class DesignSurface : Element
         public override void OnPaint(SKCanvas canvas)
         {
             base.OnPaint(canvas);
+            PaintWindowChrome(canvas);
 
             if (!_s.ShowGrid)
                 return;
@@ -1508,10 +1727,56 @@ public sealed class DesignSurface : Element
             }
         }
 
+        private void PaintWindowChrome(SKCanvas canvas)
+        {
+            if (!_s.SimulateWindowChrome || !_s.DesignShowTitle)
+                return;
+
+            var titleH = _s.DesignTitleHeight;
+            if (titleH <= 0 || Width <= 0)
+                return;
+
+            var fore = ColorScheme.ForeColor;
+            var iconW = 44f;
+            var glyph = 5f;
+
+            _chromeFill.Color = ColorScheme.Surface;
+            canvas.DrawRect(0, 0, Width, titleH, _chromeFill);
+
+            _chromeStroke.Color = ColorScheme.Outline.WithAlpha(70);
+            _chromeStroke.StrokeWidth = 1f / Math.Max(0.01f, _s.Zoom);
+            canvas.DrawLine(0, titleH, Width, titleH, _chromeStroke);
+
+            var title = string.IsNullOrEmpty(Text) ? "Window" : Text;
+            _chromeText.Color = fore;
+            var font = Font;
+            var metrics = font.Metrics;
+            var textY = titleH / 2f - (metrics.Ascent + metrics.Descent) / 2f;
+            canvas.DrawText(title, 16f, textY, font, _chromeText);
+
+            _chromeStroke.Color = fore;
+            _chromeStroke.StrokeWidth = 1.1f;
+
+            var closeLeft = Width - iconW;
+            var maxLeft = closeLeft - iconW;
+            var minLeft = maxLeft - iconW;
+            var midY = titleH / 2f;
+
+            canvas.DrawLine(minLeft + iconW / 2f - glyph, midY, minLeft + iconW / 2f + glyph, midY, _chromeStroke);
+            canvas.DrawRect(maxLeft + iconW / 2f - glyph, midY - glyph, glyph * 2f, glyph * 2f, _chromeStroke);
+            canvas.DrawLine(closeLeft + iconW / 2f - glyph, midY - glyph, closeLeft + iconW / 2f + glyph, midY + glyph, _chromeStroke);
+            canvas.DrawLine(closeLeft + iconW / 2f - glyph, midY + glyph, closeLeft + iconW / 2f + glyph, midY - glyph, _chromeStroke);
+        }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)
+            {
                 _grid.Dispose();
+                _chromeFill.Dispose();
+                _chromeStroke.Dispose();
+                _chromeText.Dispose();
+            }
             base.Dispose(disposing);
         }
     }
@@ -1865,6 +2130,7 @@ public sealed class DesignSurface : Element
                 if (tabIndex >= 0)
                 {
                     tabView.SelectedIndex = tabIndex;
+                    tabView.SyncPageVisibility();
                     _s.Selection.SelectOnly(tabView);
                     Invalidate();
                     return;

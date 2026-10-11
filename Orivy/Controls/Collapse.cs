@@ -21,9 +21,11 @@ public class Collapse : Container
         Padding = new Thickness(14, 46, 14, 0);
         Radius = new Radius(12);
         Border = new Thickness(1);
-        BackColor = ColorScheme.Surface;
-        BorderColor = ColorScheme.Outline.WithAlpha(90);
         HeaderText = "Collapse";
+        ConfigureVisualStyles(styles => styles
+            .Base(b => b
+                .Background(ColorScheme.Surface)
+                .BorderColor(ColorScheme.Outline.WithAlpha(90))));
 
         _animation = new AnimationManager(true)
         {

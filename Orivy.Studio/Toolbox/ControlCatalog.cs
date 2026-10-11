@@ -83,6 +83,7 @@ public static class ControlCatalog
     private static readonly Dictionary<string, string> Descriptions = new(StringComparer.Ordinal)
     {
         [nameof(Button)] = "Clickable push button with visual states.",
+        ["ButtonGroup"] = "Segmented button group (single selection).",
         [nameof(TextBox)] = "Single or multi-line text input.",
         [nameof(CheckBox)] = "Boolean check box with label.",
         [nameof(ComboBox)] = "Drop-down selection list.",
@@ -114,6 +115,7 @@ public static class ControlCatalog
         [nameof(TabView)] = new(300, 200),
         [nameof(ColorPicker)] = new(300, 340),
         ["SplitContainer"] = new(300, 200),
+        ["ButtonGroup"] = new(220, 36),
     };
 
     public static IReadOnlyList<ControlEntry> Discover()
@@ -192,6 +194,10 @@ public static class ControlCatalog
             case TabView tabs when tabs.Count == 0:
                 tabs.Controls.Add(new Container { Text = "Tab 1" });
                 tabs.Controls.Add(new Container { Text = "Tab 2" });
+                tabs.SyncPageVisibility();
+                break;
+            case ButtonGroup group when group.Items.Count == 0:
+                group.Items.AddRange(new[] { "One", "Two", "Three" });
                 break;
         }
     }

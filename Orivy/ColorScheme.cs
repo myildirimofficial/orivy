@@ -209,8 +209,9 @@ public static class ColorScheme
     }
 
     /// <summary>
-    /// Gets or sets the dark mode state. 
-    /// Setting this triggers an animated background transition to the default light/dark colors.
+    /// Gets or sets the dark mode state.
+    /// The semantic flag flips immediately so native chrome, <see cref="SurfaceAdjust"/>, and
+    /// <c>IsDarkMode</c> checks agree from the first frame. Only <see cref="Surface"/> lerps.
     /// </summary>
     public static bool IsDarkMode
     {
@@ -219,6 +220,10 @@ public static class ColorScheme
         {
             var target = value ? new SKColor(28, 28, 30) : new SKColor(250, 250, 250);
             if (_isDark == value && ColorsClose(_currentBackground, target)) return;
+            _isDark = value;
+            _progress = 0;
+            RecalculateDerivedColors();
+            RaiseThemeChanged();
             StartBackgroundTransition(target);
         }
     }
@@ -302,6 +307,12 @@ public static class ColorScheme
     /// Gets the cached shadow color (white with alpha in dark mode, black with alpha in light mode).
     /// </summary>
     public static SKColor ShadowColor => _shadowColor;
+
+    /// <summary>
+    /// True while <see cref="Surface"/> is still interpolating after an <see cref="IsDarkMode"/> or
+    /// <see cref="StartThemeTransition"/> call. Semantic <see cref="IsDarkMode"/> is already final.
+    /// </summary>
+    public static bool IsBackgroundTransitioning => _progress < 1;
 
     // --- Public Methods ---
 
@@ -421,6 +432,7 @@ public static class ColorScheme
         var id = ++_transitionId;
         _backgroundFrom = _currentBackground;
         _backgroundTo = target;
+        _progress = 0;
 
         var sw = Stopwatch.StartNew();
         const long durationTicks = 220 * TimeSpan.TicksPerMillisecond;
@@ -435,35 +447,37 @@ public static class ColorScheme
 
             _currentBackground = Lerp(_backgroundFrom, _backgroundTo, t);
 
-            bool newIsDark = RelativeLuminance(_currentBackground) < .45;
-            if (_isDark != newIsDark)
-            {
-                _isDark = newIsDark;
-            }
-
             RecalculateDerivedColors();
-            RaiseThemeChanged();
+            RaiseThemeChangedOnUi();
 
-            // ConfigureAwait(false) prevents context switching overhead
+            // ConfigureAwait(false) hops off the UI thread; RaiseThemeChangedOnUi posts back.
             await Task.Delay(16).ConfigureAwait(false);
         }
 
-        // Ensure final state is exact
+        // Ensure final state is exact. Keep the semantic dark flag the setter already applied;
+        // do not re-derive it from luminance mid-palette (that desynced DWM from IsDarkMode).
         _progress = 1;
         _currentBackground = target;
-        _isDark = RelativeLuminance(target) < .45;
-        
+
         RecalculateDerivedColors();
-        RaiseThemeChanged();
+        RaiseThemeChangedOnUi();
     }
 
     /// <summary>
-    /// Invokes the <see cref="ThemeChanged"/> event safely.
-    /// Avoids GetInvocationList() to prevent array allocations and reduce GC pressure.
+    /// Invokes the <see cref="ThemeChanged"/> event on the caller thread.
+    /// Used when the setter already runs on the UI thread (toolbar, menu).
     /// </summary>
     private static void RaiseThemeChanged()
     {
         ThemeChanged?.Invoke(null, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Posts <see cref="ThemeChanged"/> to the window thread after a background lerp tick.
+    /// </summary>
+    private static void RaiseThemeChangedOnUi()
+    {
+        Application.PostToUiThread(() => ThemeChanged?.Invoke(null, EventArgs.Empty));
     }
 
     /// <summary>

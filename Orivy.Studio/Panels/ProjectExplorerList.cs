@@ -65,12 +65,10 @@ public sealed class ProjectExplorerList : Element
         Controls.Add(_tree);
 
         RefreshIcons();
-        var iconsDark = ColorScheme.IsDarkMode;
         ColorScheme.ThemeChanged += (_, _) =>
         {
-            if (iconsDark == ColorScheme.IsDarkMode)
+            if (ColorScheme.IsBackgroundTransitioning)
                 return;
-            iconsDark = ColorScheme.IsDarkMode;
             RefreshIcons();
         };
     }

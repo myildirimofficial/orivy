@@ -101,12 +101,13 @@ public class TextBox : ElementBase
                     .BorderColor(ColorScheme.Primary.WithAlpha(108)))
                 .OnFocused(rule => rule
                     .Background(ColorScheme.Surface.Brightness(0.02f))
-                    .Border(2)
+                    .Border(1)
                     .BorderColor(ColorScheme.Primary.WithAlpha(232))
-                    .Shadow(new BoxShadow(0f, 0f, 0f, 3, ColorScheme.Primary.WithAlpha(46))))
+                    .Shadow(BoxShadow.None))
                 .OnInvalid(rule => rule
+                    .Border(1)
                     .BorderColor(SKColors.IndianRed.WithAlpha(210))
-                    .Shadow(new BoxShadow(0f, 0f, 0f, 3, SKColors.IndianRed.WithAlpha(38))))
+                    .Shadow(BoxShadow.None))
                 .OnDisabled(rule => rule
                     .Background(ColorScheme.SurfaceVariant.WithAlpha(220))
                     .Foreground(ColorScheme.ForeColor.WithAlpha(138))
@@ -165,6 +166,7 @@ public class TextBox : ElementBase
 
     protected override bool ShouldRenderDefaultText => false;
 
+    [Category("Behavior")]
     [DefaultValue(false)]
     public bool Multiline
     {
@@ -185,6 +187,7 @@ public class TextBox : ElementBase
         }
     }
 
+    [Category("Behavior")]
     [DefaultValue(false)]
     public bool ReadOnly
     {
@@ -200,6 +203,7 @@ public class TextBox : ElementBase
         }
     }
 
+    [Category("Behavior")]
     [DefaultValue(true)]
     public bool AcceptsReturn
     {
@@ -207,6 +211,7 @@ public class TextBox : ElementBase
         set => _acceptsReturn = value;
     }
 
+    [Category("Behavior")]
     [DefaultValue(false)]
     public bool AcceptsTab
     {
@@ -214,6 +219,7 @@ public class TextBox : ElementBase
         set => _acceptsTab = value;
     }
 
+    [Category("Behavior")]
     [DefaultValue(false)]
     public bool PasswordMode
     {
@@ -229,6 +235,7 @@ public class TextBox : ElementBase
         }
     }
 
+    [Category("Behavior")]
     [DefaultValue('*')]
     public char PasswordChar
     {
@@ -245,6 +252,7 @@ public class TextBox : ElementBase
         }
     }
 
+    [Category("Appearance")]
     [DefaultValue("")]
     public string PlaceholderText
     {
@@ -261,6 +269,7 @@ public class TextBox : ElementBase
         }
     }
 
+    [Category("Appearance")]
     [DefaultValue(typeof(TextWrap), nameof(TextWrap.WordWrap))]
     public override TextWrap WrapMode
     {
@@ -275,6 +284,7 @@ public class TextBox : ElementBase
         }
     }
 
+    [Category("Appearance")]
     [DefaultValue(DefaultTextZoomFactor)]
     public float TextZoomFactor
     {
@@ -282,6 +292,7 @@ public class TextBox : ElementBase
         set => SetTextZoomFactor(value);
     }
 
+    [Category("Appearance")]
     [DefaultValue(DefaultTextZoomStep)]
     public float TextZoomStep
     {
@@ -292,6 +303,7 @@ public class TextBox : ElementBase
     [Browsable(false)]
     public int TextZoomPercent => (int)Math.Round(_textZoomFactor * 100f);
 
+    [Category("Behavior")]
     [DefaultValue(0)]
     public int MaxLength
     {
@@ -345,6 +357,7 @@ public class TextBox : ElementBase
     [Browsable(false)]
     public string[] Lines => Text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
 
+    [Category("Appearance")]
     [DefaultValue(typeof(TextBoxCaretMode), nameof(TextBoxCaretMode.Bar))]
     public TextBoxCaretMode CaretMode
     {

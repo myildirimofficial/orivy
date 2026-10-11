@@ -341,7 +341,7 @@ public class ElementCollection : ArrangedElementCollection, IList, ICloneable
     ///     changing
     ///     the child control indices.
     /// </summary>
-    internal virtual void SetChildIndexInternal(IElement child, int newIndex)
+    internal virtual void SetChildIndexInternal(ElementBase child, int newIndex)
     {
         // Sanity check parameters
         ArgumentNullException.ThrowIfNull(child);
@@ -355,7 +355,7 @@ public class ElementCollection : ArrangedElementCollection, IList, ICloneable
         MoveElement(child, currentIndex, newIndex);
         child.UpdateZOrder();
 
-        //LayoutTransaction.DoLayout(Owner, child, PropertyNames.ChildIndex);
+        LayoutTransaction.DoLayout(Owner, child, PropertyNames.ChildIndex);
     }
 
     /// <summary>
@@ -369,10 +369,66 @@ public class ElementCollection : ArrangedElementCollection, IList, ICloneable
         SetChildIndexInternal(child, newIndex);
     }
 
-    internal void Insert(int index, ElementBase value)
+    /// <summary>
+    /// Inserts a child at <paramref name="index"/>. Unlike <see cref="Add"/> then
+    /// <see cref="SetChildIndex"/>, the parent sees the final index inside
+    /// <see cref="ElementBase.OnControlAdded"/> so hosts such as TabView can keep page order aligned.
+    /// For <see cref="TabView"/>, <paramref name="index"/> is the page index (0 = first tab), not the
+    /// raw <c>Controls</c> slot — scroll bars and other non-page children are skipped.
+    /// </summary>
+    public void Insert(int index, ElementBase value)
     {
-        Add(value);
-        SetChildIndexInternal(value, index);
+        if (value is null)
+            return;
+
+        if (value.Parent == Owner)
+        {
+            index = Owner.ResolveChildInsertIndex(index, value);
+            SetChildIndexInternal(value, index);
+            return;
+        }
+
+        value.Parent?.Controls.Remove(value);
+
+        index = Owner.ResolveChildInsertIndex(index, value);
+
+        if (index < 0 || index > Count)
+            index = Count;
+
+        Owner.SuspendLayout();
+        try
+        {
+            InnerList.Insert(index, value);
+
+            value.Parent = Owner;
+            Owner.OnControlAdded(new ElementEventArgs(value));
+
+            if (value.TabIndex == -1)
+            {
+                var nextTabIndex = 0;
+                for (var c = 0; c < Count; c++)
+                {
+                    if (ReferenceEquals(this[c], value))
+                        continue;
+
+                    var t = this[c].TabIndex;
+                    if (nextTabIndex <= t)
+                        nextTabIndex = t + 1;
+                }
+
+                value.TabIndex = nextTabIndex;
+            }
+
+            _maxZOrder++;
+            value.ZOrder = _maxZOrder;
+
+            if (Owner.FocusedElement == null && value.TabStop)
+                Owner.FocusedElement = value;
+        }
+        finally
+        {
+            Owner.ResumeLayout(true);
+        }
     }
 
     private class ControlCollectionEnumerator : IEnumerator

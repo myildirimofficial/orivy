@@ -268,6 +268,7 @@ public partial class Window : WindowBase
     private float _iconWidthDPI => _iconWidth * ScaleFactor;
     private float _symbolSizeDPI => _symbolSize * ScaleFactor;
 
+    [Category("Window")]
     [DefaultValue(42)]
     [Description("Gets or sets the header bar icon width")]
     public float IconWidth
@@ -281,13 +282,16 @@ public partial class Window : WindowBase
         }
     }
 
+    [Category("Window")]
     [DefaultValue(true)]
     [Description("Gets or sets form can movable")]
     public bool Movable { get; set; } = true;
 
+    [Category("Window")]
     [DefaultValue(false)]
     public bool AllowAddControlOnTitle { get; set; }
 
+    [Category("Window")]
     [DefaultValue(false)]
     public bool ExtendBox
     {
@@ -300,6 +304,7 @@ public partial class Window : WindowBase
         }
     }
 
+    [Category("Window")]
     [DefaultValue(24)]
     public float ExtendSymbolSize
     {
@@ -312,6 +317,7 @@ public partial class Window : WindowBase
         }
     }
 
+    [Category("Window")]
     [DefaultValue(null)]
     public ContextMenuStrip ExtendMenu
     {
@@ -339,6 +345,7 @@ public partial class Window : WindowBase
         (_extendMenu?.TryHandleGlobalShortcut(keyData) ?? false) ||
         (FormMenu?.TryHandleGlobalShortcut(keyData) ?? false);
 
+    [Category("Window")]
     [DefaultValue(null)]
     public MenuStrip? TitleBarMenuStrip
     {
@@ -376,6 +383,7 @@ public partial class Window : WindowBase
     /// <summary>
     ///     Gets or sets whether to show the title bar of the form
     /// </summary>
+    [Category("Window")]
     public bool ShowTitle
     {
         get => showTitle;
@@ -394,6 +402,7 @@ public partial class Window : WindowBase
     ///     or <see cref="Icon"/> is null), the left padding used for tabs and
     ///     title text collapses back to zero, eliminating the empty gap.
     /// </summary>
+    [Category("Window")]
     public bool ShowMenuInsteadOfIcon
     {
         get => showMenuInsteadOfIcon;
@@ -413,6 +422,7 @@ public partial class Window : WindowBase
     /// <summary>
     ///     Gets or sets whether to show the title bar of the form
     /// </summary>
+    [Category("Window")]
     public bool DrawTitleBorder
     {
         get => _drawTitleBorder;
@@ -426,6 +436,7 @@ public partial class Window : WindowBase
     /// <summary>
     ///     Whether to show the maximize button of the form
     /// </summary>
+    [Category("Window")]
     public bool MaximizeBox
     {
         get => _maximizeBox;
@@ -444,6 +455,7 @@ public partial class Window : WindowBase
     /// <summary>
     ///     Whether to show the minimize button of the form
     /// </summary>
+    [Category("Window")]
     public bool MinimizeBox
     {
         get => _minimizeBox;
@@ -462,6 +474,7 @@ public partial class Window : WindowBase
     /// <summary>
     ///     Gets or sets the title height
     /// </summary>
+    [Category("Window")]
     public float TitleHeight
     {
         get => _titleHeight;
@@ -474,6 +487,7 @@ public partial class Window : WindowBase
         }
     }
 
+    [Category("Appearance")]
     public SKColor[] Gradient
     {
         get => _gradient;
@@ -488,6 +502,7 @@ public partial class Window : WindowBase
     /// <summary>
     ///     Gets or sets the title color
     /// </summary>
+    [Category("Appearance")]
     [Description("Title color")]
     [DefaultValue(typeof(SKColor), "224, 224, 224")]
     public SKColor TitleColor
@@ -504,8 +519,10 @@ public partial class Window : WindowBase
     /// <summary>
     ///     Draw hatch brush on form
     /// </summary>
+    [Category("Appearance")]
     public bool FullDrawHatch { get; set; }
 
+    [Category("Appearance")]
     public HatchStyle Hatch
     {
         get => _hatch;
@@ -527,10 +544,12 @@ public partial class Window : WindowBase
         set => _stickyBorderTime = value * 10000;
     }
 
+    [Browsable(false)]
     public SKSize CanvasSize =>
         _cacheBitmap == null ? SKSize.Empty : new SKSize(_cacheBitmap.Width, _cacheBitmap.Height);
 
 
+    [Category("Window")]
     public TabView TabView
     {
         get => _tabView;
@@ -777,6 +796,7 @@ public partial class Window : WindowBase
         return _titleBarMenuStrip != null && ReferenceEquals(element, _titleBarMenuStrip);
     }
 
+    [Browsable(false)]
     public SKRectI MaximizedBounds { get; private set; }
 
 
@@ -914,6 +934,10 @@ public partial class Window : WindowBase
         if (_nativeThemeDark != dark)
         {
             _nativeThemeDark = dark;
+            QueueNativeThemeApply();
+        }
+        else if (!ColorScheme.IsBackgroundTransitioning)
+        {
             QueueNativeThemeApply();
         }
 

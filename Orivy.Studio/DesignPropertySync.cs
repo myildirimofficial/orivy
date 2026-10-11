@@ -40,23 +40,22 @@ internal static class DesignPropertySync
 
         var queued = new Dictionary<string, List<StatementSyntax>>(StringComparer.Ordinal);
         var queueOrder = new List<string>();
-        var removeAssignmentIndices = new HashSet<int>();
 
         foreach (var (controlName, control) in live)
         {
             if (!DesignPersistScope.ShouldPersistControlToFile(surface, controlName))
                 continue;
-            changed |= SyncComponent(statements, assignments, initializerProperties, queued, queueOrder, removeAssignmentIndices, surface, controlName, control, filePath);
+            changed |= SyncComponent(statements, assignments, initializerProperties, queued, queueOrder, surface, controlName, control, filePath);
         }
 
-        changed |= SyncComponent(statements, assignments, initializerProperties, queued, queueOrder, removeAssignmentIndices, surface, FormKey, designRoot, filePath);
+        changed |= SyncComponent(statements, assignments, initializerProperties, queued, queueOrder, surface, FormKey, designRoot, filePath);
 
         foreach (var (controlName, control) in live)
         {
             if (!DesignPersistScope.ShouldPersistControlToFile(surface, controlName))
                 continue;
             changed |= DesignCollectionSync.SyncComponent(
-                statements, collectionIndex, queued, queueOrder, surface, controlName, control, $"{controlName}.", filePath);
+                statements, collectionIndex, queued, queueOrder, surface, controlName, control, filePath);
         }
 
         if (queueOrder.Count > 0)
@@ -66,13 +65,6 @@ internal static class DesignPropertySync
                 var at = DesignInteractions.PropertyInsertionIndex(statements, key);
                 statements.InsertRange(at, queued[key]);
             }
-        }
-
-        if (removeAssignmentIndices.Count > 0)
-        {
-            foreach (var index in removeAssignmentIndices.OrderByDescending(i => i))
-                statements.RemoveAt(index);
-            changed = true;
         }
 
         if (!changed)
@@ -89,7 +81,6 @@ internal static class DesignPropertySync
         HashSet<(string ControlKey, string Property)> initializerProperties,
         Dictionary<string, List<StatementSyntax>> queued,
         List<string> queueOrder,
-        HashSet<int> removeAssignmentIndices,
         DesignSurface surface,
         string controlKey,
         ElementBase component,

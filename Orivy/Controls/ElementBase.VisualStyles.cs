@@ -138,12 +138,10 @@ public abstract partial class ElementBase
         if (!_visualStylesEnabled)
             return;
 
-        // Not forceImmediate: a light/dark toggle should cross-fade through each control's own
-        // configured transition (the same one hover/focus already animate through) instead of
-        // every control's colors snapping to the new theme in one instant, uncoordinated cut —
-        // which across a whole window of controls reads as a jarring flash rather than a fluid
-        // switch.
-        RefreshVisualStyles(forceImmediate: false);
+        // ColorScheme already lerps Surface for ~220 ms and raises ThemeChanged every tick.
+        // Restarting each control's 140 ms ease on every tick nests interpolations and flashes.
+        // Snap styles to the current palette so they track the shared lerp.
+        RefreshVisualStyles(forceImmediate: true);
     }
 
     public void ApplyVisualStyleBase(ElementVisualStyle style)
@@ -152,6 +150,7 @@ public abstract partial class ElementBase
 
         var snapshot = _styleBaseSnapshot;
         style.ApplyTo(ref snapshot);
+        ApplyStickyVisualColors(ref snapshot, allowPointerTint: false);
         _styleBaseSnapshot = snapshot;
         _hasVisualStyleBaseOverride = true;
         _styleBaseOverridesWidth |= style.Width.HasValue;
@@ -159,6 +158,62 @@ public abstract partial class ElementBase
         UpdateVisualStylesEnabledState();
 
         RefreshVisualStyles(forceImmediate: true);
+    }
+
+    /// <summary>
+    /// Colors assigned through property setters (designer / InitializeComponent) are sticky across
+    /// theme replay. Style-driven writes go through <see cref="ApplyEffectiveVisualStyle"/> and do
+    /// not mark stickiness, so CheckBox/Radio/Button theme bases keep updating until the user
+    /// assigns a color explicitly.
+    /// </summary>
+    private void MarkStickyBackColor(SKColor color)
+    {
+        if (_isReplayingVisualStyleConfigurations)
+            return;
+
+        _stickyBackColor = true;
+        _stickyBackColorValue = color;
+    }
+
+    private void MarkStickyForeColor(SKColor color)
+    {
+        if (_isReplayingVisualStyleConfigurations)
+            return;
+
+        _stickyForeColor = true;
+        _stickyForeColorValue = color;
+    }
+
+    private void MarkStickyBorderColor(SKColor color)
+    {
+        if (_isReplayingVisualStyleConfigurations)
+            return;
+
+        _stickyBorderColor = true;
+        _stickyBorderColorValue = color;
+    }
+
+    private void ApplyStickyVisualColors(ref ElementVisualStyleSnapshot snapshot, bool allowPointerTint)
+    {
+        if (_stickyBackColor)
+        {
+            var fill = _stickyBackColorValue;
+            if (allowPointerTint && Enabled && fill.Alpha > 0)
+            {
+                if (_isPressed)
+                    fill = fill.Brightness(-0.08f);
+                else if (_isPointerOver)
+                    fill = fill.Brightness(0.06f);
+            }
+
+            snapshot = snapshot.WithBackColor(fill);
+        }
+
+        if (_stickyForeColor)
+            snapshot = snapshot.WithForeColor(_stickyForeColorValue);
+
+        if (_stickyBorderColor)
+            snapshot = snapshot.WithBorderColor(_stickyBorderColorValue);
     }
 
     private void RefreshVisualStyles(bool forceImmediate = false)
@@ -187,6 +242,7 @@ public abstract partial class ElementBase
                 transition = rule.Transition;
         }
 
+        ApplyStickyVisualColors(ref snapshot, allowPointerTint: true);
         return snapshot;
     }
 
