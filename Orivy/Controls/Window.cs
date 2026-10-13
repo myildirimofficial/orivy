@@ -1042,12 +1042,18 @@ public partial class Window : WindowBase
 
             if (ExtendBox)
             {
-                if (MinimizeBox)
-                    _extendBoxRect = SKRect.Create(_minimizeBoxRect.Left - titleIconSize - 16, _controlBoxRect.Top,
-                        _iconWidthDPI, _titleHeightDPI);
-                else
-                    _extendBoxRect = SKRect.Create(_controlBoxRect.Left - titleIconSize - 16, _controlBoxRect.Top,
-                        _iconWidthDPI, _titleHeightDPI);
+                // Place immediately left of minimize/close with the same pitch as other
+                // system buttons — the old (titleIconSize + 16) gap made the hit rect
+                // overlap minimize (~4px at 100% DPI), so clicks often minimized instead.
+                var extendRight = MinimizeBox ? _minimizeBoxRect.Left : _controlBoxRect.Left;
+                _extendBoxRect = SKRect.Create(
+                    extendRight - _iconWidthDPI - 2,
+                    _controlBoxRect.Top,
+                    _iconWidthDPI,
+                    _titleHeightDPI);
+
+                // Reserve trailing title-bar space so tabs / new-tab don't cover the glyph.
+                _controlBoxLeft = _extendBoxRect.Left - 2;
             }
         }
         else
@@ -1190,27 +1196,36 @@ public partial class Window : WindowBase
         if (!ShowTitle)
             return;
 
-        if (_inCloseBox)
+        // Exclusive live hit-test — sticky hover flags can remain true after a tab-drag
+        // MouseMove early-return, which previously made ExtendBox clicks call Close().
+        var hitClose = _controlBoxRect.Contains(e.Location);
+        var hitMax = MaximizeBox && _maximizeBoxRect.Contains(e.Location);
+        var hitMin = MinimizeBox && _minimizeBoxRect.Contains(e.Location);
+        var hitExtend = ExtendBox && _extendBoxRect.Contains(e.Location);
+        var hitFormMenu = showMenuInsteadOfIcon && _formMenuRect.Contains(e.Location);
+
+        _inCloseBox = _inMaxBox = _inMinBox = _inExtendBox = _inFormMenuBox = false;
+
+        if (hitClose)
         {
-            _inCloseBox = false;
             Close();
+            return;
         }
 
-        if (_inMinBox)
+        if (hitMin)
         {
-            _inMinBox = false;
             WindowState = FormWindowState.Minimized;
+            return;
         }
 
-        if (_inMaxBox)
+        if (hitMax)
         {
-            _inMaxBox = false;
             ShowMaximize();
+            return;
         }
 
-        if (_inExtendBox)
+        if (hitExtend)
         {
-            _inExtendBox = false;
             // Force repaint to prevent stale background captures
             Update();
             if (ExtendMenu != null)
@@ -1218,25 +1233,27 @@ public partial class Window : WindowBase
                 var menuSize = ExtendMenu.MeasurePreferredSize();
                 // Open menu centered horizontally under the extend box
                 var centerX = _extendBoxRect.Left + (_extendBoxRect.Width - menuSize.Width) / 2f;
-                ExtendMenu.Show(PointToScreen(new SKPoint(
+                // Pass this as owner — Window.FindForm()/ParentWindow are null for the root.
+                ExtendMenu.Show(this, PointToScreen(new SKPoint(
                     Convert.ToInt32(centerX),
                     Convert.ToInt32(_extendBoxRect.Bottom)
                 )));
             }
             else
                 OnExtendBoxClick?.Invoke(this, EventArgs.Empty);
+            return;
         }
 
-        if (_inFormMenuBox)
+        if (hitFormMenu)
         {
-            _inFormMenuBox = false;
             // Force repaint to prevent stale background captures
             Update();
             if (FormMenu != null)
-                FormMenu.Show(PointToScreen(new SKPoint(Convert.ToInt32(_formMenuRect.Left),
+                FormMenu.Show(this, PointToScreen(new SKPoint(Convert.ToInt32(_formMenuRect.Left),
                     Convert.ToInt32(_formMenuRect.Bottom))));
             else
                 OnFormMenuClick?.Invoke(this, EventArgs.Empty);
+            return;
         }
 
         // Left-button close/new-tab clicks are already raised by ProcessTitleBarMouseDown (new-tab,
@@ -1286,9 +1303,18 @@ public partial class Window : WindowBase
                                     (_tabView.IsPointOverTitleBarCloseButton(e.Location, CreateTitleBarLayoutContext()) ||
                                      _tabView.IsPointOverTitleBarNewTabButton(e.Location, CreateTitleBarLayoutContext()));
 
+        // Exclusive live hit-test (clear + set) so stale hover flags cannot start a form drag
+        // or let title-bar tabs steal the click from system buttons.
+        _inCloseBox = _controlBoxRect.Contains(e.Location);
+        _inMaxBox = MaximizeBox && _maximizeBoxRect.Contains(e.Location);
+        _inMinBox = MinimizeBox && _minimizeBoxRect.Contains(e.Location);
+        _inExtendBox = ExtendBox && _extendBoxRect.Contains(e.Location);
+        _inFormMenuBox = showMenuInsteadOfIcon && _formMenuRect.Contains(e.Location);
+
         var inControlBox = _inCloseBox || _inMaxBox || _inMinBox || _inExtendBox || _inFormMenuBox || inTitleBarMenu || inTitleBarButtons;
 
-        if (UsesTitleBarTabs && _tabView != null &&
+        // System buttons (incl. ExtendBox) win over title-bar tab hit-testing.
+        if (!inControlBox && UsesTitleBarTabs && _tabView != null &&
             _tabView.ProcessTitleBarMouseDown(e, CreateTitleBarLayoutContext()))
         {
             SetCapture(Handle);

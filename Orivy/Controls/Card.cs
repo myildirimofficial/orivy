@@ -46,6 +46,16 @@ public class Card : Container
         }
     }
 
+    public override string Text
+    {
+        get => base.Text;
+        set
+        {
+            base.Text = value;
+            Title = value;
+        }
+    }
+
     [DefaultValue("")]
     public string Title
     {
@@ -148,7 +158,7 @@ public class Card : Container
         Controls.Add(content);
     }
 
-    public override void  OnPaint(SKCanvas canvas)
+    public override void OnPaint(SKCanvas canvas)
     {
         base.OnPaint(canvas);
         RenderHeader(canvas);
@@ -176,13 +186,13 @@ public class Card : Container
         return new SKSize(size.Width, MathF.Ceiling(size.Height + headerHeight));
     }
 
-    public override void  OnControlAdded(ElementEventArgs e)
+    public override void OnControlAdded(ElementEventArgs e)
     {
         base.OnControlAdded(e);
         InvalidateMeasure();
     }
 
-    public override void  OnControlRemoved(ElementEventArgs e)
+    public override void OnControlRemoved(ElementEventArgs e)
     {
         base.OnControlRemoved(e);
         InvalidateMeasure();

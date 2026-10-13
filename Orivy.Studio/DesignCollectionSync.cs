@@ -40,7 +40,7 @@ internal static class DesignCollectionSync
 
         foreach (PropertyDescriptor descriptor in TypeDescriptor.GetProperties(component))
         {
-            if (!DesignPersistableProperties.IsCollectionProperty(descriptor) || descriptor.IsReadOnly)
+            if (!DesignPersistableProperties.IsCollectionProperty(descriptor))
                 continue;
             if (!DesignPersistableProperties.ShouldShowInInspector(descriptor))
                 continue;
@@ -50,6 +50,12 @@ internal static class DesignCollectionSync
             catch { continue; }
 
             if (collectionObject is not IEnumerable enumerable)
+                continue;
+
+            // Get-only wrappers such as ButtonGroup.Items / ListBox.Items are fine when the live
+            // collection itself is a mutable IList — skipping IsReadOnly here was leaving Save
+            // unable to rewrite Items.Add after a PropertyGrid edit.
+            if (descriptor.IsReadOnly && collectionObject is not IList { IsReadOnly: false })
                 continue;
 
             var liveItems = new List<object?>();

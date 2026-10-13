@@ -98,6 +98,11 @@ public sealed class DesignSurface : Element
         if (ExternallyComposedElements.Contains(control))
             return false;
 
+        // ButtonGroup manages segmented buttons through Items; the auto-generated Button
+        // children must not appear in layers, hit-testing, or the inspector selection.
+        if (control.Parent is ElementBase parentHost && IsButtonGroupHost(parentHost))
+            return false;
+
         for (var parent = control.Parent as ElementBase; parent != null && !ReferenceEquals(parent, _root); parent = parent.Parent as ElementBase)
         {
             if (ForeignCompositionHosts.Contains(parent))
@@ -109,6 +114,16 @@ public sealed class DesignSurface : Element
         return true;
     }
 
+    /// <summary>True for <see cref="ButtonGroup"/> and any <c>ButtonGroup&lt;T&gt;</c>.</summary>
+    internal static bool IsButtonGroupHost(ElementBase control)
+    {
+        if (control is ButtonGroup)
+            return true;
+
+        var type = control.GetType();
+        return type.IsGenericType && type.GetGenericTypeDefinition() == typeof(ButtonGroup<>);
+    }
+
     /// <summary>Hosted custom-control roots can be selected/moved here, but not receive new children from this document.</summary>
     internal bool CanAcceptNewChildrenInThisDocument(ElementBase target)
     {
@@ -116,6 +131,11 @@ public sealed class DesignSurface : Element
             return true;
 
         if (ForeignCompositionHosts.Contains(target))
+            return false;
+
+        // ButtonGroup owns its buttons via Items — nesting toolbox drops into it leaves orphan
+        // children the group refuses to manage. Edit Items in the inspector instead.
+        if (IsButtonGroupHost(target))
             return false;
 
         return IsEditableInThisDocument(target);
@@ -169,6 +189,9 @@ public sealed class DesignSurface : Element
 
     internal ElementBase ResolveEditableTarget(ElementBase control)
     {
+        if (control.Parent is ElementBase groupHost && IsButtonGroupHost(groupHost) && IsEditableInThisDocument(groupHost))
+            return groupHost;
+
         if (IsEditableInThisDocument(control))
             return control;
 
@@ -793,6 +816,10 @@ public sealed class DesignSurface : Element
 
     private static IEnumerable<ElementBase> NestedDesignedChildrenOf(ElementBase control)
     {
+        // Items-driven hosts expose only the group in the design tree; auto buttons stay paint-only.
+        if (IsButtonGroupHost(control))
+            yield break;
+
         foreach (var c in control.Controls)
             if (c is ElementBase child and not ScrollBar)
                 yield return child;
@@ -1068,42 +1095,104 @@ public sealed class DesignSurface : Element
         if (doomed.Count == 0)
             return;
 
-        var wasGroup = doomed.Where(Groups.Contains).ToList();
-        var names = new HashSet<string>(doomed.Select(control => control.Name).Where(name => !string.IsNullOrEmpty(name))!);
-        var wires = EventWires.Where(wire => names.Contains(wire.ControlName)).ToList();
-        var bindings = ControlBindings.Where(binding => names.Contains(binding.ControlName) || (binding.SourceControl != null && names.Contains(binding.SourceControl))).ToList();
+        // Nested survivors of a deleted parent must leave with it — otherwise fields, events, and
+        // bindings for children stay in the designer source after Save.
+        var doomedSet = new HashSet<ElementBase>(doomed);
+        foreach (var root in doomed.ToList())
+        {
+            foreach (var nested in AllNestedDesignedControls(root))
+                doomedSet.Add(nested);
+        }
+
+        var doomedList = doomedSet.ToList();
+        var parents = doomedList.ToDictionary(
+            control => control,
+            control => control.Parent as ElementBase ?? _root);
+        var wasGroup = doomedList.Where(Groups.Contains).ToList();
+        var wasLocked = doomedList.Where(Locked.Contains).ToList();
+        var names = new HashSet<string>(
+            doomedList.Select(control => control.Name).Where(name => !string.IsNullOrEmpty(name))!,
+            StringComparer.Ordinal);
+        var wires = EventWires
+            .Where(wire => names.Contains(wire.ControlName))
+            .ToList();
+        var bindings = ControlBindings
+            .Where(binding => names.Contains(binding.ControlName)
+                || (binding.SourceControl != null && names.Contains(binding.SourceControl)))
+            .ToList();
+        var editedProperties = EditedProperties.Where(entry => names.Contains(entry.ControlKey)).ToList();
+        var editedGrid = EditedGridPlacements.Where(names.Contains).ToList();
+        var zOrderEdited = ZOrderEditedControls.Where(names.Contains).ToList();
+        var pendingRenames = PendingRenames
+            .Where(rename => names.Contains(rename.From) || names.Contains(rename.To))
+            .ToList();
 
         Commands.Execute(new DelegateCommand(
             doomed.Count == 1 ? $"Delete {doomed[0].Name}" : $"Delete {doomed.Count} controls",
             () =>
             {
-                foreach (var control in doomed)
+                Selection.Clear();
+                // Remove deepest children first so parent.Controls.Remove does not leave orphans.
+                foreach (var control in doomedList.OrderByDescending(DepthFromRoot))
                 {
-                    Selection.Remove(control);
-                    _root.Controls.Remove(control);
+                    var parent = parents[control];
+                    parent.Controls.Remove(control);
                     Groups.Remove(control);
+                    Locked.Remove(control);
                     if (!string.IsNullOrEmpty(control.Name) && !AddedControlNames.Remove(control.Name))
                         DeletedControlNames.Add(control.Name);
                 }
+
                 EventWires.RemoveAll(wire => wires.Contains(wire));
                 ControlBindings.RemoveAll(binding => bindings.Contains(binding));
+                foreach (var entry in editedProperties)
+                    EditedProperties.Remove(entry);
+                foreach (var name in editedGrid)
+                    EditedGridPlacements.Remove(name);
+                foreach (var name in zOrderEdited)
+                    ZOrderEditedControls.Remove(name);
+                foreach (var rename in pendingRenames)
+                    PendingRenames.Remove(rename);
+
                 AfterStructureChange();
             },
             () =>
             {
-                foreach (var control in doomed)
+                // Restore parents before children so nesting round-trips.
+                foreach (var control in doomedList.OrderBy(DepthFromRoot))
                 {
-                    _root.Controls.Add(control);
+                    var parent = parents[control];
+                    if (!parent.Controls.Contains(control))
+                        parent.Controls.Add(control);
                     if (wasGroup.Contains(control))
                         Groups.Add(control);
+                    if (wasLocked.Contains(control))
+                        Locked.Add(control);
                     if (!string.IsNullOrEmpty(control.Name) && !DeletedControlNames.Remove(control.Name))
                         AddedControlNames.Add(control.Name);
                 }
+
                 EventWires.AddRange(wires);
                 ControlBindings.AddRange(bindings);
+                foreach (var entry in editedProperties)
+                    EditedProperties.Add(entry);
+                foreach (var name in editedGrid)
+                    EditedGridPlacements.Add(name);
+                foreach (var name in zOrderEdited)
+                    ZOrderEditedControls.Add(name);
+                PendingRenames.AddRange(pendingRenames);
+
                 Selection.SetMany(doomed);
                 AfterStructureChange();
             }));
+    }
+
+    private int DepthFromRoot(ElementBase control)
+    {
+        var depth = 0;
+        for (var parent = control.Parent; parent != null && !ReferenceEquals(parent, _root); parent = parent.Parent)
+            depth++;
+        return depth;
     }
 
     public void DuplicateSelection()
@@ -1419,7 +1508,18 @@ public sealed class DesignSurface : Element
     private void ApplyAfterPropertyEdit(object component, string propertyName)
     {
         if (RequiresDesignRelayout(propertyName))
+        {
             RelayoutRoot();
+            // Persist the content-fit Size with AutoSize so reopen does not restore a stale box
+            // that SelfAutoSize controls would otherwise keep after the importer's Size restore.
+            if (component is ElementBase autoSized
+                && propertyName is "AutoSize" or "AutoSizeMode" or "Text"
+                && autoSized.AutoSize
+                && autoSized.Dock == DockStyle.None)
+            {
+                NoteEditedProperty(autoSized, "Size");
+            }
+        }
         else if (component is ElementBase element)
             element.Invalidate();
     }
@@ -1438,7 +1538,24 @@ public sealed class DesignSurface : Element
     public void RelayoutRoot()
     {
         _root.ApplyStoredDesignLayout();
+        // Buttons/CheckBoxes self-size and skip DefaultLayout's AutoSize pass — re-apply after
+        // dock/anchor so import Size restores and inspector AutoSize toggles keep content-fit bounds.
+        ApplyDesignAutoSize();
         Invalidate();
+    }
+
+    /// <summary>
+    /// Recomputes preferred size for undocked AutoSize controls. Docked axes stay layout-owned.
+    /// </summary>
+    internal void ApplyDesignAutoSize()
+    {
+        foreach (var control in AllDesignedControls)
+        {
+            if (!control.AutoSize || control.Dock != DockStyle.None)
+                continue;
+
+            control.AdjustSize();
+        }
     }
 
     /// <summary>Maps canvas positions into parent-local <see cref="ElementBase.Location"/> for merge.</summary>

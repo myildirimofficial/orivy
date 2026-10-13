@@ -584,6 +584,21 @@ public static class CodeImporter
                     collOwnerInfo.CollectionCalls.Add((collectionMember, collInvokeTarget.Name.Identifier.Text, collInvokeArgs.Select(a => a.Expression).ToList()));
                     break;
 
+                // `group.SetItems(new[] { ... })` / `group.SetItems("A", "B")` — ButtonGroup (and similar)
+                // replace the whole Items list. Replay as Items.ReplaceAll so import does not append
+                // onto ctor-seeded enum defaults. Lambdas (labelSelector overload) are skipped.
+                case InvocationExpressionSyntax
+                {
+                    Expression: MemberAccessExpressionSyntax { Name.Identifier.Text: "SetItems" } setItemsTarget,
+                    ArgumentList.Arguments: { Count: > 0 } setItemsArgs
+                }
+                    when ResolveTargetName(setItemsTarget.Expression) is { } setItemsOwner
+                         && nodes.TryGetValue(setItemsOwner, out var setItemsInfo)
+                         && setItemsArgs[0].Expression is not SimpleLambdaExpressionSyntax
+                         and not ParenthesizedLambdaExpressionSyntax:
+                    setItemsInfo.CollectionCalls.Add(("Items", "ReplaceAll", setItemsArgs.Select(a => a.Expression).ToList()));
+                    break;
+
                 case InvocationExpressionSyntax
                 {
                     Expression: MemberAccessExpressionSyntax { Name.Identifier.Text: "SetPlacement" } placeTarget,
@@ -1241,6 +1256,12 @@ public static class CodeImporter
                 if (Enum.TryParse(underlying, member.Name.Identifier.Text, out var enumValue)) { value = enumValue; return true; }
                 return false;
 
+            // Studio hosts ButtonGroup as ButtonGroup<string>; designer files often use
+            // ButtonGroup<SomeEnum> with Items.Add(SomeEnum.Foo) — keep the member name as the label.
+            case MemberAccessExpressionSyntax member when underlying == typeof(string):
+                value = member.Name.Identifier.Text;
+                return true;
+
             // A named static constant on the target type itself (GridLength.Auto, Thickness.Empty,
             // ...) — the general form of the SKColors.Named case above, for any type that exposes one
             // rather than needing a dedicated case per type. The receiver may itself be namespace-
@@ -1382,7 +1403,7 @@ public static class CodeImporter
                         }
                     }
                 }
-                else // AddRange
+                else if (methodName is "AddRange" or "ReplaceAll")
                 {
                     var method = candidateMethods.FirstOrDefault(m =>
                         m.GetParameters().Length == 1
@@ -1684,6 +1705,13 @@ public static class CodeImporter
             }
 
             ApplyImportedGridPlacements(subInstances, subNodes);
+
+            // Same as the main Rebuild path: file Size must not leave AutoSize controls clipped.
+            foreach (var child in subInstances.Values)
+            {
+                if (child.AutoSize && child.Dock == DockStyle.None)
+                    child.AdjustSize();
+            }
         }
         catch { }
     }
@@ -2065,6 +2093,8 @@ public static class CodeImporter
         }
 
         surface.RelayoutRoot();
+        // Size restore above runs after ApplyExtraProperties may have AutoSize-adjusted the
+        // control; RelayoutRoot's ApplyDesignAutoSize puts content-fit bounds back.
         surface.Commands.Clear();
         surface.NotifyStructureChanged();
         return skipped;

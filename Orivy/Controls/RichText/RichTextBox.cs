@@ -210,6 +210,11 @@ public class RichTextBox : Orivy.Controls.TextBox
     /// <summary>v5: True if more than one cursor is active.</summary>
     public bool HasMultipleCursors => _multiCursor.HasMultipleCursors;
 
+    public RichTextBox()
+    {
+        Multiline = true;
+    }
+
     /// <summary>v5: Add a cursor at the given document position. The new
     /// cursor becomes the primary. Has no effect if EnableMultiCursor is false.</summary>
     public void AddCursorAt(int position)

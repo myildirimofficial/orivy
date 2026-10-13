@@ -599,6 +599,9 @@ public static class DesignInteractions
         return "arg" + parameter.Position;
     }
 
+    /// <summary>C#-friendly type name for designer emit (<c>ButtonGroup</c>, not <c>ButtonGroup`1</c>).</summary>
+    internal static string FriendlyTypeName(Type type) => FriendlyType(type);
+
     private static string FriendlyType(Type type)
     {
         if (type == typeof(object)) return "object";

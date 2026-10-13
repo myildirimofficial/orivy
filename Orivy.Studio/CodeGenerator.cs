@@ -79,14 +79,14 @@ public static class CodeGenerator
 
     private static void AppendFieldDeclaration(StringBuilder sb, ElementBase control)
     {
-        sb.AppendLine($"    private {control.GetType().Name} {control.Name} = null!;");
+        sb.AppendLine($"    private {DesignInteractions.FriendlyTypeName(control.GetType())} {control.Name} = null!;");
         foreach (var child in NestedDesignedChildren(control))
             AppendFieldDeclaration(sb, child);
     }
 
     private static void AppendInitializer(StringBuilder sb, ElementBase control, IFormatProvider inv, DesignSurface surface)
     {
-        sb.AppendLine($"        {control.Name} = new {control.GetType().Name}");
+        sb.AppendLine($"        {control.Name} = new {DesignInteractions.FriendlyTypeName(control.GetType())}");
         sb.AppendLine("        {");
         sb.AppendLine($"            Name = \"{Escape(control.Name)}\",");
         if (DesignPersistableProperties.ShouldWriteTrackedLayoutProperty(control, "Text")

@@ -38,7 +38,7 @@ public partial class TabView : ElementBase
     private const float TabHoverAnimationStep = 0.18f;
     private const float TabDragThreshold = 6f;
     private const float TitleBarTabHorizontalPadding = 8f;
-    private const float TitleBarTabIconSize = 16f;
+    private const float TitleBarTabIconSize = 24f;
     private const float TitleBarTabIconSpacing = 4f;
     private const float TitleBarTabCloseButtonSize = 20f;
     private const float TitleBarTabCloseButtonInset = 4.5f;
@@ -122,7 +122,7 @@ public partial class TabView : ElementBase
     private TabViewDesignMode _tabDesignMode = TabViewDesignMode.Rectangle;
     private TabViewAlignment _tabAlignment = TabViewAlignment.Start;
     private TabViewLayoutMode _tabLayoutMode = TabViewLayoutMode.Top;
-    private TabViewMode _tabMode = TabViewMode.TitleBar;
+    private TabViewMode _tabMode = TabViewMode.Embedded;
     private SKColor _tabStripBackground = SKColors.Transparent;
     private TabViewStyle? _customTabStyle;
     private bool _allowTabDrag = true;

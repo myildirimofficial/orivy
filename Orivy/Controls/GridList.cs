@@ -19,7 +19,22 @@ public class GridList : ElementBase, IMouseCaptureLost
     private const float ResizeHitWidth = 18f;
     private const float RowResizeGripHeight = 6f;
     private const float CheckBoxSize = 16f;
-    private const float IconSize = 16f;
+    private float _iconSize = 16f;
+
+    /// <summary>Logical size used when drawing row/cell icons. Default is 16.</summary>
+    public float IconSize
+    {
+        get => _iconSize;
+        set
+        {
+            var clamped = Math.Max(8f, value);
+            if (Math.Abs(_iconSize - clamped) < 0.001f)
+                return;
+            _iconSize = clamped;
+            InvalidateMeasure();
+            Invalidate();
+        }
+    }
 
     // Group collapse state is tracked per rendered group instance (group index) rather than group text.
     // This avoids collapsing every group that shares the same name when multiple groups have identical labels.

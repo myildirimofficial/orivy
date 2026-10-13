@@ -355,9 +355,22 @@ internal partial class DefaultLayout : LayoutEngine
                 continue;
             }
 
-            UpdateAnchorInfo(element);
-            if (element is ElementBase cleared)
-                cleared._forceAnchorCalculations = false;
+            // WinForms V2: only (re)compute margins when missing or forced — never on every
+            // parent resize, or Right/Bottom distances rewrite themselves from the already-moved
+            // bounds and the control drifts instead of holding its edge gap.
+            if (element is ElementBase control)
+            {
+                if (GetAnchorInfo(element) is null)
+                    UpdateAnchorInfoV2(control, ignoreParentSuspendState: true);
+                else if (control._forceAnchorCalculations)
+                    UpdateAnchorInfo(control);
+
+                control._forceAnchorCalculations = false;
+            }
+            else if (GetAnchorInfo(element) is null)
+            {
+                UpdateAnchorInfo(element);
+            }
 
             Debug.Assert(GetAnchorInfo(element) is not null, "AnchorInfo should be initialized before LayoutAnchorControls().");
             SetCachedBounds(element, GetAnchorDestination(element, displayRectangle, measureOnly: false));
@@ -744,13 +757,11 @@ internal partial class DefaultLayout : LayoutEngine
     }
  
     /// <summary>
-    ///  Stores anchor margins from the control's current bounds (WinForms AnchorLayoutV2 / ComputeAnchorInfo).
+    ///  Stores anchor margins from the control's current bounds (WinForms AnchorLayoutV2).
     ///  Must stay aligned with <see cref="ComputeAnchoredBoundsV2"/>.
     /// </summary>
     internal static void UpdateAnchorInfo(IArrangedElement element)
     {
-        Debug.Assert(!HasCachedBoundsFor(element), "Do not call this method with an active cached bounds entry for this element.");
- 
         if (element.Container is null)
         {
             return;
@@ -764,15 +775,17 @@ internal partial class DefaultLayout : LayoutEngine
         }
 
         SkiaSharp.SKRect displayRectangle = element.Container.DisplayRectangle;
-        SkiaSharp.SKRect elementBounds = element.Bounds;
-        var xInDisplay = elementBounds.Left - displayRectangle.Left;
-        var yInDisplay = elementBounds.Top - displayRectangle.Top;
+        // Prefer the in-flight layout cache (same as WinForms) so margins match the bounds about
+        // to be committed, not a stale element.Bounds from a previous pass.
+        SkiaSharp.SKRect elementBounds = GetCachedBounds(element);
+        var x = elementBounds.Left;
+        var y = elementBounds.Top;
 
         anchorInfo.DisplayRectangle = displayRectangle;
-        anchorInfo.Left = elementBounds.Left;
-        anchorInfo.Top = elementBounds.Top;
-        anchorInfo.Right = displayRectangle.Width - (xInDisplay + elementBounds.Width);
-        anchorInfo.Bottom = displayRectangle.Height - (yInDisplay + elementBounds.Height);
+        anchorInfo.Left = x;
+        anchorInfo.Top = y;
+        anchorInfo.Right = displayRectangle.Width - (x + elementBounds.Width);
+        anchorInfo.Bottom = displayRectangle.Height - (y + elementBounds.Height);
     }
  
     /// <summary>
@@ -783,7 +796,10 @@ internal partial class DefaultLayout : LayoutEngine
     ///  https://github.com/dotnet/winforms/blob/tree/main/docs/design/anchor-layout-changes-in-net80.md for more details.
     ///  Developers may opt-out of this new behavior using switch <see cref="AppContextSwitches.AnchorLayoutV2"/>.
     /// </devdoc>
-    internal static void UpdateAnchorInfoV2(ElementBase control)
+    internal static void UpdateAnchorInfoV2(ElementBase control) =>
+        UpdateAnchorInfoV2(control, ignoreParentSuspendState: false);
+
+    internal static void UpdateAnchorInfoV2(ElementBase control, bool ignoreParentSuspendState)
     {
         if (!CommonProperties.GetNeedsAnchorLayout(control))
         {
@@ -807,8 +823,9 @@ internal partial class DefaultLayout : LayoutEngine
             // outside of serialized source and happen only in design-time scenario. Hence, checking for
             // LayoutSuspendCount > 1.
             bool ancestorInDesignMode = control.IsAncestorSiteInDesignMode;
-            if ((ancestorInDesignMode && parent.LayoutSuspendCount > 1)
-                || (!ancestorInDesignMode && parent.LayoutSuspendCount != 0))
+            if (!ignoreParentSuspendState
+                && ((ancestorInDesignMode && parent.LayoutSuspendCount > 1)
+                    || (!ancestorInDesignMode && parent.LayoutSuspendCount != 0)))
             {
                 // Mark parent to indicate that one of its child control requires AnchorsInfo to be calculated.
                 parent._childControlsNeedAnchorLayout = true;
@@ -821,6 +838,12 @@ internal partial class DefaultLayout : LayoutEngine
             // Only control's Size or Parent change, prompts recalculation of anchors. Otherwise,
             // we skip updating anchors for the control.
             return;
+        }
+
+        if (anchorInfo is null)
+        {
+            anchorInfo = new AnchorInfo();
+            SetAnchorInfo(control, anchorInfo);
         }
 
         parent._childControlsNeedAnchorLayout = false;

@@ -335,6 +335,14 @@ public static class CodeMerger
                          && ResolveTargetName(arguments[0].Expression) is { } child
                          && _deleted.Contains(child):
                     return true;
+                case InvocationExpressionSyntax
+                {
+                    Expression: MemberAccessExpressionSyntax { Name.Identifier.Text: "SetPlacement" or "Add" },
+                    ArgumentList.Arguments: { Count: >= 1 } placeArgs
+                }
+                    when ResolveTargetName(placeArgs[0].Expression) is { } placedChild
+                         && _deleted.Contains(placedChild):
+                    return true;
                 default:
                     return false;
             }
@@ -444,11 +452,12 @@ public static class CodeMerger
         private static string QualifiedTypeName(ElementBase control)
         {
             var type = control.GetType();
+            var friendly = DesignInteractions.FriendlyTypeName(type);
             return type.Namespace switch
             {
-                "Orivy.Controls" => "Orivy.Controls." + type.Name,
-                "Orivy" or "Orivy.Enums" => "Orivy." + type.Name,
-                _ => type.Name,
+                "Orivy.Controls" => "Orivy.Controls." + friendly,
+                "Orivy" or "Orivy.Enums" => "Orivy." + friendly,
+                _ => friendly,
             };
         }
 

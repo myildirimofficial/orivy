@@ -34,6 +34,7 @@ private IntPtr _hWnd;
     private NotificationManager? _notifications;
     private bool _mouseInClient;
     private bool _closeRequested;
+    private bool _closeMessagePosted;
     private bool _formClosed;
     // True while this window is being displayed modally via ShowDialog(). A modal dialog runs its
     // own nested message loop and must NOT post WM_QUIT when it closes — otherwise the queued
@@ -862,6 +863,7 @@ private IntPtr _hWnd;
             return;
 
         _closeRequested = false;
+        _closeMessagePosted = false;
         _formClosed = false;
         Application.RegisterForm(this);
         if (_formStartPosition == FormStartPosition.CenterScreen)
@@ -895,6 +897,7 @@ private IntPtr _hWnd;
             return DialogResult.None;
 
         _closeRequested = false;
+        _closeMessagePosted = false;
         _formClosed = false;
         _isModal = true;
         DialogResult = DialogResult.None;
@@ -972,10 +975,12 @@ private IntPtr _hWnd;
 
     public void Close(DialogResult dialogResult)
     {
-        if (_hWnd != IntPtr.Zero && !_closeRequested)
+        // Do not set _closeRequested here. WM_CLOSE must raise FormClosing first so
+        // subscribers can cancel; setting the flag early made X-button closes skip FormClosing.
+        if (_hWnd != IntPtr.Zero && !_closeRequested && !_closeMessagePosted)
         {
             DialogResult = dialogResult;
-            _closeRequested = true;
+            _closeMessagePosted = true;
             nint param = 0;
             PostMessage(_hWnd, (int)WindowMessage.WM_CLOSE, 0, ref param);
         }
@@ -1496,6 +1501,7 @@ private IntPtr _hWnd;
                 }
             case WindowMessage.WM_CLOSE:
                 {
+                    // Re-entrancy: DefWindowProc may deliver another WM_CLOSE after we accept.
                     if (_closeRequested)
                         return DefWindowProc(hWnd, msg, wParam, lParam);
 
@@ -1503,7 +1509,10 @@ private IntPtr _hWnd;
                     OnFormClosing(args);
 
                     if (args.Cancel)
+                    {
+                        _closeMessagePosted = false;
                         return IntPtr.Zero;
+                    }
 
                     _closeRequested = true;
                     return DefWindowProc(hWnd, msg, wParam, lParam);
@@ -1550,6 +1559,7 @@ private IntPtr _hWnd;
                 }
 
                 _closeRequested = false;
+                _closeMessagePosted = false;
                 // Only the top-level (non-modal) application window may end the thread's message
                 // loop. A modal ShowDialog() dialog exits its own nested loop via _formClosed; if it
                 // also posted WM_QUIT here, that quit would be dequeued by the caller's next

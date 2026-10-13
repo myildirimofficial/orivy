@@ -73,7 +73,9 @@ See implementation for details: `Orivy/Layout/DefaultLayout.cs`
 ### Docking
 
 - Docked children take up space by consuming the parent's remaining client region. Typical dock values: `Top`, `Bottom`, `Left`, `Right`, `Fill`.
+- Top/Bottom own height and stretch to the parent's remaining width; Left/Right own width and stretch to the remaining height; Fill consumes both axes.
 - The layout calculates preferred size for docked controls when asked for parent's preferred size.
+- In Orivy.Studio, spontaneous design-mode layout is skipped so anchors do not snap during drag. Assigning `Dock` (or `Anchor`) still runs `DefaultLayout` immediately — including through a deferred `PerformLayout` queued while `SuspendLayout` is active — so a Top dock no longer keeps a pre-dock overflow width.
 
 Example (conceptual):
 
@@ -88,11 +90,13 @@ content.Dock = DockStyle.Fill;
 
 - Anchors pin edges of the child to parent edges. Horizontal and vertical anchors can be combined.
 - When a child is anchored Left+Right, it stretches horizontally.
-- Anchor V2 is an improved computation path in `DefaultLayout` that provides better behavior for complex anchor combinations; the code uses `UpdateAnchorInfoV2` and `ComputeAnchoredBoundsV2` — consult the source for compatibility notes.
+- Anchor V2 (`UpdateAnchorInfoV2` / `ComputeAnchoredBoundsV2`) stores edge distances once and reuses them on parent resize — the same .NET 8 WinForms rule. Margins are recomputed only when missing or forced (move/resize/parent change), not on every layout pass.
 
 ### AutoSize
 
 - `AutoSize` controls can either grow-only or grow-and-shrink based on mode (see `AutoSizeMode`). The layout engine considers `AutoSize` when calculating parent preferred sizes.
+- `AdjustSize` measures with an unbounded constraint unless the control is stretch-anchored on an axis (Left+Right / Top+Bottom), so turning AutoSize on can grow beyond the previous box.
+- Some controls (Button, CheckBox, …) set `SelfAutoSizeInDefaultLayout` and size themselves via `AdjustSize` rather than `DefaultLayout`'s AutoSize pass. In Orivy.Studio, `RelayoutRoot` calls `ApplyDesignAutoSize` after dock/anchor layout so those controls still content-fit after import restores a stale `Size`.
 
 ## Preferred-size caching and Measure strategies
 

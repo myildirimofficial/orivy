@@ -1775,7 +1775,7 @@ public class PropertyGrid : GridList
         {
             var elementType = GetCollectionElementType(list.GetType());
             list.Add(CreateDefault(elementType));
-            RebuildAfterCollectionChange(collectionNode);
+            RebuildAfterCollectionChange(collectionNode, notify: true);
         }
         catch { /* fixed / typed collections may reject the default element */ }
     }
@@ -1790,7 +1790,7 @@ public class PropertyGrid : GridList
                 return;
 
             (list[j], list[i]) = (list[i], list[j]);
-            RebuildAfterCollectionChange(FindCollectionNode(list) ?? elementNode);
+            RebuildAfterCollectionChange(FindCollectionNode(list) ?? elementNode, notify: true);
         }
         catch { /* ignore */ }
     }
@@ -1803,18 +1803,28 @@ public class PropertyGrid : GridList
             {
                 list.RemoveAt(elementNode.ElementIndex);
                 // Rebuild the owning collection node (find it among root/children).
-                RebuildAfterCollectionChange(FindCollectionNode(list) ?? elementNode);
+                RebuildAfterCollectionChange(FindCollectionNode(list) ?? elementNode, notify: true);
             }
         }
         catch { /* ignore */ }
     }
 
-    private void RebuildAfterCollectionChange(PropNode collectionNode)
+    private void RebuildAfterCollectionChange(PropNode collectionNode, bool notify = false)
     {
         collectionNode.ChildrenBuilt = false;
         collectionNode.Expanded = true;
         EnsureChildren(collectionNode);
         RebuildRows();
+
+        // Collection mutations must mark the owning property edited so Studio Save/Merge
+        // rewrites Items.Add / AddRange (ButtonGroup, ListBox, …).
+        if (notify)
+        {
+            var descriptor = collectionNode.Descriptor
+                ?? FindCollectionNode(collectionNode.CollectionValue ?? collectionNode.ParentList!)?.Descriptor;
+            if (descriptor != null)
+                PropertyValueChanged?.Invoke(this, new PropertyValueChangedEventArgs(descriptor, null, descriptor, null));
+        }
     }
 
     private PropNode? FindCollectionNode(IList list)

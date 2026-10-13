@@ -1064,10 +1064,13 @@ public class ContextMenuStrip : MenuStrip
     private WindowBase? ResolveOwner(ElementBase? element)
     {
         if (Parent is WindowBase w) return w;
+        // Top-level windows have no Parent — FindForm()/ParentWindow are null for them.
+        if (element is WindowBase ownerWindow) return ownerWindow;
         if (element != null)
         {
             if (element.ParentWindow is WindowBase pw) return pw;
             if (element.FindForm() is WindowBase fw) return fw;
+            if (element.GetParentWindow() is WindowBase gw) return gw;
         }
 
         if (Application.ActiveForm is WindowBase aw) return aw;

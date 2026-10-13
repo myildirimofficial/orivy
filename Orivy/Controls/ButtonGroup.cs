@@ -3,6 +3,7 @@ using Orivy.Animation;
 using Orivy.Layout;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
 using SkiaSharp;
 
@@ -58,8 +59,11 @@ public class ButtonGroup<TValue> : Container
 
     public SKColor SelectedBorderColor { get; set; } = SKColor.Empty;
 
+    [Category("Data")]
+    [Description("Values shown as segmented buttons. Edit this list in Studio; do not nest Button children.")]
     public ItemCollection<TValue> Items => _items;
 
+    [Browsable(false)]
     public Func<TValue, string>? LabelSelector
     {
         get => _labelSelector;
@@ -70,6 +74,7 @@ public class ButtonGroup<TValue> : Container
         }
     }
 
+    [Browsable(false)]
     public Action<Button, TValue>? ConfigureButton
     {
         get => _configureButton;
@@ -106,7 +111,15 @@ public class ButtonGroup<TValue> : Container
         {
             var item = _items[i];
             var text = _labelSelector != null ? _labelSelector(item) : item?.ToString() ?? string.Empty;
-            var button = new Button { Text = text, Tag = item! };
+            var button = new Button
+            {
+                Text = text,
+                Tag = item!,
+                // Studio edits Items — auto buttons are not independently selectable layers.
+                Selectable = false,
+                TabStop = false,
+                IsAncestorSiteInDesignMode = IsAncestorSiteInDesignMode,
+            };
             _configureButton?.Invoke(button, item);
             ApplyButtonSelectionStyle(button);
             _autoButtons.Add(button);
@@ -240,7 +253,14 @@ public class ButtonGroup<TValue> : Container
     public override void  OnControlAdded(ElementEventArgs e)
     {
         if (e.Element is Button incomingButton && !_autoButtons.Contains(incomingButton))
+        {
+            // Studio edits Items in the PropertyGrid; toolbox drops must not land as raw children.
+            // At runtime the only supported path is SetItems / Items.
+            if (IsAncestorSiteInDesignMode)
+                return;
+
             throw new InvalidOperationException("Use SetItems() or ConfigureButton to manage ButtonGroup contents.");
+        }
 
         base.OnControlAdded(e);
         RegisterElement(e.Element as ElementBase);

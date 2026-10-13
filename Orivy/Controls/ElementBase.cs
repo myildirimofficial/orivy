@@ -54,6 +54,11 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     // Use a counter to support nested SuspendLayout/ResumeLayout like WinForms.
     // When > 0 layout is suspended; when it reaches 0 we allow layouts again.
     protected int _layoutSuspendCount;
+
+    // LayoutTransaction queues PerformLayout while suspended; ResumeLayout must replay the
+    // named request (e.g. Dock) so design mode can stretch fill axes instead of keeping the
+    // pre-dock Width/Height that SetDock restores into SpecifiedBounds.
+    private LayoutEventArgs? _deferredLayoutArgs;
     private object? _dataContext;
     private string _toolTipText = string.Empty;
     private int _toolTipInitialDelay = DefaultToolTipInitialDelay;
@@ -3556,12 +3561,14 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     protected virtual SKSize GetAutoSizeMeasurementConstraints()
     {
-        var constraints = Size;
-
-        if (constraints.Width < 0f)
-            constraints.Width = 0f;
-        if (constraints.Height < 0f)
-            constraints.Height = 0f;
+        // Unbounded by default so enabling AutoSize can grow to content. Stretched
+        // anchors keep the live axis (same rule DefaultLayout uses for AutoSize).
+        var constraints = SKSize.Empty;
+        var anchor = Anchor;
+        if ((anchor & (AnchorStyles.Left | AnchorStyles.Right)) == (AnchorStyles.Left | AnchorStyles.Right))
+            constraints.Width = Math.Max(0f, Size.Width);
+        if ((anchor & (AnchorStyles.Top | AnchorStyles.Bottom)) == (AnchorStyles.Top | AnchorStyles.Bottom))
+            constraints.Height = Math.Max(0f, Size.Height);
 
         return NormalizePreferredSizeConstraints(constraints);
     }
@@ -4890,7 +4897,10 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     public virtual void PerformLayout()
     {
         if (_layoutSuspendCount > 0)
+        {
+            _deferredLayoutArgs ??= new LayoutEventArgs(null!);
             return;
+        }
 
         if (IsPerformingLayout)
             return;
@@ -4930,7 +4940,10 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     public virtual void PerformLayout(LayoutEventArgs args)
     {
         if (_layoutSuspendCount > 0)
+        {
+            DeferLayoutArgs(args);
             return;
+        }
 
         if (IsPerformingLayout)
             return;
@@ -4945,6 +4958,21 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             IsPerformingLayout = false;
         }
     }
+
+    private void DeferLayoutArgs(LayoutEventArgs args)
+    {
+        // Prefer a named Dock/Anchor request over an empty one so ResumeLayout after SetDock
+        // still identifies the axis stretch that design mode must apply immediately.
+        if (_deferredLayoutArgs == null
+            || IsDesignAxisLayoutProperty(args.AffectedProperty))
+        {
+            _deferredLayoutArgs = args;
+        }
+    }
+
+    private static bool IsDesignAxisLayoutProperty(string? propertyName) =>
+        string.Equals(propertyName, PropertyNames.Dock, StringComparison.Ordinal)
+        || string.Equals(propertyName, PropertyNames.Anchor, StringComparison.Ordinal);
 
     /// <summary>
     /// Runs dock/anchor layout for this design container and every nested container.
@@ -4980,7 +5008,13 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         // Spontaneous layout in design mode re-applies stale anchor margins and snaps drags back
         // (especially Top|Right controls such as toolbar buttons). WYSIWYG refresh uses
         // ApplyStoredDesignLayout / RelayoutRoot after import, preview, or dock/anchor edits.
-        if (!IsAncestorSiteInDesignMode || s_explicitDesignLayout > 0)
+        // Dock/Anchor assignment is an exception: SetDock restores SpecifiedBounds (often a wide
+        // pre-dock Size) and must run DefaultLayout immediately so Top/Bottom fill width and
+        // Left/Right fill height instead of overflowing the parent.
+        var runDefaultLayout = !IsAncestorSiteInDesignMode
+            || s_explicitDesignLayout > 0
+            || IsDesignAxisLayoutProperty(e.AffectedProperty);
+        if (runDefaultLayout)
             Orivy.Layout.DefaultLayout.Instance.Layout(this, e);
         ResolveChildOverflowLocations();
 
@@ -5138,7 +5172,18 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         if (_layoutSuspendCount > 0)
             _layoutSuspendCount--;
 
-        if (performLayout && _layoutSuspendCount == 0)
+        if (_layoutSuspendCount != 0)
+            return;
+
+        var deferred = _deferredLayoutArgs;
+        _deferredLayoutArgs = null;
+
+        if (!performLayout)
+            return;
+
+        if (deferred != null)
+            PerformLayout(deferred);
+        else
             PerformLayout();
     }
 

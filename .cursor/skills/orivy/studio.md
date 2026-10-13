@@ -9,7 +9,7 @@ The canvas is live Orivy controls. Persistence is Designer C# (`InitializeCompon
 - In design mode the overlay receives pointer and keyboard input. Designed controls paint but do not take general input. `PreviewMode` hides the overlay and the controls become live.
 - Zoom is `protected override float ChildRenderScale => _zoom`. That scale applies to both paint and hit-testing. `GetInputBounds` is the element's own rectangle plus anchor-overflow children only. Do not union every descendant: the overlay is `Width/zoom` locally and that union covers the side panels, so a click lands on the canvas while the wheel (own rectangle) still hits the panel.
 - The overlay must not be `Dock = Fill`. `SyncOverlayBounds` sets its logical size to the viewport divided by zoom so the scaled overlay still covers the surface. Do not “simplify” that.
-- Drop path: `ToolboxList` → `DragLayer.Begin` → `DesignSurface.DropAt` → `AddControl`. Every placed or imported control goes through `DesignSurface.PrepareForDesign` (`AutoSize = false` and related flags) so the designer owns bounds. That `AutoSize = false` is persisted (new drop, duplicate, and import) so runtime does not grow the control again.
+- Drop path: `ToolboxList` → `DragLayer.Begin` → `DesignSurface.DropAt` → `AddControl`. Every placed or imported control goes through `DesignSurface.PrepareForDesign` (`AutoSize = false` and related flags) so the designer owns bounds. That `AutoSize = false` is persisted (new drop, duplicate, and import) so runtime does not grow the control again. When the user turns `AutoSize` back on (or the file has `AutoSize = true`), import restores file `Size` then `RelayoutRoot` / `ApplyDesignAutoSize` re-runs `AdjustSize` for undocked AutoSize controls — SelfAutoSize buttons skip `DefaultLayout`'s AutoSize pass, so without that step a stale Size looks clipped or shifted after reopen. Enabling AutoSize in the inspector also records `Size` for Save.
 - When the designed type is a `Window` / `WindowBase`, `DesignRoot` is an `Element` (not an HWND) but it paints title chrome and uses `Padding.Top = TitleHeight` so Dock/Anchor share the same `DisplayRectangle` as runtime. Pages / `Element` hosts stay chrome-less and opaque `ColorScheme.Surface`.
 - The design root sets `ClipChildrenToShape` false so a control outside the form still paints. `DrawOutsideFormBorders` then strokes those bounds (including nested controls) from `VisualLocation`, after the selection stroke.
 
@@ -33,6 +33,12 @@ A new control appears by existing in the Orivy assembly. Do not add a static too
 `CreateInstance(seedPlaceholderContent: true)` is for a toolbox drop. The importer calls `CreateInstance(seedPlaceholderContent: false)` so placeholder rows are not left beside real imported items. Keep that split.
 
 Designed `TabView` pages: only the selected page is `Visible`. Design mode disables page transitions. After import and on tab-header clicks, call `TabView.SyncPageVisibility()`. Drops onto a TabView nest into the selected page, not as siblings of every page.
+
+`ButtonGroup` is edited through its `Items` collection in the PropertyGrid (`ItemCollection<T>` implements `IList`). Do not nest toolbox Buttons into a ButtonGroup. Auto-generated item buttons are not in the design tree (layers / hit-test / selection); clicking them selects the group. Import maps `ButtonGroup<T>` to the closed `ButtonGroup` and stringifies enum item names.
+
+Assigning `Dock` in the designer must stretch the layout-owned axis immediately (`Top`/`Bottom` → parent width, `Left`/`Right` → parent height). Design mode still skips spontaneous `DefaultLayout` for anchor drag stability; Dock/Anchor-named layout (including ResumeLayout after `SetDock`) is the exception.
+
+`DeleteSelection` removes the control from its real parent (not always the design root), includes nested descendants in `DeletedControlNames` / events / bindings, and clears related edit tracking so Save does not leave orphan fields.
 
 ## Save / open
 

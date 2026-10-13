@@ -24,8 +24,16 @@ internal static class DesignDockLayout
         if (descriptor.Name == "Location")
             return !AllowsLocation(control.Dock);
 
+        // Fill owns both axes. Top/Bottom still allow Height (and Left/Right Width) via Size;
+        // ClampSize keeps the layout-owned axis when the inspector commits.
         if (descriptor.Name == "Size")
             return control.Dock == DockStyle.Fill;
+
+        if (descriptor.Name == "Width")
+            return !AllowsWidth(control.Dock);
+
+        if (descriptor.Name == "Height")
+            return !AllowsHeight(control.Dock);
 
         return false;
     }
