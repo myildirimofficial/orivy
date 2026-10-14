@@ -44,8 +44,8 @@ public sealed class ComboBoxItem
 
 public class ComboBox : ElementBase
 {
-    private const int DefaultDropDownItemHeight = 36;
-    private const int DefaultDropDownVerticalPadding = 8;
+    private const int DefaultDropDownItemHeight = 28;
+    private const int DefaultDropDownVerticalPadding = 4;
     private const int DefaultHeight = 24;
     private const int DefaultMaxDropDownItems = 8;
     private const int DefaultMinWidth = 140;
@@ -108,7 +108,7 @@ public class ComboBox : ElementBase
         CanSelect = true;
         MinimumSize = new SKSize(DefaultMinWidth, DefaultHeight);
         Padding = new Thickness(14, 0, 48, 0);
-        Radius = new Radius(8);
+        Radius = new Radius(6);
         Size = new SKSize(DefaultWidth, DefaultHeight);
         TabStop = true;
         TextAlign = ContentAlignment.MiddleLeft;
@@ -775,27 +775,30 @@ public class ComboBox : ElementBase
         ConfigureVisualStyles(styles =>
         {
             styles
-                .DefaultTransition(TimeSpan.FromMilliseconds(170), AnimationType.CubicEaseOut)
+                .DefaultTransition(TimeSpan.FromMilliseconds(220), AnimationType.CubicEaseOut)
                 .Base(baseStyle => baseStyle
                     .Background(ColorScheme.Surface)
                     .Foreground(ColorScheme.ForeColor)
                     .Border(1)
                     .BorderColor(ColorScheme.Outline.WithAlpha(118))
-                    .Radius(8)
+                    .Radius(6)
                     .Shadow(BoxShadow.None))
                 .OnHover(rule => rule
-                    .Background(ColorScheme.SurfaceContainer)
+                    .Background(ColorScheme.Surface.Brightness(0.014f))
                     .BorderColor(ColorScheme.Primary.WithAlpha(72)))
                 .OnPressed(rule => rule
-                    .Background(ColorScheme.SurfaceVariant)
+                    .Background(ColorScheme.Surface.Brightness(-0.02f))
                     .BorderColor(ColorScheme.Primary.WithAlpha(110))
                     .Opacity(0.98f))
                 .OnFocused(rule => rule
-                    .Background(ColorScheme.SurfaceContainer)
-                    .BorderColor(ColorScheme.Primary.WithAlpha(145)))
+                    .Background(ColorScheme.Surface.Brightness(0.02f))
+                    .BorderColor(ColorScheme.Primary.WithAlpha(200))
+                    // Bootstrap 3 focus glow: box-shadow: 0 0 8px rgba(primary, .6)
+                    .Shadow(new BoxShadow(0f, 0f, 8f, 0, ColorScheme.Primary.WithAlpha(153))))
                 .When((element, state) => ((ComboBox)element).DroppedDown, rule => rule
-                    .Background(ColorScheme.SurfaceContainerHigh)
-                    .BorderColor(ColorScheme.Primary.WithAlpha(160)))
+                    .Background(ColorScheme.Surface.Brightness(0.028f))
+                    .BorderColor(ColorScheme.Primary.WithAlpha(200))
+                    .Shadow(new BoxShadow(0f, 0f, 8f, 0, ColorScheme.Primary.WithAlpha(153))))
                 .When((element, state) => !((ComboBox)element).HasSelection, rule => rule
                     .Foreground(ColorScheme.ForeColor.WithAlpha(150)))
                 .OnDisabled(rule => rule
@@ -1603,7 +1606,7 @@ public class ComboBox : ElementBase
             _owner = owner;
             AutoClose = false;
             Border = new Thickness(1);
-            Radius = new Radius(12);
+            Radius = new Radius(8);
             Shadow = new BoxShadow(0f, 6f, 18f, 0, ColorScheme.ShadowColor);
             ShowCheckMargin = false;
             ShowIcons = false;

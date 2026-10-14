@@ -841,9 +841,14 @@ public sealed class DesignSurface : Element
     }
 
     /// <summary>Root-relative position of a designed control at any nesting depth — walks up through
-    /// container parents, accumulating their locations, until reaching the design root.</summary>
+    /// container parents, accumulating their locations, until reaching the design root.
+    /// The root itself is the origin (0,0): its <see cref="ElementBase.VisualLocation"/> is the
+    /// pan offset on the surface, not a design-space coordinate.</summary>
     internal SKPoint GetDesignSpaceLocation(ElementBase control)
     {
+        if (ReferenceEquals(control, _root))
+            return SKPoint.Empty;
+
         var x = control.VisualLocation.X;
         var y = control.VisualLocation.Y;
         var current = control.Parent;
@@ -956,7 +961,9 @@ public sealed class DesignSurface : Element
     /// selected controls as its children with locations rebased relative to it. Undoable.</summary>
     public void GroupSelection()
     {
-        var items = Selection.Items.Where(c => !Locked.Contains(c) && !Groups.Contains(c)).ToList();
+        var items = Selection.Items
+            .Where(c => !Locked.Contains(c) && !Groups.Contains(c) && !ReferenceEquals(c, _root))
+            .ToList();
         if (items.Count < 2)
             return;
 
@@ -1091,7 +1098,10 @@ public sealed class DesignSurface : Element
     {
         // A locked control is meant to be protected from exactly this kind of destructive edit —
         // matches the same exclusion NudgeSelection/BeginBoundsDrag/GroupSelection already apply.
-        var doomed = Selection.Items.Where(c => !Locked.Contains(c)).ToList();
+        // The design root is the document canvas itself — never delete it with the selection.
+        var doomed = Selection.Items
+            .Where(c => !Locked.Contains(c) && !ReferenceEquals(c, _root))
+            .ToList();
         if (doomed.Count == 0)
             return;
 
@@ -1197,7 +1207,7 @@ public sealed class DesignSurface : Element
 
     public void DuplicateSelection()
     {
-        var sources = Selection.Items.ToList();
+        var sources = Selection.Items.Where(c => !ReferenceEquals(c, _root)).ToList();
         if (sources.Count == 0)
             return;
 
@@ -1354,7 +1364,7 @@ public sealed class DesignSurface : Element
     public void CommitPropertyEdit(System.ComponentModel.PropertyDescriptor descriptor, object component, object? oldValue)
     {
         if (component is ElementBase element
-            && descriptor.Name == "Size"
+            && descriptor.Name is "Size" or "MinimumSize" or "MaximumSize"
             && oldValue is SKSize before
             && descriptor.GetValue(component) is SKSize after)
         {
@@ -1685,7 +1695,7 @@ public sealed class DesignSurface : Element
 
     public void Align(AlignKind kind)
     {
-        var items = Selection.Items;
+        var items = Selection.Items.Where(c => !ReferenceEquals(c, _root)).ToList();
         if (items.Count < 2)
             return;
 
@@ -1717,7 +1727,10 @@ public sealed class DesignSurface : Element
 
     public void Distribute(bool horizontal)
     {
-        var items = Selection.Items.OrderBy(c => horizontal ? c.Location.X : c.Location.Y).ToList();
+        var items = Selection.Items
+            .Where(c => !ReferenceEquals(c, _root))
+            .OrderBy(c => horizontal ? c.Location.X : c.Location.Y)
+            .ToList();
         if (items.Count < 3)
             return;
 
@@ -1918,6 +1931,7 @@ public sealed class DesignSurface : Element
         private SKRect _rootDragBefore;
         private bool _ctrlDragDuplicated;
         private bool _pendingBodyDrag;
+        private bool _pendingMarquee;
         private SKPoint _pendingBodyDragStart;
         private const float BodyDragThreshold = 3f;
         private readonly List<(SKPoint A, SKPoint B)> _activeGuides = new();
@@ -2075,14 +2089,19 @@ public sealed class DesignSurface : Element
                 if (items.Count == 1 && !_s.Locked.Contains(items[0]))
                 {
                     var bounds = ToOverlay(items[0]);
-                    _fill.Color = ColorScheme.Surface;
-                    foreach (var (_, rect) in EnumerateGrips(bounds, items[0].Dock))
+                    // The design root already has permanent right/bottom resize grips drawn below —
+                    // don't stack a second full grip set (or offer move grips) on top of it.
+                    if (!ReferenceEquals(items[0], Root))
                     {
-                        canvas.DrawRect(rect, _fill);
-                        canvas.DrawRect(rect, _stroke);
+                        _fill.Color = ColorScheme.Surface;
+                        foreach (var (_, rect) in EnumerateGrips(bounds, items[0]))
+                        {
+                            canvas.DrawRect(rect, _fill);
+                            canvas.DrawRect(rect, _stroke);
+                        }
                     }
                     labelAnchor = bounds;
-                    label = items[0].Name;
+                    label = string.IsNullOrEmpty(items[0].Name) ? "Form" : items[0].Name;
 
                     if (items[0] is Grid selectedGridForStrips)
                     {
@@ -2193,8 +2212,12 @@ public sealed class DesignSurface : Element
                     return;
 
                 var hitR = HitControl(e.Location);
+                if (hitR != null)
+                    hitR = _s.ResolveEditableTarget(hitR);
                 if (hitR != null && !_s.Selection.Contains(hitR))
                     _s.Selection.SelectOnly(hitR);
+                else if (hitR == null && RootOverlayRect.Contains(e.Location.X, e.Location.Y))
+                    _s.Selection.SelectOnly(Root);
                 ShowContextMenu(e.Location);
                 return;
             }
@@ -2218,10 +2241,15 @@ public sealed class DesignSurface : Element
                 return;
             }
 
-            // Resize grips (single selection only).
-            if (_s.Selection.Items.Count == 1 && !_s.Locked.Contains(_s.Selection.Items[0]))
+            // Resize grips (single selection only). The design root uses the dedicated root-grip
+            // path above — its Location is the pan origin, so the ordinary bounds drag must not
+            // treat it as a movable/resizable designed control.
+            if (_s.Selection.Items.Count == 1
+                && !ReferenceEquals(_s.Selection.Items[0], Root)
+                && !_s.Locked.Contains(_s.Selection.Items[0]))
             {
-                var grip = HitGrip(ToOverlay(_s.Selection.Items[0]), e.Location, _s.Selection.Items[0].Dock);
+                var selected = _s.Selection.Items[0];
+                var grip = HitGrip(ToOverlay(selected), e.Location, selected);
                 if (grip != Grip.None)
                 {
                     BeginBoundsDrag(grip, e.Location);
@@ -2256,6 +2284,18 @@ public sealed class DesignSurface : Element
 
             if (hit == null)
             {
+                // Empty space on the form selects the design root (the "form") so its properties
+                // are editable — matching WinForms / WPF designers. A drag past the threshold
+                // still starts a marquee; clicks outside the form clear selection immediately.
+                if (RootOverlayRect.Contains(e.Location.X, e.Location.Y))
+                {
+                    if (!ctrl)
+                        _s.Selection.SelectOnly(Root);
+                    _pendingMarquee = true;
+                    _pendingBodyDragStart = e.Location;
+                    return;
+                }
+
                 if (!ctrl)
                     _s.Selection.Clear();
                 _mode = Grip.Marquee;
@@ -2277,8 +2317,10 @@ public sealed class DesignSurface : Element
             // Do not capture the mouse for a plain selection click. A click that does not move
             // should remain a click: starting a body drag (and Win32 capture) here can leave the
             // Studio's inspector/layers panels unable to receive the following mouse-up.
+            // The design root is never body-dragged — its Location is the pan origin.
             if (_s.Selection.Contains(hit) && !_s.Locked.Contains(hit)
-                && _s.Selection.Items.All(c => DesignDockLayout.AllowsLocation(c.Dock)))
+                && !ReferenceEquals(hit, Root)
+                && _s.Selection.Items.All(c => !ReferenceEquals(c, Root) && DesignDockLayout.AllowsLocation(c.Dock)))
             {
                 _pendingBodyDrag = true;
                 _pendingBodyDragStart = e.Location;
@@ -2377,6 +2419,27 @@ public sealed class DesignSurface : Element
         public override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+
+            if (_pendingMarquee)
+            {
+                var mdx = e.Location.X - _pendingBodyDragStart.X;
+                var mdy = e.Location.Y - _pendingBodyDragStart.Y;
+                if (mdx * mdx + mdy * mdy >= BodyDragThreshold * BodyDragThreshold)
+                {
+                    var start = _pendingBodyDragStart;
+                    _pendingMarquee = false;
+                    // Marquee replaces a lone form selection the same way an empty-canvas drag does.
+                    if ((ModifierKeys & Keys.Control) != Keys.Control)
+                        _s.Selection.Clear();
+                    _mode = Grip.Marquee;
+                    _dragStart = start;
+                    _marquee = RectFromPoints(start, e.Location);
+                    Capture();
+                    Invalidate();
+                }
+
+                return;
+            }
 
             if (_pendingBodyDrag)
             {
@@ -2779,7 +2842,9 @@ public sealed class DesignSurface : Element
 
         private void NudgeSelection(float dx, float dy)
         {
-            var movable = _s.Selection.Items.Where(c => !_s.Locked.Contains(c)).ToList();
+            var movable = _s.Selection.Items
+                .Where(c => !_s.Locked.Contains(c) && !ReferenceEquals(c, Root))
+                .ToList();
             if (movable.Count == 0)
                 return;
 
@@ -2820,16 +2885,19 @@ public sealed class DesignSurface : Element
 
             if (hasSelection)
             {
-                menu.AddItem(new MenuItem("Duplicate", (_, _) => _s.DuplicateSelection()) { ShortcutKeys = Keys.Control | Keys.D });
-                menu.AddItem(new MenuItem("Delete", (_, _) => _s.DeleteSelection()) { ShortcutKeys = Keys.Delete });
-                if (single != null)
+                var rootSelected = single != null && ReferenceEquals(single, Root);
+                if (!rootSelected)
+                {
+                    menu.AddItem(new MenuItem("Duplicate", (_, _) => _s.DuplicateSelection()) { ShortcutKeys = Keys.Control | Keys.D });
+                    menu.AddItem(new MenuItem("Delete", (_, _) => _s.DeleteSelection()) { ShortcutKeys = Keys.Delete });
+                }
+                if (single != null && !rootSelected)
                 {
                     menu.AddItem(new MenuItem("Bring to front", (_, _) => _s.BringToFront(single)));
                     menu.AddItem(new MenuItem("Send to back", (_, _) => _s.SendToBack(single)));
 
-                    // Only meaningful for a nested control — a top-level one's Parent is the design
-                    // root itself ("the form"), which isn't a selectable designed control.
-                    if (single.Parent is ElementBase parent && !ReferenceEquals(parent, Root))
+                    // Top-level controls parent to the design root; nested ones to another control.
+                    if (single.Parent is ElementBase parent)
                         menu.AddItem(new MenuItem("Select parent", (_, _) => _s.Selection.SelectOnly(parent)));
                 }
                 // TabView pages are just Container children (see TabView.IsTabViewPage) added/removed
@@ -2863,26 +2931,30 @@ public sealed class DesignSurface : Element
                 // Operates over the whole selection (not just a single item) like Duplicate/Delete/
                 // Group above — "Unlock" only when every selected item is already locked, otherwise
                 // "Lock" locks the rest too, matching the common multi-select toggle convention.
-                var selectionItems = _s.Selection.Items;
-                var allLocked = selectionItems.All(_s.Locked.Contains);
-                menu.AddItem(new MenuItem(allLocked ? "Unlock" : "Lock", (_, _) =>
+                // The design root is never lockable (hiding the canvas would strand the document).
+                var selectionItems = _s.Selection.Items.Where(c => !ReferenceEquals(c, Root)).ToList();
+                if (selectionItems.Count > 0)
                 {
-                    foreach (var item in selectionItems)
+                    var allLocked = selectionItems.All(_s.Locked.Contains);
+                    menu.AddItem(new MenuItem(allLocked ? "Unlock" : "Lock", (_, _) =>
                     {
-                        if (allLocked) _s.Locked.Remove(item);
-                        else _s.Locked.Add(item);
-                    }
-                    _s.StructureChanged?.Invoke();
-                    Invalidate();
-                }));
-                if (_s.Selection.Count >= 2)
+                        foreach (var item in selectionItems)
+                        {
+                            if (allLocked) _s.Locked.Remove(item);
+                            else _s.Locked.Add(item);
+                        }
+                        _s.StructureChanged?.Invoke();
+                        Invalidate();
+                    }));
+                }
+                if (selectionItems.Count >= 2)
                 {
                     menu.AddItem(new MenuItem("Align left", (_, _) => _s.Align(AlignKind.Left)));
                     menu.AddItem(new MenuItem("Align top", (_, _) => _s.Align(AlignKind.Top)));
                     menu.AddItem(new MenuItem("Align centers", (_, _) => { _s.Align(AlignKind.CenterH); _s.Align(AlignKind.CenterV); }));
                     menu.AddItem(new MenuItem("Group Selection", (_, _) => _s.GroupSelection()) { ShortcutKeys = Keys.Control | Keys.G });
                 }
-                if (_s.Selection.Count >= 3)
+                if (selectionItems.Count >= 3)
                 {
                     menu.AddItem(new MenuItem("Distribute horizontally", (_, _) => _s.Distribute(true)));
                     menu.AddItem(new MenuItem("Distribute vertically", (_, _) => _s.Distribute(false)));
@@ -2902,9 +2974,12 @@ public sealed class DesignSurface : Element
 
         // ── Hit testing (overlay space == logical child space of the surface) ──
 
-        /// <summary>Root-relative bounds of a designed control at any nesting depth.</summary>
+        /// <summary>Overlay-space bounds of a designed control (or the design root itself).</summary>
         private SKRect ToOverlay(ElementBase designed)
         {
+            if (ReferenceEquals(designed, Root))
+                return RootOverlayRect;
+
             var loc = _s.GetDesignSpaceLocation(designed);
             return SKRect.Create(Root.Location.X + loc.X, Root.Location.Y + loc.Y, designed.Width, designed.Height);
         }
@@ -2914,7 +2989,10 @@ public sealed class DesignSurface : Element
             var root = RootOverlayRect;
             foreach (var control in _s.AllDesignedControls)
             {
-                if (!control.Visible || control.Width <= 0f || control.Height <= 0f)
+                // Skip hidden controls and anything under a Visible=false ancestor — the overflow
+                // cue is only useful for something actually painted on the canvas.
+                if (!control.Visible || !IsVisibleInDesignTree(control)
+                    || control.Width <= 0f || control.Height <= 0f)
                     continue;
 
                 var bounds = ToOverlay(control);
@@ -2972,8 +3050,8 @@ public sealed class DesignSurface : Element
 
             if (_s.Selection.Items.Count == 1)
             {
-                var dock = _s.Selection.Items[0].Dock;
-                cursor = HitGrip(ToOverlay(_s.Selection.Items[0]), p, dock) switch
+                var selected = _s.Selection.Items[0];
+                cursor = HitGrip(ToOverlay(selected), p, selected) switch
                 {
                     Grip.TopLeft or Grip.BottomRight => Cursors.SizeNWSE,
                     Grip.TopRight or Grip.BottomLeft => Cursors.SizeNESW,
@@ -3324,6 +3402,17 @@ public sealed class DesignSurface : Element
             }
         }
 
+        /// <summary>Resize grips for a designed control — none while <see cref="ElementBase.AutoSize"/>
+        /// owns the size (content-fit), otherwise the same Dock-axis rules as the inspector.</summary>
+        private static IEnumerable<(Grip Grip, SKRect Rect)> EnumerateGrips(SKRect b, ElementBase control)
+        {
+            if (control.AutoSize)
+                yield break;
+
+            foreach (var pair in EnumerateGrips(b, control.Dock))
+                yield return pair;
+        }
+
         private static bool AllowsResizeGrip(Grip grip, DockStyle dock)
         {
             if (dock == DockStyle.None)
@@ -3333,6 +3422,17 @@ public sealed class DesignSurface : Element
             if (dock is DockStyle.Top or DockStyle.Bottom)
                 return grip is Grip.Top or Grip.Bottom;
             return grip is Grip.Left or Grip.Right;
+        }
+
+        private static Grip HitGrip(SKRect bounds, SKPoint p, ElementBase control)
+        {
+            foreach (var (grip, rect) in EnumerateGrips(bounds, control))
+            {
+                if (SKRect.Inflate(rect, 2f, 2f).Contains(p))
+                    return grip;
+            }
+
+            return Grip.None;
         }
 
         private static Grip HitGrip(SKRect bounds, SKPoint p, DockStyle dock)
@@ -3360,6 +3460,7 @@ public sealed class DesignSurface : Element
         private void CancelPendingBodyDrag()
         {
             _pendingBodyDrag = false;
+            _pendingMarquee = false;
             _pendingBodyDragStart = SKPoint.Empty;
         }
 
@@ -3376,6 +3477,7 @@ public sealed class DesignSurface : Element
             _resizingRoot = false;
             _ctrlDragDuplicated = false;
             _pendingBodyDrag = false;
+            _pendingMarquee = false;
             _gridDragTarget = null;
             _activeGuides.Clear();
             _s.SetHoverNestingTarget(null);

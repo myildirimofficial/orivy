@@ -304,7 +304,7 @@ public static class ColorScheme
     public static SKColor Warning => _warning;
     
     /// <summary>
-    /// Gets the cached shadow color (white with alpha in dark mode, black with alpha in light mode).
+    /// Gets the cached shadow color (black in both themes; higher alpha in dark mode for depth on dark surfaces).
     /// </summary>
     public static SKColor ShadowColor => _shadowColor;
 
@@ -373,12 +373,9 @@ public static class ColorScheme
     /// <param name="targetBackground">The target background color to transition to.</param>
     public static void StartThemeTransition(SKColor targetBackground)
     {
+        // Only flip dark/light from the background luminance. Do not overwrite Primary —
+        // brand accent must stay stable across dark/light switches (set Primary explicitly).
         _isDark = RelativeLuminance(targetBackground) < .45;
-        var accent = targetBackground.Brightness(_isDark ? .35f : -.35f);
-        
-        // Update primary color via the property setter
-        Primary = accent; 
-        
         StartBackgroundTransition(targetBackground);
     }
 
@@ -495,7 +492,8 @@ public static class ColorScheme
         _error = _isDark ? new SKColor(255, 100, 100) : new SKColor(220, 50, 50);
         _success = _isDark ? new SKColor(100, 255, 150) : new SKColor(50, 200, 100);
         _warning = _isDark ? new SKColor(255, 200, 100) : new SKColor(220, 150, 50);
-        _shadowColor = _isDark ? new SKColor(255, 255, 255, 20) : new SKColor(0, 0, 0, 20);
+        // Dark UIs need real umbra (black), not a light halo — white shadows read as washed-out glow.
+        _shadowColor = _isDark ? new SKColor(0, 0, 0, 96) : new SKColor(0, 0, 0, 28);
     }
 
     /// <summary>

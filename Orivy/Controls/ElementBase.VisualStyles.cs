@@ -18,6 +18,7 @@ public abstract partial class ElementBase
     private readonly List<VisualStyleConfiguration> _visualStyleConfigurations = new();
     private readonly List<ElementBase> _visualStyleStateDependents = new();
     private bool _isReplayingVisualStyleConfigurations;
+    private int _visualStyleMutationDepth;
     private bool _hasVisualStyleBaseOverride;
     private bool _styleBaseOverridesWidth;
     private bool _styleBaseOverridesHeight;
@@ -59,11 +60,23 @@ public abstract partial class ElementBase
             _visualStyleConfigurations.Add(new VisualStyleConfiguration(configure, clearExisting));
         }
 
-        var builder = new ElementVisualStyleBuilder(this);
-        if (clearExisting)
-            builder.ClearRules();
+        // Batch rule Clear/Add without per-item RefreshVisualStyles — InsertItem used to
+        // re-enter ResolveVisualStyleSnapshot while the collection was still being rebuilt
+        // (ThemeChanged → Replay → Configure → OnHover Add → NRE on a half-built list).
+        _visualStyleMutationDepth++;
+        try
+        {
+            var builder = new ElementVisualStyleBuilder(this);
+            if (clearExisting)
+                builder.ClearRules();
 
-        configure(builder);
+            configure(builder);
+        }
+        finally
+        {
+            _visualStyleMutationDepth--;
+        }
+
         RefreshVisualStyles();
         return this;
     }
@@ -106,6 +119,10 @@ public abstract partial class ElementBase
     {
         UpdateVisualStylesEnabledState();
         if (!_visualStylesEnabled)
+            return;
+
+        // Defer refresh until the outer ConfigureVisualStyles / Replay batch finishes.
+        if (_visualStyleMutationDepth > 0 || _isReplayingVisualStyleConfigurations)
             return;
 
         RefreshVisualStyles();
@@ -229,11 +246,18 @@ public abstract partial class ElementBase
     private ElementVisualStyleSnapshot ResolveVisualStyleSnapshot(ref ElementVisualTransition transition)
     {
         var snapshot = _styleBaseSnapshot;
+        // Keep layout size in the snapshot so focus transitions do not interpolate Width/Height.
+        if (!_styleBaseOverridesWidth && !_styleBaseOverridesHeight)
+            snapshot = snapshot.WithSize(_size);
+
         var state = CreateVisualStateContext();
 
         for (var i = 0; i < VisualStyles.Count; i++)
         {
             var rule = VisualStyles[i];
+            if (rule?.Style == null)
+                continue;
+
             if (!rule.Matches(this, state))
                 continue;
 
@@ -344,7 +368,13 @@ public abstract partial class ElementBase
         var previousScaleX = _renderScaleX;
         var previousScaleY = _renderScaleY;
 
-        _size = snapshot.Size;
+        // Layout owns Size unless a style explicitly sets Width/Height. Applying interpolated
+        // snapshot sizes made TextBox/ComboBox animate wider on focus (slide/grow to the right).
+        if (_styleBaseOverridesWidth || _styleBaseOverridesHeight)
+            _size = snapshot.Size;
+        else
+            _size = previousSize;
+
         _backColor = snapshot.BackColor;
         _foreColor = snapshot.ForeColor;
         _border = snapshot.Border;
@@ -462,9 +492,14 @@ public abstract partial class ElementBase
         if (_visualStyleConfigurations.Count == 0)
             return;
 
+        // Nested ThemeChanged during an in-flight replay must not Clear+rebuild again.
+        if (_isReplayingVisualStyleConfigurations)
+            return;
+
         var configurations = _visualStyleConfigurations.ToArray();
 
         _isReplayingVisualStyleConfigurations = true;
+        _visualStyleMutationDepth++;
         try
         {
             VisualStyles.Clear();
@@ -481,6 +516,7 @@ public abstract partial class ElementBase
         }
         finally
         {
+            _visualStyleMutationDepth--;
             _isReplayingVisualStyleConfigurations = false;
         }
     }

@@ -17,7 +17,7 @@ public static class ElevationHelper
 
         var blur = ColorScheme.GetElevationBlur(elevation);
         var offset = ColorScheme.GetElevationOffset(elevation);
-        var shadowColor = ColorScheme.ShadowColor.WithAlpha((byte)(ColorScheme.IsDarkMode ? 40 : 15));
+        var shadowColor = ColorScheme.ShadowColor.WithAlpha((byte)(ColorScheme.IsDarkMode ? 110 : 20));
 
         // Draw shadow
         using (var shadowMaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, blur / 2))

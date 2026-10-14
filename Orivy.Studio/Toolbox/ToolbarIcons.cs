@@ -58,6 +58,7 @@ internal static class ToolbarIcons
             case "export": Export(canvas, paint); break;
             case "play": Play(canvas, paint); break;
             case "stop": Stop(canvas, paint); break;
+            case "preview-window": PreviewWindow(canvas, paint); break;
             case "zoom-in": ZoomIn(canvas, paint); break;
             case "zoom-out": ZoomOut(canvas, paint); break;
             case "zoom-fit": ZoomFit(canvas, paint); break;
@@ -65,6 +66,8 @@ internal static class ToolbarIcons
             case "snap": Snap(canvas, paint); break;
             case "guides": Guides(canvas, paint); break;
             case "moon": Moon(canvas, paint); break;
+            case "sun": Sun(canvas, paint); break;
+            case "theme-auto": ThemeAuto(canvas, paint); break;
             case "toolbox": ToolboxGlyph(canvas, paint); break;
             case "sliders": Sliders(canvas, paint); break;
             case "layout": Layout(canvas, paint); break;
@@ -80,6 +83,8 @@ internal static class ToolbarIcons
             case "eye": Eye(canvas, paint); break;
             case "lock": Lock(canvas, paint); break;
             case "shuffle": Shuffle(canvas, paint); break;
+            case "sort-az": SortAz(canvas, paint); break;
+            case "sort-category": SortCategory(canvas, paint); break;
         }
 
         canvas.RestoreToCount(saved);
@@ -163,6 +168,15 @@ internal static class ToolbarIcons
         fill.Dispose();
     }
 
+    /// <summary>Two overlapping window frames — "run preview in a separate window".</summary>
+    private static void PreviewWindow(SKCanvas c, SKPaint p)
+    {
+        c.DrawRoundRect(new SKRect(3.5f, 7f, 15.5f, 19f), 1.5f, 1.5f, p);
+        c.DrawLine(3.5f, 10f, 15.5f, 10f, p);
+        c.DrawRoundRect(new SKRect(8.5f, 4.5f, 20.5f, 16.5f), 1.5f, 1.5f, p);
+        c.DrawLine(8.5f, 7.5f, 20.5f, 7.5f, p);
+    }
+
     private static void Stop(SKCanvas c, SKPaint p)
     {
         var fill = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = p.Color };
@@ -243,6 +257,35 @@ internal static class ToolbarIcons
         using var bite = new SKPath();
         bite.AddCircle(16, 9, 7);
         using var crescent = path.Op(bite, SKPathOp.Difference);
+        c.DrawPath(crescent, fill);
+        fill.Dispose();
+    }
+
+    private static void Sun(SKCanvas c, SKPaint p)
+    {
+        c.DrawCircle(12, 12, 3.5f, p);
+        for (var i = 0; i < 8; i++)
+        {
+            var a = i * (MathF.PI / 4f);
+            var c0 = MathF.Cos(a);
+            var s0 = MathF.Sin(a);
+            c.DrawLine(12 + c0 * 6.5f, 12 + s0 * 6.5f, 12 + c0 * 9.5f, 12 + s0 * 9.5f, p);
+        }
+    }
+
+    /// <summary>Monitor-style frame with a small sun/moon — "follow system theme".</summary>
+    private static void ThemeAuto(SKCanvas c, SKPaint p)
+    {
+        c.DrawRoundRect(new SKRect(4, 5, 20, 16), 1.5f, 1.5f, p);
+        c.DrawLine(8, 19, 16, 19, p);
+        c.DrawLine(12, 16, 12, 19, p);
+        // Mini crescent inside the screen.
+        var fill = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = p.Color };
+        using var disc = new SKPath();
+        disc.AddCircle(12, 10.5f, 3.2f);
+        using var bite = new SKPath();
+        bite.AddCircle(13.8f, 9.2f, 2.6f);
+        using var crescent = disc.Op(bite, SKPathOp.Difference);
         c.DrawPath(crescent, fill);
         fill.Dispose();
     }
@@ -416,5 +459,32 @@ internal static class ToolbarIcons
             path.Close();
             c.DrawPath(path, p);
         }
+    }
+
+    /// <summary>Compact A/Z sort glyph for the inspector PropertySort toggle.</summary>
+    private static void SortAz(SKCanvas c, SKPaint p)
+    {
+        using var a = new SKPath();
+        a.MoveTo(5, 11);
+        a.LineTo(8, 4.5f);
+        a.LineTo(11, 11);
+        c.DrawPath(a, p);
+        c.DrawLine(6, 8.5f, 10, 8.5f, p);
+        using var z = new SKPath();
+        z.MoveTo(13, 13.5f);
+        z.LineTo(19, 13.5f);
+        z.LineTo(13, 19.5f);
+        z.LineTo(19, 19.5f);
+        c.DrawPath(z, p);
+    }
+
+    /// <summary>Three grouped rows — categorized PropertyGrid sort.</summary>
+    private static void SortCategory(SKCanvas c, SKPaint p)
+    {
+        c.DrawLine(4.5f, 6.5f, 19.5f, 6.5f, p);
+        c.DrawLine(7, 11.5f, 19.5f, 11.5f, p);
+        c.DrawLine(7, 16.5f, 19.5f, 16.5f, p);
+        c.DrawCircle(5.2f, 11.5f, 1.1f, p);
+        c.DrawCircle(5.2f, 16.5f, 1.1f, p);
     }
 }

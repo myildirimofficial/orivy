@@ -17,7 +17,7 @@ namespace Orivy.Studio;
 
 /// <summary>
 /// Orivy.Studio shell — Figma-style multi-document visual designer.
-/// Toolbar (undo/redo · file · export/preview · zoom · toggles · theme) on top, reflection-driven
+/// Toolbar (undo/redo · file · preview · zoom · toggles · theme) on top, reflection-driven
 /// Toolbox on the left, a TabView of design documents in the middle, and Layers + Layout + a live
 /// PropertyGrid inspector on the right. The toolbox supports both double-click and drag-and-drop.
 /// </summary>
@@ -41,11 +41,12 @@ public sealed class StudioWindow : Window
     private readonly ToolbarButton _undoButton = new("undo", "Undo (Ctrl+Z)");
     private readonly ToolbarButton _redoButton = new("redo", "Redo (Ctrl+Y)");
     private readonly ToolbarButton _previewButton = new("play", "Preview");
-    private readonly ToolbarButton _themeToggle = new("moon", "Toggle dark mode", 28f)
+    private readonly ToolbarButton _previewExternalToggle = new("preview-window", "Preview in separate window", 28f)
     {
         CheckOnClick = true,
-        Checked = ColorScheme.IsDarkMode,
     };
+    private readonly ToolbarButton _themeToggle = new("moon", "Theme", 28f);
+    private Window? _externalPreview;
     private readonly Element _zoomLabel;
     private readonly Element _statusHost;
 
@@ -115,6 +116,11 @@ public sealed class StudioWindow : Window
         ShowIcon = true;
         this.DrawTitleBorder = false;
 
+        // LocalAppData settings (theme, preview host) before chrome builds so the first paint
+        // matches the user's last preference — including Auto → OS dark/light.
+        StudioSettings.Load();
+        SyncThemeButton();
+
         // Tabbed is the theme meant to cooperate with a TitleBar-mode TabView (see BuildLayout);
         // it falls back to a flat surface automatically on older Windows.
         WindowThemeType = WindowThemeType.Tabbed;
@@ -152,6 +158,16 @@ public sealed class StudioWindow : Window
         AttachSurface(_active);
         WireShell();
 
+        // Auto theme: re-read the OS flag when Studio is focused again (user may have flipped
+        // Windows dark mode while we were in the background).
+        Activated += (_, _) =>
+        {
+            if (StudioSettings.Theme != StudioThemePreference.Auto)
+                return;
+            StudioSettings.ApplyTheme();
+            SyncThemeButton();
+        };
+
         _documents.SelectedTab = firstDoc;
         SwitchActive(firstDoc.Surface);
 
@@ -160,6 +176,8 @@ public sealed class StudioWindow : Window
 
         if (Environment.GetEnvironmentVariable("ORIVY_STUDIO_TEST_FOLDER") is { Length: > 0 } testFolder)
             _explorer.RootFolder = testFolder;
+
+        UpdatePreviewUi();
     }
 
     // ── Layout ───────────────────────────────────────────────────────────────
@@ -173,10 +191,9 @@ public sealed class StudioWindow : Window
         Tint(toolbar, background: () => SKColors.Transparent, border: () => ColorScheme.Outline.WithAlpha(50));
 
         var newDocButton = new ToolbarButton("new-doc", "New document");
-        var newButton = new ToolbarButton("new", "New (clear canvas)");
-        var openButton = new ToolbarButton("open", "Open folder…");
+        var openFileButton = new ToolbarButton("file", "Open file…");
+        var openFolderButton = new ToolbarButton("open", "Open folder…");
         var saveButton = new ToolbarButton("save", "Save (Ctrl+S)");
-        var exportButton = new ToolbarButton("export", "Export designer code");
         var zoomOut = new ToolbarButton("zoom-out", "Zoom out", 28f);
         var zoomIn = new ToolbarButton("zoom-in", "Zoom in", 28f);
         var zoomFit = new ToolbarButton("zoom-fit", "Fit to view", 28f);
@@ -199,28 +216,26 @@ public sealed class StudioWindow : Window
         _gridToolsGroup.Controls.Add(addGridColumnButton);
         _gridToolsGroup.Controls.Add(addGridRowButton);
 
-        var sortPropertiesButton = new Button
+        // Shared across Properties / Bindings / Events — sits on the inspector tab strip (right),
+        // not inside the Properties page alone.
+        var sortPropertiesButton = new ToolbarButton("sort-category", "Alfabetik sırala", size: 28f)
         {
-            Text = "Kategori",
-            Dock = DockStyle.Right,
-            Width = 70,
-            Height = 24,
-            Margin = new Thickness(0, 2, 0, 2),
-            AutoSize = false,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.None,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right,
             CheckOnClick = true,
             OpenDropDownOnClick = false,
-            ToolTipText = "Alfabetik sırala",
+            Margin = new Thickness(0),
+            ZOrder = 10_000,
         };
-        ToolbarButton.ApplyFlatSkin(sortPropertiesButton);
         sortPropertiesButton.CheckedChanged += (_, _) =>
         {
             var alphabetical = sortPropertiesButton.Checked;
-            sortPropertiesButton.Text = alphabetical ? "A–Z" : "Kategori";
+            sortPropertiesButton.Icon = alphabetical ? "sort-az" : "sort-category";
             sortPropertiesButton.SetToolTip(alphabetical ? "Kategorilere göre sırala" : "Alfabetik sırala");
             _inspector.PropertySort = alphabetical ? PropertySort.Alphabetical : PropertySort.Categorized;
         };
         sortPropertiesButton.Checked = _inspector.PropertySort == PropertySort.Alphabetical;
+        sortPropertiesButton.Icon = sortPropertiesButton.Checked ? "sort-az" : "sort-category";
 
         // Grid/snap spacing was a fixed 8px with no way to change it — a plain NumericUpDown next to
         // the toggles it controls, rather than a whole settings dialog for one number.
@@ -278,9 +293,9 @@ public sealed class StudioWindow : Window
             _gridToolsGroup,
             zoomGroup,
             Divider(),
-            _previewButton,
+            _previewButton, _previewExternalToggle,
             Divider(),
-            exportButton, saveButton, openButton, newButton, newDocButton,
+            saveButton, openFolderButton, openFileButton, newDocButton,
             Divider(),
             _redoButton, _undoButton,
         })
@@ -362,14 +377,7 @@ public sealed class StudioWindow : Window
         var propertiesPage = new Container { Dock = DockStyle.Fill, Text = "Properties", Border = new Thickness(0), Radius = new Radius(0) };
         var eventsPage = new Container { Dock = DockStyle.Fill, Text = "Events", Border = new Thickness(0), Radius = new Radius(0) };
         var bindingsPage = new Container { Dock = DockStyle.Fill, Text = "Bindings", Border = new Thickness(0), Radius = new Radius(0) };
-        var sortRow = new Element
-        {
-            Dock = DockStyle.Top, Height = 32, Margin = new Thickness(0, 0, 0, 6),
-            Border = new Thickness(0), Radius = new Radius(0), BackColor = SKColors.Transparent,
-        };
-        sortRow.Controls.Add(sortPropertiesButton);
         propertiesPage.Controls.Add(_inspector);
-        propertiesPage.Controls.Add(sortRow);
         eventsPage.Controls.Add(_eventHelper);
         bindingsPage.Controls.Add(_bindingHelper);
 
@@ -387,7 +395,33 @@ public sealed class StudioWindow : Window
         _inspectorTabs.Controls.Add(eventsPage);
         _inspectorTabs.SelectedTab = propertiesPage;
 
-        innerSplit.Panel2.Controls.Add(_inspectorTabs);
+        var inspectorHost = new Element
+        {
+            Dock = DockStyle.Fill,
+            Border = new Thickness(0),
+            Radius = new Radius(0),
+            BackColor = SKColors.Transparent,
+            Padding = new Thickness(0),
+        };
+        _inspectorTabs.Dock = DockStyle.Fill;
+        inspectorHost.Controls.Add(_inspectorTabs);
+        inspectorHost.Controls.Add(sortPropertiesButton);
+
+        void SyncInspectorSortButtonBounds()
+        {
+            const float stripHeight = 32f;
+            const float buttonSize = 28f;
+            const float pad = 2f;
+            sortPropertiesButton.Size = new SKSize(buttonSize, buttonSize);
+            sortPropertiesButton.Location = new SKPoint(
+                Math.Max(pad, inspectorHost.Width - buttonSize - pad),
+                Math.Max(0f, (stripHeight - buttonSize) / 2f));
+        }
+
+        inspectorHost.SizeChanged += (_, _) => SyncInspectorSortButtonBounds();
+        SyncInspectorSortButtonBounds();
+
+        innerSplit.Panel2.Controls.Add(inspectorHost);
         innerSplit.Panel2.Controls.Add(_layoutBar);
         innerSplit.Panel2.Controls.Add(Header("layout", "Layout"));
         innerSplit.Panel2.Controls.Add(_layers);
@@ -414,13 +448,31 @@ public sealed class StudioWindow : Window
             Controls.Add(_startScreen); // above everything, including the drag layer, until dismissed
 
         newDocButton.Click += (_, _) => { var d = NewDocument(); _documents.SelectedTab = d; SwitchActive(d.Surface); };
-        newButton.Click += (_, _) => _active.ClearAll();
-        openButton.Click += (_, _) => OpenFolder();
+        openFileButton.Click += (_, _) => OpenFile();
+        openFolderButton.Click += (_, _) => OpenFolder();
         saveButton.Click += (_, _) => SaveActiveDocument();
-        exportButton.Click += (_, _) => ExportCode();
         _undoButton.Click += (_, _) => _active.Commands.Undo();
         _redoButton.Click += (_, _) => _active.Commands.Redo();
         _previewButton.Click += (_, _) => TogglePreview();
+        _previewExternalToggle.Checked = StudioSettings.PreviewInSeparateWindow;
+        _previewExternalToggle.SetToolTip(_previewExternalToggle.Checked
+            ? "Preview runs in a separate window"
+            : "Preview runs inline on the canvas");
+        _previewExternalToggle.CheckedChanged += (_, _) =>
+        {
+            StudioSettings.PreviewInSeparateWindow = _previewExternalToggle.Checked;
+            _previewExternalToggle.SetToolTip(_previewExternalToggle.Checked
+                ? "Preview runs in a separate window"
+                : "Preview runs inline on the canvas");
+            // Switching host while a preview is live restarts it in the new mode.
+            if (IsPreviewActive)
+                RestartPreview();
+        };
+        _themeToggle.Click += (_, _) =>
+        {
+            StudioSettings.CycleTheme();
+            SyncThemeButton();
+        };
         zoomOut.Click += (_, _) => _active.Zoom /= 1.25f;
         zoomIn.Click += (_, _) => _active.Zoom *= 1.25f;
         zoomFit.Click += (_, _) => _active.FitToView();
@@ -428,7 +480,6 @@ public sealed class StudioWindow : Window
         snapToggle.CheckedChanged += (_, _) => { _active.SnapToGrid = snapToggle.Checked; _active.Invalidate(); };
         gridSizeField.ValueChanged += (_, _) => _active.GridStep = (float)gridSizeField.Value;
         guidesToggle.CheckedChanged += (_, _) => _active.SmartGuides = guidesToggle.Checked;
-        _themeToggle.CheckedChanged += (_, _) => ColorScheme.IsDarkMode = _themeToggle.Checked;
         randomizeToggle.CheckedChanged += (_, _) => _active.ShowRandomBackgrounds = randomizeToggle.Checked;
         addGridRowButton.Click += (_, _) =>
         {
@@ -488,11 +539,10 @@ public sealed class StudioWindow : Window
 
         var file = menu.AddMenuItem("File");
         file.AddMenuItem("New Document", (_, _) => { var d = NewDocument(); _documents.SelectedTab = d; SwitchActive(d.Surface); }, Keys.Control | Keys.N);
-        file.AddMenuItem("New (Clear Canvas)", (_, _) => _active.ClearAll());
-        file.AddMenuItem("Open Folder…", (_, _) => OpenFolder(), Keys.Control | Keys.O);
+        file.AddMenuItem("Open File…", (_, _) => OpenFile(), Keys.Control | Keys.O);
+        file.AddMenuItem("Open Folder…", (_, _) => OpenFolder(), Keys.Control | Keys.Shift | Keys.O);
         file.AddMenuItem("Save", (_, _) => SaveActiveDocument(), Keys.Control | Keys.S);
         file.AddSeparator();
-        file.AddMenuItem("Export Designer Code…", (_, _) => ExportCode(), Keys.Control | Keys.E);
         file.AddMenuItem("Import Designer Code…", (_, _) => ImportCode(), Keys.Control | Keys.I);
         file.AddSeparator();
         file.AddMenuItem("Close Tab", (_, _) => { if (_documents.SelectedTab is ElementBase t) TryCloseDocument(t); }, Keys.Control | Keys.W);
@@ -515,9 +565,21 @@ public sealed class StudioWindow : Window
         view.AddMenuItem("Zoom Out", (_, _) => _active.Zoom /= 1.25f, Keys.Control | Keys.OemMinus);
         view.AddMenuItem("Fit to View", (_, _) => _active.FitToView(), Keys.Control | Keys.D0);
         view.AddSeparator();
-        view.AddMenuItem("Toggle Dark Mode", (_, _) => _themeToggle.Checked = !_themeToggle.Checked);
+        view.AddMenuItem("Cycle Theme (Light / Dark / Auto)", (_, _) =>
+        {
+            StudioSettings.CycleTheme();
+            SyncThemeButton();
+        });
 
         return menu;
+    }
+
+    private void SyncThemeButton()
+    {
+        var preference = StudioSettings.Theme;
+        _themeToggle.Icon = StudioSettings.ThemeIcon(preference);
+        _themeToggle.SetToolTip(StudioSettings.ThemeToolTip(preference));
+        _themeToggle.Checked = preference == StudioThemePreference.Dark;
     }
 
     private void WireShell()
@@ -546,11 +608,19 @@ public sealed class StudioWindow : Window
         {
             if (_documents.SelectedTab is DesignDocument dd)
                 SwitchActive(dd.Surface);
+            else
+                StopPreview();
+
             if (_documents.SelectedTab is IStudioDocument doc)
                 _explorer.SetActiveFile(doc.FilePath);
+
+            UpdatePreviewUi();
         };
 
-        _explorer.FileOpenRequested += path => OpenPath(path, asPreview: true);
+        // Each Explorer activation opens (or focuses) its own permanent tab — preview-tab reuse
+        // was collapsing every subsequent click into the first tab and felt like the file never
+        // really opened.
+        _explorer.FileOpenRequested += path => OpenPath(path, asPreview: false);
 
         _startScreen.NewRequested += () => Controls.Remove(_startScreen);
         _startScreen.OpenFolderRequested += () => { Controls.Remove(_startScreen); OpenFolder(); };
@@ -692,6 +762,7 @@ public sealed class StudioWindow : Window
             return;
         }
 
+        StopPreview();
         DetachSurface(_active);
         _active = surface;
         AttachSurface(_active);
@@ -700,6 +771,7 @@ public sealed class StudioWindow : Window
         RefreshSelectionDependentUi();
         RefreshInteractionPages();
         RefreshAllPanels();
+        UpdatePreviewUi();
     }
 
     private void AttachSurface(DesignSurface s)
@@ -859,8 +931,10 @@ public sealed class StudioWindow : Window
         // root itself (or opening Properties) first. Leading with it here means it stays visible
         // alongside whatever else the status bar is currently reporting, selection or not.
         var formSize = $"Form {_active.DesignRoot.Width:0}×{_active.DesignRoot.Height:0}";
-        if (_active.PreviewMode)
-            _statusHost.Text = "PREVIEW — controls are live. Click ⏹ Design to return.";
+        if (IsPreviewActive)
+            _statusHost.Text = _previewExternalToggle.Checked
+                ? "PREVIEW — separate window. Click ⏹ to close."
+                : "PREVIEW — controls are live on the canvas. Click ⏹ to return.";
         else if (_active.Selection.Count > 1)
             _statusHost.Text = $"{formSize}   ·   {_active.Selection.Count} selected · right-click for align/distribute · {count} control(s)";
         else if (_active.Selection.Primary is { } s)
@@ -869,16 +943,173 @@ public sealed class StudioWindow : Window
             _statusHost.Text = $"{formSize}   ·   {count} control(s) · drag or double-click toolbox to add · Ctrl+wheel zoom · wheel/middle-drag pan";
     }
 
+    private bool IsPreviewActive =>
+        _active.PreviewMode || _externalPreview is { IsDisposed: false };
+
+    /// <summary>Preview / debug only makes sense for a visual designer document — text, .resx, and
+    /// other non-design tabs have no surface to run.</summary>
+    private bool CanPreview => _documents.SelectedTab is DesignDocument;
+
     private void TogglePreview()
     {
-        _active.PreviewMode = !_active.PreviewMode;
-        _previewButton.Icon = _active.PreviewMode ? "stop" : "play";
-        _previewButton.SetToolTip(_active.PreviewMode ? "Stop preview" : "Preview");
+        if (IsPreviewActive)
+            StopPreview();
+        else if (CanPreview)
+            StartPreview();
+    }
+
+    private void RestartPreview()
+    {
+        StopPreview();
+        if (CanPreview)
+            StartPreview();
+    }
+
+    private void StartPreview()
+    {
+        if (_documents.SelectedTab is not DesignDocument)
+            return;
+
+        if (_previewExternalToggle.Checked)
+            StartExternalPreview();
+        else
+            _active.PreviewMode = true;
+
+        _previewButton.Icon = "stop";
+        _previewButton.SetToolTip("Stop preview");
+        UpdatePreviewUi();
         UpdateStatus();
     }
 
+    private void StopPreview()
+    {
+        if (_active.PreviewMode)
+            _active.PreviewMode = false;
 
-    // ── File / export ────────────────────────────────────────────────────────
+        CloseExternalPreview();
+        _previewButton.Icon = "play";
+        UpdatePreviewUi();
+        UpdateStatus();
+    }
+
+    private void UpdatePreviewUi()
+    {
+        var allowStart = CanPreview;
+        _previewButton.Enabled = allowStart || IsPreviewActive;
+        _previewExternalToggle.Enabled = allowStart || IsPreviewActive;
+        if (IsPreviewActive)
+            _previewButton.SetToolTip("Stop preview");
+        else if (allowStart)
+            _previewButton.SetToolTip("Preview");
+        else
+            _previewButton.SetToolTip("Preview is only available for designer documents");
+    }
+
+    /// <summary>Materializes the active design into a real owned <see cref="Window"/> so preview
+    /// can run outside the canvas (HWND chrome, Alt+Tab, independent sizing) without putting the
+    /// design surface itself into live mode.</summary>
+    private void StartExternalPreview()
+    {
+        CloseExternalPreview();
+        _active.PreviewMode = false;
+
+        if (_documents.SelectedTab is not DesignDocument doc)
+            return;
+
+        var code = doc.GetPersistedSource();
+        var filePath = doc.FilePath;
+
+        var host = new Window
+        {
+            Text = string.IsNullOrWhiteSpace(_active.DesignRoot.Text) ? "Preview" : _active.DesignRoot.Text,
+            ClientSize = _active.DesignRoot.Size,
+            StartPosition = FormStartPosition.CenterScreen,
+            Owner = this,
+            ShowInTaskbar = true,
+            KeyPreview = true,
+        };
+
+        if (_active.SimulateWindowChrome)
+        {
+            host.ShowTitle = _active.DesignShowTitle;
+            if (_active.DesignTitleHeight > 0)
+                host.TitleHeight = _active.DesignTitleHeight;
+        }
+        else
+        {
+            host.ShowTitle = false;
+        }
+
+        var scratch = new DesignSurface();
+        try
+        {
+            CodeImporter.Import(scratch, code, filePath);
+            foreach (var child in scratch.DesignedControls.ToList())
+            {
+                scratch.DesignRoot.Controls.Remove(child);
+                ClearDesignModeFlags(child);
+                host.Controls.Add(child);
+            }
+        }
+        catch (Exception ex)
+        {
+            scratch.Dispose();
+            host.Dispose();
+            MessageBox.Show(ex.Message, "Preview failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        scratch.Dispose();
+        host.KeyDown += OnExternalPreviewKeyDown;
+        host.FormClosed += (_, _) =>
+        {
+            host.KeyDown -= OnExternalPreviewKeyDown;
+            if (ReferenceEquals(_externalPreview, host))
+            {
+                _externalPreview = null;
+                _previewButton.Icon = "play";
+                UpdatePreviewUi();
+                UpdateStatus();
+            }
+        };
+
+        _externalPreview = host;
+        host.Show();
+    }
+
+    private void OnExternalPreviewKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.KeyCode != Keys.Escape)
+            return;
+
+        e.Handled = true;
+        StopPreview();
+    }
+
+    private void CloseExternalPreview()
+    {
+        if (_externalPreview == null)
+            return;
+
+        var win = _externalPreview;
+        _externalPreview = null;
+        if (!win.IsDisposed)
+            win.Close();
+        win.Dispose();
+    }
+
+    private static void ClearDesignModeFlags(ElementBase control)
+    {
+        control.IsAncestorSiteInDesignMode = false;
+        for (var i = 0; i < control.Controls.Count; i++)
+        {
+            if (control.Controls[i] is ElementBase child)
+                ClearDesignModeFlags(child);
+        }
+    }
+
+
+    // ── File / open ──────────────────────────────────────────────────────────
 
     private void SaveActiveDocument()
     {
@@ -914,6 +1145,18 @@ public sealed class StudioWindow : Window
         AdoptRootFolderIfNone(doc.FilePath);
         _explorer.SetActiveFile(doc.FilePath);
         return true;
+    }
+
+    private void OpenFile()
+    {
+        var dialog = new FileSelectionDialog
+        {
+            Title = "Open File",
+            Filter = "C# source (*.cs)|*.cs|All files (*.*)|*.*",
+        };
+        var files = dialog.ShowDialog(this);
+        if (files.Length > 0)
+            OpenPath(files[0], asPreview: false);
     }
 
     private void OpenFolder()
@@ -952,11 +1195,10 @@ public sealed class StudioWindow : Window
     /// nothing here invents a hidden save format on top of it.
     /// </summary>
     /// <param name="asPreview">
-    /// True for Explorer navigation: reuses the single preview tab (<see cref="_previewDocument"/>)
-    /// instead of opening a new permanent one, matching Visual Studio's Solution Explorer — clicking
-    /// through files to look at them doesn't leave a trail of tabs behind. False (File ▸ Open, a
-    /// recent-projects entry, or any other explicit "open this" action) always opens a real,
-    /// permanent tab, exactly like Visual Studio's own File ▸ Open does.
+    /// Reserved for callers that intentionally want a single reusable preview tab
+    /// (<see cref="_previewDocument"/>). Explorer navigation and File ▸ Open both pass
+    /// <c>false</c> so each distinct path gets its own permanent tab (an already-open path
+    /// is focused instead of duplicated).
     /// </param>
     private void OpenPath(string path, bool asPreview = false)
     {
@@ -1085,46 +1327,9 @@ public sealed class StudioWindow : Window
         oldExplorerImage?.Dispose();
     }
 
-    private void ExportCode()
-    {
-        var code = (_documents.SelectedTab as DesignDocument)?.GetPersistedSource()
-            ?? CodeGenerator.Generate(_active, "MyWindow");
-
-        var preview = new Window
-        {
-            Text = "Generated Designer Code",
-            ClientSize = new SKSize(760, 580),
-            StartPosition = FormStartPosition.CenterScreen,
-            MinimizeBox = false, MaximizeBox = false,
-        };
-
-        var bar = new Element { Dock = DockStyle.Bottom, Height = 52, Padding = new Thickness(12, 10, 12, 10), BackColor = SKColors.Transparent, Border = new Thickness(0), Radius = new Radius(0) };
-        var close = new Button { Text = "Close", Dock = DockStyle.Right, Width = 96, DialogResult = DialogResult.Cancel };
-        var save = new Button { Text = "Save .cs…", Dock = DockStyle.Right, Width = 116, Margin = new Thickness(0, 0, 8, 0) };
-        bar.Controls.Add(close);
-        bar.Controls.Add(save);
-
-        var box = new RichTextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, Text = code, Margin = new Thickness(12) };
-        save.Click += (_, _) =>
-        {
-            var dialog = new SaveFileDialog { Title = "Save designer code", FileName = "MyWindow.Designer.cs", Filter = "C# source (*.cs)|*.cs" };
-            var path = dialog.ShowDialog(preview);
-            if (!string.IsNullOrWhiteSpace(path))
-            {
-                System.IO.File.WriteAllText(path!, code);
-                preview.Close(DialogResult.OK);
-            }
-        };
-
-        preview.Controls.Add(box);
-        preview.Controls.Add(bar);
-        preview.ShowDialog();
-    }
-
     /// <summary>
-    /// The reverse of <see cref="ExportCode"/>: reads Designer code (pasted, or loaded from a
-    /// <c>.cs</c> file) back through <see cref="CodeImporter"/> into a new document tab — the round
-    /// trip the export-only flow was missing.
+    /// Paste / load Designer code through <see cref="CodeImporter"/> into a new document tab —
+    /// complementary to <see cref="OpenFile"/> when the source is not already on disk.
     /// </summary>
     private void ImportCode()
     {

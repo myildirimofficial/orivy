@@ -77,13 +77,14 @@ public static class ControlCatalog
         [nameof(Badge)] = "Display",
         ["Breadcrumb"] = "Display",
         [nameof(ProgressBar)] = "Display",
+        [nameof(Carousel)] = "Display",
         ["MenuStrip"] = "Display",
     };
 
     private static readonly Dictionary<string, string> Descriptions = new(StringComparer.Ordinal)
     {
         [nameof(Button)] = "Clickable push button with visual states.",
-        ["ButtonGroup"] = "Segmented button group (single selection).",
+        [nameof(ButtonGroup)] = "Segmented button group (single selection).",
         [nameof(TextBox)] = "Single or multi-line text input.",
         [nameof(CheckBox)] = "Boolean check box with label.",
         [nameof(ComboBox)] = "Drop-down selection list.",
@@ -95,6 +96,7 @@ public static class ControlCatalog
         [nameof(TreeView)] = "Hierarchical node tree.",
         [nameof(DatePicker)] = "Date field with calendar drop-down.",
         [nameof(ProgressBar)] = "Progress indicator.",
+        [nameof(Carousel)] = "Image carousel with styled previous/next navigation chrome.",
     };
 
     /// <summary>Per-type default sizes so freshly dropped controls look reasonable.</summary>
@@ -110,6 +112,7 @@ public static class ControlCatalog
         [nameof(PropertyGrid)] = new(280, 220),
         [nameof(TreeView)] = new(200, 180),
         [nameof(ProgressBar)] = new(200, 14),
+        [nameof(Carousel)] = new(320, 200),
         [nameof(TrackBar)] = new(200, 32),
         [nameof(Separator)] = new(200, 12),
         [nameof(TabView)] = new(300, 200),

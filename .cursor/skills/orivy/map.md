@@ -23,7 +23,8 @@ Open the owner before editing. Do not duplicate its job in a new type.
 | `Orivy/Controls/ElementBase.IArrangedElement.cs` | `IArrangedElement` explicit implementation |
 | `Orivy/Controls/ElementBase.VisualStyles.cs` | `ConfigureVisualStyles`, snapshots, state transitions |
 | `Orivy/Controls/ElementBase.MotionEffects.cs` | Motion effects and their timer |
-| `Orivy/Controls/ElementBase.BackgroundImages.cs` | Slideshow, blur, image transitions |
+| `Orivy/Controls/ElementBase.BackgroundImages.cs` | Background image frames, blur, transitions, `ShowNext/PreviousBackgroundImage` |
+| `Orivy/Controls/Carousel.cs` | Carousel host with styled previous/next navigation chrome |
 | `Orivy/Controls/ElementBase.RemoteImages.cs` | URL image load |
 | `Orivy/Controls/ElementBase.Backdrop.cs` | Mica / acrylic / glass element backdrop |
 | `Orivy/Controls/IMouseCaptureLost.cs` | Cancel drag when capture is stolen |

@@ -540,7 +540,8 @@ internal static class ElementVisualStyleInterpolator
 
     private static BoxShadow CreateTransparentShadow(in BoxShadow source)
     {
-        return new BoxShadow(source.OffsetX, source.OffsetY, source.Blur, source.Spread, source.Color.WithAlpha(0), source.Inset);
+        // Start from zero blur so focus glows ease in (Bootstrap 3-style), not pop as a hard rim.
+        return new BoxShadow(source.OffsetX, source.OffsetY, 0f, Radius.Empty, source.Color.WithAlpha(0), source.Inset);
     }
 
     private static Radius InterpolateRadius(Radius from, Radius to, float progress)

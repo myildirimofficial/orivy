@@ -74,6 +74,9 @@ See implementation for details: `Orivy/Layout/DefaultLayout.cs`
 
 - Docked children take up space by consuming the parent's remaining client region. Typical dock values: `Top`, `Bottom`, `Left`, `Right`, `Fill`.
 - Top/Bottom own height and stretch to the parent's remaining width; Left/Right own width and stretch to the remaining height; Fill consumes both axes.
+- `MinimumSize` / `MaximumSize` constrain only axes the control still owns. On a Dock=Top/Bottom control, Min/Max width is ignored so docking can stretch without Min Width fighting the layout engine; Left/Right ignore Min/Max height; Fill ignores both. The stored Min/Max values remain for when Dock returns to `None`.
+- `SetDock` seeds from `SpecifiedBounds` but caps the layout-owned axis to the parent client before `DefaultLayout` assigns the real remaining region (Top→Fill stacking). Studio import restores file Size only on free axes for the same reason. Do not clamp every `Size` write to the full `DisplayRectangle` — that overlaps stacked dock siblings.
+- `Visible = false` controls never reserve Dock/Anchor space (runtime and designer). In design mode, `DefaultLayout` still assigns docked Bounds to hidden children without shrinking the remaining region, so selection adorners stretch correctly without leaving an empty gap for siblings.
 - The layout calculates preferred size for docked controls when asked for parent's preferred size.
 - In Orivy.Studio, spontaneous design-mode layout is skipped so anchors do not snap during drag. Assigning `Dock` (or `Anchor`) still runs `DefaultLayout` immediately — including through a deferred `PerformLayout` queued while `SuspendLayout` is active — so a Top dock no longer keeps a pre-dock overflow width.
 

@@ -59,9 +59,14 @@ public partial class Window : WindowBase
     private readonly List<AnimationManager> _hoverAnimationManagers = new();
 
     /// <summary>
-    ///     The control box left value
+    ///     The control box left value (system buttons + hosted title-bar controls reserved edge)
     /// </summary>
     private float _controlBoxLeft;
+
+    /// <summary>
+    ///     Left edge of native system buttons (Extend / Min / Max / Close), before hosted extras.
+    /// </summary>
+    private float _systemButtonsLeft;
 
     /// <summary>
     ///     The rectangle of control box
@@ -187,6 +192,10 @@ public partial class Window : WindowBase
     private Thickness _titleBarMenuStripStoredMargin;
     private DockStyle _titleBarMenuStripStoredDock;
     private AnchorStyles _titleBarMenuStripStoredAnchor;
+    private readonly List<ElementBase> _titleBarControls = [];
+    private SKRect _titleBarControlsRect;
+    private EventHandler? _titleBarControlLayoutHandler;
+    private bool _syncingTitleBarControls;
 
     /// <summary>
     ///     Whether to show the title bar of the form
@@ -381,6 +390,74 @@ public partial class Window : WindowBase
     }
 
     /// <summary>
+    /// Controls hosted in the title bar, laid out immediately to the left of the system
+    /// buttons (Extend / Min / Max / Close). Hit-testing and caption drag treat them like
+    /// other title-bar chrome so they stay interactive and DPI-aligned.
+    /// </summary>
+    [Browsable(false)]
+    public IReadOnlyList<ElementBase> TitleBarControls => _titleBarControls;
+
+    /// <summary>
+    /// Hosts <paramref name="control"/> in the title bar to the left of ExtendBox / system buttons.
+    /// </summary>
+    public void AddTitleBarControl(ElementBase control)
+    {
+        ArgumentNullException.ThrowIfNull(control);
+
+        if (_titleBarControls.Contains(control))
+            return;
+
+        _titleBarControls.Add(control);
+        control.Dock = DockStyle.None;
+        control.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+
+        _titleBarControlLayoutHandler ??= (_, _) =>
+        {
+            if (!_syncingTitleBarControls && IsHandleCreated)
+                RefreshHostedTitleBarLayout();
+        };
+        control.SizeChanged += _titleBarControlLayoutHandler;
+        control.VisibleChanged += _titleBarControlLayoutHandler;
+
+        if (!Controls.Contains(control))
+            Controls.Add(control);
+
+        RefreshHostedTitleBarLayout();
+    }
+
+    /// <summary>
+    /// Removes a previously hosted title-bar control.
+    /// </summary>
+    public void RemoveTitleBarControl(ElementBase control)
+    {
+        if (control == null || !_titleBarControls.Remove(control))
+            return;
+
+        if (_titleBarControlLayoutHandler != null)
+        {
+            control.SizeChanged -= _titleBarControlLayoutHandler;
+            control.VisibleChanged -= _titleBarControlLayoutHandler;
+        }
+
+        if (Controls.Contains(control))
+            Controls.Remove(control);
+
+        RefreshHostedTitleBarLayout();
+    }
+
+    /// <summary>
+    /// Clears all hosted title-bar controls.
+    /// </summary>
+    public void ClearTitleBarControls()
+    {
+        if (_titleBarControls.Count == 0)
+            return;
+
+        foreach (var control in _titleBarControls.ToArray())
+            RemoveTitleBarControl(control);
+    }
+
+    /// <summary>
     ///     Gets or sets whether to show the title bar of the form
     /// </summary>
     [Category("Window")]
@@ -567,6 +644,7 @@ public partial class Window : WindowBase
             }
 
             _tabView = value;
+            _tabView.TabMode = TabViewMode.TitleBar;
             if (_tabView == null)
             {
                 Invalidate();
@@ -694,6 +772,7 @@ public partial class Window : WindowBase
         InvalidateMeasureRecursive();
         PerformLayout();
         SyncTitleBarMenuStripLayout();
+        SyncTitleBarControlsLayout();
         NeedsFullChildRedraw = true;
         InvalidateRenderTree();
         Invalidate();
@@ -718,6 +797,8 @@ public partial class Window : WindowBase
     private float GetTitleBarTrailingContentX()
     {
         var trailingEdge = _controlBoxLeft > 0f ? _controlBoxLeft : Width - _titleBarRightInsetDPI;
+        if (!_titleBarControlsRect.IsEmpty)
+            trailingEdge = Math.Min(trailingEdge, _titleBarControlsRect.Left);
         return Math.Max(_titleBarLeftInsetDPI, trailingEdge - (8f * ScaleFactor));
     }
 
@@ -786,14 +867,123 @@ public partial class Window : WindowBase
         return _titleBarMenuStripRect.Width + (10f * ScaleFactor);
     }
 
+    private float GetTitleBarControlsReservedWidth()
+    {
+        if (_titleBarControlsRect.IsEmpty)
+            return 0f;
+
+        return _titleBarControlsRect.Width + (8f * ScaleFactor);
+    }
+
     private bool IsPointOverTitleBarMenuStrip(SKPoint point)
     {
         return HasVisibleTitleBarMenuStrip && !_titleBarMenuStripRect.IsEmpty && _titleBarMenuStripRect.Contains(point);
     }
 
+    private bool IsPointOverTitleBarControls(SKPoint point)
+    {
+        if (_titleBarControls.Count == 0)
+            return false;
+
+        if (!_titleBarControlsRect.IsEmpty && _titleBarControlsRect.Contains(point))
+            return true;
+
+        foreach (var control in _titleBarControls)
+        {
+            if (control is { Visible: true } && control.Bounds.Contains(point))
+                return true;
+        }
+
+        return false;
+    }
+
     private bool IsHostedTitleBarElement(IElement element)
     {
-        return _titleBarMenuStrip != null && ReferenceEquals(element, _titleBarMenuStrip);
+        if (_titleBarMenuStrip != null && ReferenceEquals(element, _titleBarMenuStrip))
+            return true;
+
+        if (element is ElementBase control && _titleBarControls.Contains(control))
+            return true;
+
+        return false;
+    }
+
+    private void SyncTitleBarControlsLayout()
+    {
+        if (_syncingTitleBarControls)
+            return;
+
+        if (_titleBarControls.Count == 0 || !ShowTitle)
+        {
+            _titleBarControlsRect = SKRect.Empty;
+            return;
+        }
+
+        _syncingTitleBarControls = true;
+        try
+        {
+            var gap = 4f * ScaleFactor;
+            var maxHeight = Math.Max(0f, _titleHeightDPI - (4f * ScaleFactor));
+            var systemEdge = _systemButtonsLeft > 0f ? _systemButtonsLeft : Width - _titleBarRightInsetDPI;
+            var x = systemEdge - (4f * ScaleFactor);
+
+            float leftmost = x;
+            float topMost = _titleBarCenterYDPI;
+            float bottomMost = _titleBarCenterYDPI;
+            var anyVisible = false;
+
+            // Keep addition order left→right: first added sits farthest left of ExtendBox.
+            for (var i = _titleBarControls.Count - 1; i >= 0; i--)
+            {
+                var control = _titleBarControls[i];
+                if (control is not { Visible: true })
+                    continue;
+
+                var preferred = control.GetPreferredSize(SKSize.Empty);
+                var width = preferred.Width > 0f ? preferred.Width : control.Width;
+                var height = preferred.Height > 0f ? preferred.Height : control.Height;
+                if (width <= 0f)
+                    width = 28f * ScaleFactor;
+                if (height <= 0f)
+                    height = Math.Min(28f * ScaleFactor, maxHeight);
+                height = Math.Min(height, maxHeight);
+
+                x -= width;
+                var top = _titleBarCenterYDPI - (height / 2f);
+                var location = new SKPoint(x, top);
+                var size = new SKSize(width, height);
+
+                if (control.Location != location)
+                    control.Location = location;
+                if (control.Size != size)
+                    control.Size = size;
+
+                leftmost = x;
+                topMost = Math.Min(topMost, top);
+                bottomMost = Math.Max(bottomMost, top + height);
+                anyVisible = true;
+                x -= gap;
+            }
+
+            if (!anyVisible)
+            {
+                _titleBarControlsRect = SKRect.Empty;
+                return;
+            }
+
+            _titleBarControlsRect = SKRect.Create(
+                leftmost,
+                topMost,
+                Math.Max(0f, systemEdge - leftmost),
+                Math.Max(0f, bottomMost - topMost));
+
+            // Reserve trailing chrome so tabs / TitleBarMenuStrip don't cover these controls.
+            _controlBoxLeft = Math.Max(_titleBarLeftInsetDPI, leftmost - (2f * ScaleFactor));
+        }
+        finally
+        {
+            _syncingTitleBarControls = false;
+        }
     }
 
     [Browsable(false)]
@@ -890,11 +1080,12 @@ public partial class Window : WindowBase
 
     private void EnsureInitialLayoutAndDpiSync()
     {
-        // ensure measurements are fresh now that handle (and correct client size) exist
+        // Title-bar Padding must be applied BEFORE the first child layout pass — otherwise Anchor
+        // baselines and docked children measure against a zero top inset and look clipped until resize.
+        CalcSystemBoxPos();
         InvalidateMeasureRecursive();
         PerformLayout();
         Invalidate();
-        CalcSystemBoxPos();
 
         // Initial DPI sync: Ensure controls match the window's actual DPI
         try
@@ -910,9 +1101,9 @@ public partial class Window : WindowBase
             }
 
             // layout again after DPI adjustments (child OnDpiChanged may alter desired sizes)
+            CalcSystemBoxPos();
             InvalidateMeasureRecursive();
             PerformLayout();
-            CalcSystemBoxPos();
             if (UsesTitleBarTabs)
                 _tabView.InvalidateTitleBarLayout();
             Invalidate();
@@ -999,6 +1190,9 @@ public partial class Window : WindowBase
         if (IsPointOverTitleBarMenuStrip(clientPt))
             return false;
 
+        if (IsPointOverTitleBarControls(clientPt))
+            return false;
+
         return true;
     }
 
@@ -1062,7 +1256,11 @@ public partial class Window : WindowBase
             _minimizeBoxRect = _controlBoxRect = SKRect.Create(Width + 1, Height + 1, 1, 1);
         }
 
+        _systemButtonsLeft = _controlBoxLeft;
         _formMenuRect = SKRect.Create(_titleBarLeftInsetDPI + 10, _titleBarCenterYDPI - titleIconSize / 2, titleIconSize, titleIconSize);
+
+        // Hosted controls sit left of ExtendBox and further shrink the trailing content edge.
+        SyncTitleBarControlsLayout();
 
         Padding = new Thickness(
             (int)MathF.Ceiling(_titleBarLeftInsetDPI),
@@ -1297,6 +1495,7 @@ public partial class Window : WindowBase
         // Title bar drag has absolute priority over child controls.
         var inTitleArea = ShowTitle && e.Y < Padding.Top;
         var inTitleBarMenu = IsPointOverTitleBarMenuStrip(e.Location);
+        var inTitleBarExtras = IsPointOverTitleBarControls(e.Location);
         var inTabHeader = UsesTitleBarTabs && _tabView != null && _tabView.TryGetTitleBarTabIndexAtPoint(e.Location, CreateTitleBarLayoutContext(), out _);
 
         var inTitleBarButtons = UsesTitleBarTabs && _tabView != null &&
@@ -1311,7 +1510,8 @@ public partial class Window : WindowBase
         _inExtendBox = ExtendBox && _extendBoxRect.Contains(e.Location);
         _inFormMenuBox = showMenuInsteadOfIcon && _formMenuRect.Contains(e.Location);
 
-        var inControlBox = _inCloseBox || _inMaxBox || _inMinBox || _inExtendBox || _inFormMenuBox || inTitleBarMenu || inTitleBarButtons;
+        var inControlBox = _inCloseBox || _inMaxBox || _inMinBox || _inExtendBox || _inFormMenuBox
+                           || inTitleBarMenu || inTitleBarExtras || inTitleBarButtons;
 
         // System buttons (incl. ExtendBox) win over title-bar tab hit-testing.
         if (!inControlBox && UsesTitleBarTabs && _tabView != null &&
@@ -1376,6 +1576,7 @@ public partial class Window : WindowBase
         {
             var inTabHeaderDbl = UsesTitleBarTabs && IsPointOverTabHeader(e.Location);
             var inTitleBarMenuDbl = IsPointOverTitleBarMenuStrip(e.Location);
+            var inTitleBarExtrasDbl = IsPointOverTitleBarControls(e.Location);
             var inControlBoxDbl = _controlBoxRect.Contains(e.Location)
                                   || _maximizeBoxRect.Contains(e.Location)
                                   || _minimizeBoxRect.Contains(e.Location)
@@ -1383,7 +1584,8 @@ public partial class Window : WindowBase
                                   || (UsesTitleBarTabs && _tabView.IsPointOverTitleBarCloseButton(e.Location, CreateTitleBarLayoutContext()))
                                   || (UsesTitleBarTabs && _tabView.IsPointOverTitleBarNewTabButton(e.Location, CreateTitleBarLayoutContext()))
                                   || (showMenuInsteadOfIcon && _formMenuRect.Contains(e.Location))
-                                  || inTitleBarMenuDbl;
+                                  || inTitleBarMenuDbl
+                                  || inTitleBarExtrasDbl;
 
             if (!inControlBoxDbl && !inTabHeaderDbl)
             {
@@ -2144,8 +2346,10 @@ public partial class Window : WindowBase
         bool leftGroupVisible = showMenuInsteadOfIcon || (ShowIcon && Icon != null);
         var initialOffset = leftGroupVisible ? 44 * ScaleFactor : 0;
         var titleBarMenuReservedWidth = GetTitleBarMenuReservedWidth();
+        var titleBarControlsReservedWidth = GetTitleBarControlsReservedWidth();
 
-        var occupiedWidth = initialOffset + leadingInset + trailingInset + titleBarMenuReservedWidth;
+        var occupiedWidth = initialOffset + leadingInset + trailingInset
+                            + titleBarMenuReservedWidth + titleBarControlsReservedWidth;
 
         if (controlBox)
             occupiedWidth += _controlBoxRect.Width;
@@ -2158,8 +2362,6 @@ public partial class Window : WindowBase
 
         if (ExtendBox)
             occupiedWidth += _extendBoxRect.Width;
-
-        occupiedWidth += 0;
 
         var availableWidth = Math.Max(0f, Width - occupiedWidth);
         var maxSize = 250f * ScaleFactor;

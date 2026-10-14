@@ -45,6 +45,9 @@ public class TreeView : ElementBase
         AutoScroll = true;
         CanSelect = true;
         TabStop = true;
+        // Row hover/selection is painted in OnPaint. Sticky BackColor + visual-styles Base
+        // would otherwise brightness-tint the entire control on PointerOver/Pressed.
+        UseDefaultPointerVisualStates = false;
         Size = new SKSize(220, 260);
         Padding = new Thickness(6);
         Radius = new Radius(10);

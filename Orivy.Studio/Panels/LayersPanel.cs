@@ -96,6 +96,13 @@ public sealed class LayersPanel : Element
                 return;
 
             var control = _rows[e.ItemIndex];
+            // Hiding or locking the design root would make the whole document unreachable.
+            if (ReferenceEquals(control, _surface.DesignRoot))
+            {
+                Rebuild();
+                return;
+            }
+
             var isChecked = e.CurrentState == CheckState.Checked;
             if (e.ColumnIndex == 1)
             {
@@ -144,12 +151,9 @@ public sealed class LayersPanel : Element
             _rows.Clear();
             _list.Items.Clear();
 
-            // Topmost first, like Figma's layer list. Recurses into a group's own children too — this
-            // used to only ever list the top-level DesignedControls, so a group's contents had no way
-            // to be seen, selected or unlocked from here at all short of clicking them directly on the
-            // (possibly crowded) canvas.
-            foreach (var control in _surface.DesignedControls.OrderByDescending(c => c.ZOrder))
-                AddRow(control, depth: 0);
+            // Design root first so the form itself is selectable from Layers, then its children
+            // (topmost first) recursively — same hierarchy the canvas uses for nesting.
+            AddRow(_surface.DesignRoot, depth: 0);
         }
         finally
         {
@@ -169,12 +173,17 @@ public sealed class LayersPanel : Element
         // A leading tree-branch glyph (rather than plain spaces, which some text renderers collapse)
         // makes a nested row visually distinct from a top-level one at a glance.
         var indent = depth > 0 ? new string(' ', (depth - 1) * 3) + "↳ " : string.Empty;
-        var item = new GridListItem($"{indent}{control.Name}  ·  {control.GetType().Name}");
+        var isRoot = ReferenceEquals(control, _surface.DesignRoot);
+        var displayName = string.IsNullOrEmpty(control.Name) ? (isRoot ? "Form" : control.GetType().Name) : control.Name;
+        var typeLabel = isRoot ? "Form" : control.GetType().Name;
+        var item = new GridListItem($"{indent}{displayName}  ·  {typeLabel}");
         item.Cells.Add(new GridListCell { CheckState = control.Visible ? CheckState.Checked : CheckState.Unchecked });
         item.Cells.Add(new GridListCell { CheckState = _surface.Locked.Contains(control) ? CheckState.Checked : CheckState.Unchecked });
         _list.Items.Add(item);
 
-        var children = control.Controls.OfType<ElementBase>().Where(c => c is not ScrollBar && _surface.IsEditableInThisDocument(c)).OrderByDescending(c => c.ZOrder);
+        var children = control.Controls.OfType<ElementBase>()
+            .Where(c => c is not ScrollBar && _surface.IsEditableInThisDocument(c))
+            .OrderByDescending(c => c.ZOrder);
         foreach (var child in children)
             AddRow(child, depth + 1);
     }
@@ -192,6 +201,8 @@ public sealed class LayersPanel : Element
 
         var dragged = _rows[fromIndex];
         var target = _rows[toIndex];
+        if (ReferenceEquals(dragged, _surface.DesignRoot) || ReferenceEquals(target, _surface.DesignRoot))
+            return;
         if (!ReferenceEquals(dragged.Parent, target.Parent))
             return;
 

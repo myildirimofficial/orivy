@@ -155,7 +155,7 @@ internal partial class MainWindow
         this.Controls.Add(tabView);
         this.Controls.Add(this.menuStrip);
         this.menuStrip.BringToFront();
-        this.ResumeLayout(false);
+        this.ResumeLayout(true);
     }
 
     private Container panel3;

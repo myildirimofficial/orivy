@@ -164,7 +164,8 @@ public class ElementCollection : ArrangedElementCollection, IList, ICloneable
             _maxZOrder++;
             value.ZOrder = _maxZOrder;
 
-            if (Owner.FocusedElement == null && value.TabStop) Owner.FocusedElement = value;
+            // Do not auto-focus the first TabStop child on Add — that made TextBox/ComboBox
+            // appear focused (caret + focus ring) as soon as a form was built, before any click.
         }
         finally
         {

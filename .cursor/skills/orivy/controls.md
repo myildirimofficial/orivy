@@ -4,7 +4,7 @@
 
 `ElementBase` is the control. `Element` is an empty concrete. `Container` is a transparent host (`FlowLayout`, `Grid`). `WindowBase` is the HWND. `Window` adds title-bar chrome.
 
-Paint order in `ElementBase.Render` is fixed: transform, shadows, background, background images, backdrop, motion, `OnPaint`, spinner, border, default text, children, focus adorner. Customize with `OnPaint`, visual styles, motion, or backdrop. Do not reimplement `Render`.
+Paint order in `ElementBase.Render` is fixed: transform, shadows, background, background images, backdrop, motion, `OnPaint`, spinner, border, content `Image` (when `ShouldRenderContentImage` / `RenderImageAsContent`), default text, children, focus adorner. Customize with `OnPaint`, visual styles, motion, or backdrop. Do not reimplement `Render`. Chrome that uses a child's `Image` only via `RenderImageSlot` (TabView tab glyphs) sets `RenderImageAsContent = false` on that child — `ElementBase` must not special-case host types.
 
 ## New control
 

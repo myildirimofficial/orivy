@@ -10,7 +10,13 @@ public abstract partial class ElementBase
     PropertyStore IArrangedElement.Properties => _properties ??= new PropertyStore();
     private PropertyStore? _properties;
 
-    protected virtual bool ParticipatesInParentLayout => Visible && !UsesAnchorOverflowLayout(this);
+    /// <summary>
+    /// Invisible controls are skipped by parent layout (WinForms-compatible) so they do not
+    /// reserve Dock/Anchor space. Design-mode dock sizing for hidden children is handled in
+    /// <see cref="Orivy.Layout.DefaultLayout"/> without shrinking the remaining region.
+    /// </summary>
+    protected virtual bool ParticipatesInParentLayout =>
+        Visible && !UsesAnchorOverflowLayout(this);
 
     #region IArrangedElement Explicit Implementation
 

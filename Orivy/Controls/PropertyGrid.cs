@@ -884,7 +884,8 @@ public class PropertyGrid : GridList
     /// </summary>
     private static bool IsCompactStruct(Type t) =>
         t == typeof(SKSize) || t == typeof(SKSizeI) || t == typeof(SKPoint) || t == typeof(SKPointI)
-        || t == typeof(SKRect) || t == typeof(SKRectI);
+        || t == typeof(SKRect) || t == typeof(SKRectI)
+        || t == typeof(Thickness) || t == typeof(Radius);
 
     private static string CategoryOf(PropertyDescriptor pd)
         => string.IsNullOrWhiteSpace(pd.Category) ? "Misc" : pd.Category;
@@ -1131,6 +1132,22 @@ public class PropertyGrid : GridList
             if (t == typeof(SKPointI) && parts.Length == 2) return new SKPointI(I(0), I(1));
             if (t == typeof(SKRect) && parts.Length == 4) return new SKRect(F(0), F(1), F(2), F(3));
             if (t == typeof(SKRectI) && parts.Length == 4) return new SKRectI(I(0), I(1), I(2), I(3));
+            if (t == typeof(Thickness))
+            {
+                if (parts.Length == 1) return new Thickness(I(0));
+                if (parts.Length == 2) return new Thickness(I(0), I(1));
+                if (parts.Length == 4) return new Thickness(I(0), I(1), I(2), I(3));
+            }
+            if (t == typeof(Radius))
+            {
+                if (parts.Length == 1)
+                {
+                    var all = F(0);
+                    return new Radius(all, all, all, all);
+                }
+
+                if (parts.Length == 4) return new Radius(F(0), F(1), F(2), F(3));
+            }
         }
         catch (FormatException) { /* fall through */ }
 
@@ -1138,7 +1155,7 @@ public class PropertyGrid : GridList
     }
 
     /// <summary>"120, 40" / "10, 10, 120, 40" — same order ToString() below produces, so a copied
-    /// value pastes back in cleanly.</summary>
+    /// value pastes back in cleanly. Thickness/Radius also accept a single "all" value.</summary>
     private static string FormatCompactStruct(object value) => value switch
     {
         SKSize s => FormattableString.Invariant($"{s.Width:0.##}, {s.Height:0.##}"),
@@ -1147,6 +1164,10 @@ public class PropertyGrid : GridList
         SKPointI p => FormattableString.Invariant($"{p.X}, {p.Y}"),
         SKRect r => FormattableString.Invariant($"{r.Left:0.##}, {r.Top:0.##}, {r.Right:0.##}, {r.Bottom:0.##}"),
         SKRectI r => FormattableString.Invariant($"{r.Left}, {r.Top}, {r.Right}, {r.Bottom}"),
+        Thickness thickness when thickness.All >= 0 => thickness.All.ToString(CultureInfo.InvariantCulture),
+        Thickness thickness => FormattableString.Invariant($"{thickness.Left}, {thickness.Top}, {thickness.Right}, {thickness.Bottom}"),
+        Radius radius when radius.All >= 0f => FormattableString.Invariant($"{radius.All:0.##}"),
+        Radius radius => FormattableString.Invariant($"{radius.TopLeft:0.##}, {radius.TopRight:0.##}, {radius.BottomRight:0.##}, {radius.BottomLeft:0.##}"),
         _ => value.ToString() ?? string.Empty,
     };
 

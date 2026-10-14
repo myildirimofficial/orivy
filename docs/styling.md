@@ -20,7 +20,7 @@ Core responsibilities:
 
 - expose theme-aware surface colors such as `Surface`, `SurfaceVariant`, `SurfaceContainer`, and `SurfaceContainerHigh`
 - expose semantic colors such as `Primary`, `Error`, `Success`, and `Warning`
-- derive `ForeColor`, `Outline`, `BorderColor`, and `ShadowColor` from the current theme state
+- derive `ForeColor`, `Outline`, `BorderColor`, and `ShadowColor` from the current theme state (`ShadowColor` is black in both themes; dark mode uses a higher alpha so elevation reads as depth rather than a light halo)
 - animate background and theme changes through `StartThemeTransition(...)`
 - notify controls through the `ThemeChanged` event
 
@@ -150,7 +150,7 @@ The default `Button` also demonstrates this flow by defining a full visual-style
 
 For styles configured directly with `ConfigureVisualStyles(...)`, `ElementBase` remembers the builder configuration and replays it on `ColorScheme.ThemeChanged`. This keeps `ColorScheme`-derived colors current across normal, hover, pressed, checked, focused, disabled, hidden, and invalid states. If a control rebuilds styles manually with `clearExisting: true`, the remembered configuration is replaced instead of accumulated.
 
-An explicit `BackColor`, `ForeColor`, or `BorderColor` property assignment (property grid / `InitializeComponent`) is sticky: theme replay does not put the control's style-base palette back on top of it. Hover/pressed fills derive from that assigned background. Theme-following chrome should use `ConfigureVisualStyles` with `ColorScheme` lambdas instead of a one-time property snapshot. Style engine writes do not mark stickiness.
+An explicit `BackColor`, `ForeColor`, or `BorderColor` property assignment (property grid / `InitializeComponent`) is sticky: theme replay does not put the control's style-base palette back on top of it. Hover/pressed fills derive from that assigned background (generic brightness tint), which can override `OnHover`/`OnFocused` backgrounds from `ConfigureVisualStyles`. Theme-following chrome such as `TextBox` and `ComboBox` should set colors only through style builders, not one-time property snapshots in the constructor. Style engine writes do not mark stickiness.
 
 ## 5. Toggle Buttons and Button Groups
 

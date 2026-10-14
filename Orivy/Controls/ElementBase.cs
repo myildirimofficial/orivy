@@ -257,6 +257,28 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
+    private bool _renderImageAsContent = true;
+
+    /// <summary>
+    /// When true (default), <see cref="Image"/> is painted into the content area during
+    /// <see cref="Render"/>. Chrome hosts that only use <see cref="RenderImageSlot"/> for glyphs
+    /// (for example a tab strip) set this to false on their children.
+    /// </summary>
+    [Browsable(false)]
+    [DefaultValue(true)]
+    public bool RenderImageAsContent
+    {
+        get => _renderImageAsContent;
+        set
+        {
+            if (_renderImageAsContent == value)
+                return;
+
+            _renderImageAsContent = value;
+            Invalidate();
+        }
+    }
+
     protected bool IsDesignMode { get; }
 
     protected bool IsPerformingLayout { get; private set; }
@@ -1005,11 +1027,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         {
             if (_minimumSize == value) return;
             _minimumSize = value;
-            if (Size.Width < _minimumSize.Width || Size.Height < _minimumSize.Height)
-                Size = new(
-                    Math.Max(Size.Width, _minimumSize.Width),
-                    Math.Max(Size.Height, _minimumSize.Height)
-                );
+            var constrained = ConstrainProposedSize(Size);
+            if (constrained != Size)
+                Size = constrained;
         }
     }
 
@@ -1024,13 +1044,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         {
             if (_maximumSize == value) return;
             _maximumSize = value;
-
-            if ((_maximumSize.Width > 0 && Size.Width > _maximumSize.Width) ||
-                (_maximumSize.Height > 0 && Size.Height > _maximumSize.Height))
-                Size = new SKSize(
-                    _maximumSize.Width > 0 ? Math.Min(Size.Width, _maximumSize.Width) : Size.Width,
-                    _maximumSize.Height > 0 ? Math.Min(Size.Height, _maximumSize.Height) : Size.Height
-                );
+            var constrained = ConstrainProposedSize(Size);
+            if (constrained != Size)
+                Size = constrained;
         }
     }
 
@@ -1042,17 +1058,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         get => _size;
         set
         {
-            var newSize = value;
-
-            if (MinimumSize.Width > 0)
-                newSize.Width = Math.Max(newSize.Width, MinimumSize.Width);
-            if (MinimumSize.Height > 0)
-                newSize.Height = Math.Max(newSize.Height, MinimumSize.Height);
-
-            if (MaximumSize.Width > 0)
-                newSize.Width = Math.Min(newSize.Width, MaximumSize.Width);
-            if (MaximumSize.Height > 0)
-                newSize.Height = Math.Min(newSize.Height, MaximumSize.Height);
+            var newSize = ConstrainProposedSize(value);
 
             if (_size == newSize) return;
             _size = newSize;
@@ -1313,6 +1319,13 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     protected virtual bool ShouldRenderDefaultText => true;
 
+    /// <summary>
+    /// When true, <see cref="Image"/> is drawn into the element content area during
+    /// <see cref="Render"/>. Honors <see cref="RenderImageAsContent"/>.
+    /// </summary>
+    protected virtual bool ShouldRenderContentImage =>
+        RenderImageAsContent && (_image != null || _imageLoading);
+
     private SKFont GetDefaultTextRenderFont()
     {
         var sourceFont = Font;
@@ -1371,7 +1384,18 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
             OnPaddingChanged(EventArgs.Empty);
             InvalidateMeasure();
-            Invalidate();
+            // Title-bar / container Padding changes DisplayRectangle; refresh Anchor baselines so the
+            // first paint is not clipped until the user resizes by 1px.
+            for (var i = 0; i < Controls.Count; i++)
+            {
+                if (Controls[i] is ElementBase child)
+                    child._forceAnchorCalculations = true;
+            }
+
+            if (!IsPerformingLayout)
+                PerformLayout();
+            else
+                Invalidate();
         }
     }
 
@@ -2030,24 +2054,50 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         return ApplyBoundsConstraints(0, 0, proposedSize.Width, proposedSize.Height).Size;
     }
 
-    internal virtual SKRect ApplyBoundsConstraints(int suggestedX, int suggestedY, float proposedWidth, float proposedHeight)
+    /// <summary>
+    /// Min/Max apply only on axes the control still owns. Dock Top/Bottom stretch width (layout owns
+    /// it); Left/Right stretch height; Fill owns both — constraining those axes would fight docking
+    /// and overflow the parent (e.g. Dock=Top + MinimumSize.Width larger than the form).
+    /// </summary>
+    private bool SizeConstraintAppliesToWidth =>
+        Dock is DockStyle.None or DockStyle.Left or DockStyle.Right;
+
+    private bool SizeConstraintAppliesToHeight =>
+        Dock is DockStyle.None or DockStyle.Top or DockStyle.Bottom;
+
+    private SKSize ConstrainProposedSize(SKSize proposed)
     {
-        // COMPAT: in Everett we would allow you to set negative values in pre-handle mode
-        // in Whidbey, if you've set Min/Max size we will constrain you to 0,0. Everett apps didnt
-        // have min/max size on control, which is why this works.
-        if (MaximumSize != SKSize.Empty || MinimumSize != SKSize.Empty)
+        var width = proposed.Width;
+        var height = proposed.Height;
+
+        // Only constrain axes the control still owns. Do NOT stretch docked Size to the full parent
+        // DisplayRectangle here — DefaultLayout owns remaining-region stacking (Top then Fill, etc.).
+        if (SizeConstraintAppliesToWidth)
         {
-            var maximumSize = LayoutUtils.ConvertZeroToUnbounded(MaximumSize);
-
-            var size = LayoutUtils.IntersectSizes(new SKSize(proposedWidth, proposedHeight), maximumSize);
-            var newBounds = SKRect.Create(suggestedX, suggestedY, (int)size.Width, (int)size.Height);
-
-            newBounds.Size = LayoutUtils.UnionSizes(newBounds.Size, MinimumSize);
-
-            return newBounds;
+            if (MinimumSize.Width > 0)
+                width = Math.Max(width, MinimumSize.Width);
+            if (MaximumSize.Width > 0)
+                width = Math.Min(width, MaximumSize.Width);
         }
 
-        return SkiaSharp.SKRect.Create(suggestedX, suggestedY, proposedWidth, proposedHeight);
+        if (SizeConstraintAppliesToHeight)
+        {
+            if (MinimumSize.Height > 0)
+                height = Math.Max(height, MinimumSize.Height);
+            if (MaximumSize.Height > 0)
+                height = Math.Min(height, MaximumSize.Height);
+        }
+
+        return new SKSize(width, height);
+    }
+
+    internal virtual SKRect ApplyBoundsConstraints(int suggestedX, int suggestedY, float proposedWidth, float proposedHeight)
+    {
+        if (MaximumSize == SKSize.Empty && MinimumSize == SKSize.Empty)
+            return SKRect.Create(suggestedX, suggestedY, proposedWidth, proposedHeight);
+
+        var constrained = ConstrainProposedSize(new SKSize(proposedWidth, proposedHeight));
+        return SKRect.Create(suggestedX, suggestedY, constrained.Width, constrained.Height);
     }
 
     public virtual void  OnPaint(SKCanvas canvas)
@@ -2922,6 +2972,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
                 }
             }
 
+            if (ShouldRenderContentImage)
+                RenderContentImage(targetCanvas, elementRect);
+
             if (ShouldRenderDefaultText)
                 RenderDefaultText(targetCanvas);
 
@@ -3380,6 +3433,75 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             MathF.Min(radius.BottomRight, maxRadius));
     }
 
+    private void RenderContentImage(SKCanvas canvas, SKRect elementRect)
+    {
+        var padL = MathF.Max(0f, Padding.Left);
+        var padT = MathF.Max(0f, Padding.Top);
+        var padR = MathF.Max(0f, Padding.Right);
+        var padB = MathF.Max(0f, Padding.Bottom);
+
+        var content = new SKRect(
+            elementRect.Left + padL,
+            elementRect.Top + padT,
+            elementRect.Right - padR,
+            elementRect.Bottom - padB);
+
+        if (content.Width <= 0f || content.Height <= 0f)
+            content = elementRect;
+
+        if (_image == null)
+        {
+            RenderImageSlot(canvas, content);
+            return;
+        }
+
+        var srcW = _image.Width;
+        var srcH = _image.Height;
+        if (srcW <= 0 || srcH <= 0)
+        {
+            RenderImageSlot(canvas, content);
+            return;
+        }
+
+        var scale = MathF.Min(content.Width / srcW, content.Height / srcH);
+        var drawW = srcW * scale;
+        var drawH = srcH * scale;
+
+        var x = content.Left + (content.Width - drawW) / 2f;
+        var y = content.Top + (content.Height - drawH) / 2f;
+
+        // Honour ImageAlign for non-centered placements.
+        switch (_imageAlign)
+        {
+            case ContentAlignment.TopLeft:
+            case ContentAlignment.MiddleLeft:
+            case ContentAlignment.BottomLeft:
+                x = content.Left;
+                break;
+            case ContentAlignment.TopRight:
+            case ContentAlignment.MiddleRight:
+            case ContentAlignment.BottomRight:
+                x = content.Right - drawW;
+                break;
+        }
+
+        switch (_imageAlign)
+        {
+            case ContentAlignment.TopLeft:
+            case ContentAlignment.TopCenter:
+            case ContentAlignment.TopRight:
+                y = content.Top;
+                break;
+            case ContentAlignment.BottomLeft:
+            case ContentAlignment.BottomCenter:
+            case ContentAlignment.BottomRight:
+                y = content.Bottom - drawH;
+                break;
+        }
+
+        RenderImageSlot(canvas, SKRect.Create(x, y, drawW, drawH));
+    }
+
     private void RenderDefaultText(SKCanvas canvas)
     {
         if (this is Container || string.IsNullOrEmpty(_text))
@@ -3586,17 +3708,7 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             return _cachedMeasure.Value;
 
         // Default implementation: use GetPreferredSize for backward compatibility
-        var desiredSize = GetPreferredSize(availableSize);
-
-        // Apply MinimumSize/MaximumSize constraints
-        if (MinimumSize.Width > 0)
-            desiredSize.Width = Math.Max(desiredSize.Width, MinimumSize.Width);
-        if (MinimumSize.Height > 0)
-            desiredSize.Height = Math.Max(desiredSize.Height, MinimumSize.Height);
-        if (MaximumSize.Width > 0)
-            desiredSize.Width = Math.Min(desiredSize.Width, MaximumSize.Width);
-        if (MaximumSize.Height > 0)
-            desiredSize.Height = Math.Min(desiredSize.Height, MaximumSize.Height);
+        var desiredSize = ConstrainProposedSize(GetPreferredSize(availableSize));
 
         // Cache for this layout pass
         _cachedMeasure = desiredSize;

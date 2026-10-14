@@ -846,6 +846,8 @@ public partial class TabView : ElementBase
         if (e.Element is not ElementBase element || !IsTabViewPage(element))
             return;
 
+        // Page.Image is the strip glyph (RenderImageSlot); do not also fill the page body.
+        element.RenderImageAsContent = false;
         element.Dock = DockStyle.Fill;
         SyncPageBounds(element);
 
@@ -888,6 +890,9 @@ public partial class TabView : ElementBase
 
         if (e.Element is not ElementBase element || !IsTabViewPage(element))
             return;
+
+        // Leave RenderImageAsContent alone — Container defaults to false; forcing true here
+        // resurrected page-body icons when pages were briefly reparented during import/layout.
 
         if (_pageOrder != null)
             _pageOrder.Remove(element);
@@ -5694,6 +5699,11 @@ public partial class TabView : ElementBase
 
     private void SyncPageBounds(ElementBase page)
     {
+        // Re-assert on every sync: page.Image is the strip glyph only. Importers, re-parents,
+        // and late Image assignments must not bring content-area painting back.
+        if (page.RenderImageAsContent)
+            page.RenderImageAsContent = false;
+
         var viewport = DisplayRectangle;
         if (page.Bounds != viewport)
             page.Arrange(viewport);

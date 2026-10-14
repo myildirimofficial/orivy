@@ -393,135 +393,150 @@ internal partial class DefaultLayout : LayoutEngine
         {
             IArrangedElement element = children[i];
             Debug.Assert(element.Bounds == GetCachedBounds(element), "Why do we have cachedBounds for a docked element?");
-            if (CommonProperties.GetNeedsDockLayout(element))
+            // Visible docked children consume remaining space. Hidden ones never reserve space, but
+            // in the designer we still assign docked Bounds so selection adorners match the form
+            // (stale file Width must not overflow) without pushing siblings.
+            bool consumesSpace = CommonProperties.GetNeedsDockLayout(element);
+            bool designGhost = !measureOnly && !consumesSpace && IsDesignModeInvisibleDock(element);
+            if (!consumesSpace && !designGhost)
+                continue;
+
+            // Some controls modify their bounds when you call SetBoundsCore. We
+            // therefore need to read the value of bounds back when adjusting our layout rectangle.
+            switch (GetDock(element))
             {
-                // Some controls modify their bounds when you call SetBoundsCore. We
-                // therefore need to read the value of bounds back when adjusting our layout rectangle.
-                switch (GetDock(element))
-                {
-                    case DockStyle.Top:
+                case DockStyle.Top:
+                    {
+                        Thickness margin = CommonProperties.GetMargin(element);
+                        var availableWidth = measureOnly && proposedBounds.Width > 0f
+                            ? Math.Max(0f, proposedBounds.Width - remainingBounds.Width - margin.Left - margin.Right)
+                            : Math.Max(0f, remainingBounds.Width - margin.Left - margin.Right);
+                        var effectiveSize = new SKSize(
+                            availableWidth,
+                            remainingBounds.Height);
+                        SKSize elementSize = GetVerticalDockedSize(element, effectiveSize, measureOnly);
+                        SkiaSharp.SKRect newElementBounds = SkiaSharp.SKRect.Create(
+                            remainingBounds.Left + margin.Left,
+                            remainingBounds.Top + margin.Top,
+                            elementSize.Width,
+                            elementSize.Height);
+
+                        TryCalculatePreferredSizeDockedControl(element, newElementBounds, measureOnly, ref preferredSize, ref remainingBounds);
+
+                        if (!measureOnly && consumesSpace)
                         {
-                            Thickness margin = CommonProperties.GetMargin(element);
-                            var availableWidth = measureOnly && proposedBounds.Width > 0f
-                                ? Math.Max(0f, proposedBounds.Width - remainingBounds.Width - margin.Left - margin.Right)
-                                : Math.Max(0f, remainingBounds.Width - margin.Left - margin.Right);
-                            var effectiveSize = new SKSize(
-                                availableWidth,
-                                remainingBounds.Height);
-                            SKSize elementSize = GetVerticalDockedSize(element, effectiveSize, measureOnly);
-                            SkiaSharp.SKRect newElementBounds = SkiaSharp.SKRect.Create(
-                                remainingBounds.Left + margin.Left,
-                                remainingBounds.Top + margin.Top,
-                                elementSize.Width,
-                                elementSize.Height);
- 
-                            TryCalculatePreferredSizeDockedControl(element, newElementBounds, measureOnly, ref preferredSize, ref remainingBounds);
- 
-                            if (!measureOnly)
-                            {
-                                remainingBounds.Top += margin.Top + element.Bounds.Height + margin.Bottom;
-                            }
-                            break;
+                            remainingBounds.Top += margin.Top + element.Bounds.Height + margin.Bottom;
                         }
- 
-                    case DockStyle.Bottom:
-                        {
-                            Thickness margin = CommonProperties.GetMargin(element);
-                            var availableWidth = measureOnly && proposedBounds.Width > 0f
-                                ? Math.Max(0f, proposedBounds.Width - remainingBounds.Width - margin.Left - margin.Right)
-                                : Math.Max(0f, remainingBounds.Width - margin.Left - margin.Right);
-                            var effectiveSize = new SKSize(
-                                availableWidth,
-                                remainingBounds.Height);
-                            SKSize elementSize = GetVerticalDockedSize(element, effectiveSize, measureOnly);
-                            SkiaSharp.SKRect newElementBounds = SkiaSharp.SKRect.Create(
-                                remainingBounds.Left + margin.Left,
-                                remainingBounds.Bottom - margin.Bottom - elementSize.Height,
-                                elementSize.Width,
-                                elementSize.Height);
- 
-                            TryCalculatePreferredSizeDockedControl(element, newElementBounds, measureOnly, ref preferredSize, ref remainingBounds);
- 
-                            if (!measureOnly)
-                            {
-                                remainingBounds.Bottom -= margin.Top + element.Bounds.Height + margin.Bottom;
-                            }
- 
-                            break;
-                        }
- 
-                    case DockStyle.Left:
-                        {
-                            Thickness margin = CommonProperties.GetMargin(element);
-                            var availableHeight = measureOnly && proposedBounds.Height > 0f
-                                ? Math.Max(0f, proposedBounds.Height - remainingBounds.Height - margin.Top - margin.Bottom)
-                                : Math.Max(0f, remainingBounds.Height - margin.Top - margin.Bottom);
-                            var effectiveSize = new SKSize(
-                                remainingBounds.Width,
-                                availableHeight);
-                            SKSize elementSize = GetHorizontalDockedSize(element, effectiveSize, measureOnly);
-                            SkiaSharp.SKRect newElementBounds = SkiaSharp.SKRect.Create(
-                                remainingBounds.Left + margin.Left,
-                                remainingBounds.Top + margin.Top,
-                                elementSize.Width,
-                                elementSize.Height);
- 
-                            TryCalculatePreferredSizeDockedControl(element, newElementBounds, measureOnly, ref preferredSize, ref remainingBounds);
- 
-                            if (!measureOnly)
-                            {
-                                remainingBounds.Left += margin.Left + element.Bounds.Width + margin.Right;
-                            }
-                            break;
-                        }
- 
-                    case DockStyle.Right:
-                        {
-                            Thickness margin = CommonProperties.GetMargin(element);
-                            var availableHeight = measureOnly && proposedBounds.Height > 0f
-                                ? Math.Max(0f, proposedBounds.Height - remainingBounds.Height - margin.Top - margin.Bottom)
-                                : Math.Max(0f, remainingBounds.Height - margin.Top - margin.Bottom);
-                            var effectiveSize = new SKSize(
-                                remainingBounds.Width,
-                                availableHeight);
-                            SKSize elementSize = GetHorizontalDockedSize(element, effectiveSize, measureOnly);
-                            SkiaSharp.SKRect newElementBounds = SkiaSharp.SKRect.Create(
-                                remainingBounds.Right - margin.Right - elementSize.Width,
-                                remainingBounds.Top + margin.Top,
-                                elementSize.Width,
-                                elementSize.Height);
- 
-                            TryCalculatePreferredSizeDockedControl(element, newElementBounds, measureOnly, ref preferredSize, ref remainingBounds);
- 
-                            if (!measureOnly)
-                            {
-                                remainingBounds.Right -= margin.Left + element.Bounds.Width + margin.Right;
-                            }
-                            break;
-                        }
- 
-                    case DockStyle.Fill:
-                        {
-                            SKSize elementSize = remainingBounds.Size;
-                            SkiaSharp.SKRect newElementBounds = SkiaSharp.SKRect.Create(
-                                remainingBounds.Left,
-                                remainingBounds.Top,
-                                elementSize.Width,
-                                elementSize.Height);
- 
-                            TryCalculatePreferredSizeDockedControl(element, newElementBounds, measureOnly, ref preferredSize, ref remainingBounds);
-                        }
- 
                         break;
-                    default:
-                        Debug.Fail("Unsupported value for dock.");
+                    }
+
+                case DockStyle.Bottom:
+                    {
+                        Thickness margin = CommonProperties.GetMargin(element);
+                        var availableWidth = measureOnly && proposedBounds.Width > 0f
+                            ? Math.Max(0f, proposedBounds.Width - remainingBounds.Width - margin.Left - margin.Right)
+                            : Math.Max(0f, remainingBounds.Width - margin.Left - margin.Right);
+                        var effectiveSize = new SKSize(
+                            availableWidth,
+                            remainingBounds.Height);
+                        SKSize elementSize = GetVerticalDockedSize(element, effectiveSize, measureOnly);
+                        SkiaSharp.SKRect newElementBounds = SkiaSharp.SKRect.Create(
+                            remainingBounds.Left + margin.Left,
+                            remainingBounds.Bottom - margin.Bottom - elementSize.Height,
+                            elementSize.Width,
+                            elementSize.Height);
+
+                        TryCalculatePreferredSizeDockedControl(element, newElementBounds, measureOnly, ref preferredSize, ref remainingBounds);
+
+                        if (!measureOnly && consumesSpace)
+                        {
+                            remainingBounds.Bottom -= margin.Top + element.Bounds.Height + margin.Bottom;
+                        }
+
                         break;
-                }
+                    }
+
+                case DockStyle.Left:
+                    {
+                        Thickness margin = CommonProperties.GetMargin(element);
+                        var availableHeight = measureOnly && proposedBounds.Height > 0f
+                            ? Math.Max(0f, proposedBounds.Height - remainingBounds.Height - margin.Top - margin.Bottom)
+                            : Math.Max(0f, remainingBounds.Height - margin.Top - margin.Bottom);
+                        var effectiveSize = new SKSize(
+                            remainingBounds.Width,
+                            availableHeight);
+                        SKSize elementSize = GetHorizontalDockedSize(element, effectiveSize, measureOnly);
+                        SkiaSharp.SKRect newElementBounds = SkiaSharp.SKRect.Create(
+                            remainingBounds.Left + margin.Left,
+                            remainingBounds.Top + margin.Top,
+                            elementSize.Width,
+                            elementSize.Height);
+
+                        TryCalculatePreferredSizeDockedControl(element, newElementBounds, measureOnly, ref preferredSize, ref remainingBounds);
+
+                        if (!measureOnly && consumesSpace)
+                        {
+                            remainingBounds.Left += margin.Left + element.Bounds.Width + margin.Right;
+                        }
+                        break;
+                    }
+
+                case DockStyle.Right:
+                    {
+                        Thickness margin = CommonProperties.GetMargin(element);
+                        var availableHeight = measureOnly && proposedBounds.Height > 0f
+                            ? Math.Max(0f, proposedBounds.Height - remainingBounds.Height - margin.Top - margin.Bottom)
+                            : Math.Max(0f, remainingBounds.Height - margin.Top - margin.Bottom);
+                        var effectiveSize = new SKSize(
+                            remainingBounds.Width,
+                            availableHeight);
+                        SKSize elementSize = GetHorizontalDockedSize(element, effectiveSize, measureOnly);
+                        SkiaSharp.SKRect newElementBounds = SkiaSharp.SKRect.Create(
+                            remainingBounds.Right - margin.Right - elementSize.Width,
+                            remainingBounds.Top + margin.Top,
+                            elementSize.Width,
+                            elementSize.Height);
+
+                        TryCalculatePreferredSizeDockedControl(element, newElementBounds, measureOnly, ref preferredSize, ref remainingBounds);
+
+                        if (!measureOnly && consumesSpace)
+                        {
+                            remainingBounds.Right -= margin.Left + element.Bounds.Width + margin.Right;
+                        }
+                        break;
+                    }
+
+                case DockStyle.Fill:
+                    {
+                        SKSize elementSize = remainingBounds.Size;
+                        SkiaSharp.SKRect newElementBounds = SkiaSharp.SKRect.Create(
+                            remainingBounds.Left,
+                            remainingBounds.Top,
+                            elementSize.Width,
+                            elementSize.Height);
+
+                        TryCalculatePreferredSizeDockedControl(element, newElementBounds, measureOnly, ref preferredSize, ref remainingBounds);
+                    }
+
+                    break;
+                default:
+                    Debug.Fail("Unsupported value for dock.");
+                    break;
             }
         }
  
         return preferredSize;
     }
+
+    /// <summary>
+    /// Hidden docked controls must not reserve space, but the designer still needs correct Bounds
+    /// so a selected <c>Visible = false</c> Dock.Top stretches to the form instead of a stale Width.
+    /// </summary>
+    private static bool IsDesignModeInvisibleDock(IArrangedElement element) =>
+        element is ElementBase control
+        && !control.Visible
+        && control.IsAncestorSiteInDesignMode
+        && GetDock(element) != DockStyle.None;
  
     /// <summary>
     ///  Helper method that either sets the control bounds or does the preferredSize computation based on
@@ -922,13 +937,45 @@ internal partial class DefaultLayout : LayoutEngine
                 }
                 else
                 {
-                    // Now setup the new bounds.
-                    element.SetBounds(CommonProperties.GetSpecifiedBounds(element), BoundsSpecified.All);
+                    // Seed from SpecifiedBounds, but never reintroduce a pre-dock Size on the
+                    // layout-owned axis larger than the parent client (Dock.Top + old Width 800 on a
+                    // 640-wide form). DefaultLayout then assigns the true remaining-region bounds
+                    // (so Top/Fill/Left stacking stays correct — unlike clamping every Size write to
+                    // the full DisplayRectangle).
+                    element.SetBounds(CreateDockTransitionSeed(element, value), BoundsSpecified.All);
                 }
             }
         }
  
         Debug.Assert(GetDock(element) == value, "Error setting Dock value.");
+    }
+
+    /// <summary>SpecifiedBounds for the free axis; layout-owned axis capped to the parent client so
+    /// a wide pre-dock Size cannot survive if the following dock layout pass is deferred.</summary>
+    private static SkiaSharp.SKRect CreateDockTransitionSeed(IArrangedElement element, DockStyle dock)
+    {
+        var specified = CommonProperties.GetSpecifiedBounds(element);
+        if (element.Container is null)
+            return specified;
+
+        var display = element.Container.DisplayRectangle;
+        var margin = CommonProperties.GetMargin(element);
+        var maxW = Math.Max(0f, display.Width - margin.Left - margin.Right);
+        var maxH = Math.Max(0f, display.Height - margin.Top - margin.Bottom);
+
+        return dock switch
+        {
+            DockStyle.Top or DockStyle.Bottom => SkiaSharp.SKRect.Create(
+                specified.Left, specified.Top, Math.Min(specified.Width, maxW), specified.Height),
+            DockStyle.Left or DockStyle.Right => SkiaSharp.SKRect.Create(
+                specified.Left, specified.Top, specified.Width, Math.Min(specified.Height, maxH)),
+            DockStyle.Fill => SkiaSharp.SKRect.Create(
+                display.Left + margin.Left,
+                display.Top + margin.Top,
+                maxW,
+                maxH),
+            _ => specified,
+        };
     }
  
     public static void ScaleAnchorInfo(IArrangedElement element, SKSize factor)
@@ -1058,10 +1105,12 @@ internal partial class DefaultLayout : LayoutEngine
         Debug.Assert(specified == BoundsSpecified.None || GetCachedBounds(element) == element.Bounds,
             "Attempt to InitLayout while element has active cached bounds.");
  
-        if (specified != BoundsSpecified.None &&
-            (CommonProperties.GetNeedsAnchorLayout(element) && ((ElementBase)element)._childControlsNeedAnchorLayout))
+        if (specified != BoundsSpecified.None && CommonProperties.GetNeedsAnchorLayout(element))
         {
-            UpdateAnchorInfo(element);
+            // Flag is stored on the parent when a child was deferred during SuspendLayout.
+            var parent = ((ElementBase)element).Parent as ElementBase;
+            if (parent != null && parent._childControlsNeedAnchorLayout)
+                UpdateAnchorInfo(element);
         }
     }
  

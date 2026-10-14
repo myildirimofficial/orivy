@@ -1,3 +1,4 @@
+using Orivy.Helpers;
 using SkiaSharp;
 using System;
 using System.ComponentModel;
@@ -11,7 +12,7 @@ public class Card : Container
     private string _title = string.Empty;
     private string _description = string.Empty;
     private bool _useThemeColors = true;
-    private float _headerGap = 14f;
+    private float _headerGap = 4f;
     private float _mediaHeight;
     private CardHeaderPlacement _headerPlacement = CardHeaderPlacement.Overlay;
 
@@ -19,7 +20,8 @@ public class Card : Container
     {
         Radius = new Radius(12);
         Border = new Thickness(1);
-        Padding = new Thickness(18);
+        Padding = new Thickness(8);
+        TextAlign = ContentAlignment.TopLeft;
         BackColor = ColorScheme.Surface;
         ForeColor = ColorScheme.ForeColor;
         BorderColor = ColorScheme.Outline.WithAlpha(ColorScheme.IsDarkMode ? (byte)78 : (byte)92);
@@ -103,7 +105,7 @@ public class Card : Container
         }
     }
 
-    [DefaultValue(14f)]
+    [DefaultValue(4f)]
     public float HeaderGap
     {
         get => _headerGap;
@@ -242,16 +244,18 @@ public class Card : Container
         var height = 0f;
 
         if (hasTitle)
-            height += GetFontLineHeight(titleFont);
+            height += GetTightLineHeight(titleFont);
 
         if (hasDescription)
         {
             if (height > 0f)
-                height += 4f * ScaleFactor;
-            height += GetFontLineHeight(descriptionFont);
+                height += 2f * ScaleFactor;
+            height += GetTightLineHeight(descriptionFont);
         }
 
-        return MathF.Ceiling(height + HeaderGap * ScaleFactor);
+        // HeaderGap is only the air between the text block and child content — not a top inset.
+        height += HeaderGap * ScaleFactor;
+        return MathF.Ceiling(height);
     }
 
     private float GetResolvedMediaHeight()
@@ -290,44 +294,66 @@ public class Card : Container
         using var titleFont = CreateHeaderFont(true);
         using var descriptionFont = CreateHeaderFont(false);
 
-        _titlePaint.Color = ForeColor;
-        _descriptionPaint.Color = ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)170 : (byte)145);
+        _titlePaint.Color = ForeColor.WithAlpha(255);
+        _descriptionPaint.Color = ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)178 : (byte)160);
 
         var headerHeight = GetHeaderHeight();
         var y = GetHeaderTop(rect, headerHeight);
+
         if (hasTitle)
         {
-            y += -titleFont.Metrics.Ascent;
-            canvas.DrawText(Title, rect.Left, y, SKTextAlign.Left, titleFont, _titlePaint);
-            y += titleFont.Metrics.Descent + 4f * ScaleFactor;
+            DrawHeaderLine(canvas, Title, titleFont, _titlePaint, rect.Left, ref y);
+            if (hasDescription)
+                y += 2f * ScaleFactor;
         }
 
         if (hasDescription)
-        {
-            y += -descriptionFont.Metrics.Ascent;
-            canvas.DrawText(Description, rect.Left, y, SKTextAlign.Left, descriptionFont, _descriptionPaint);
-        }
+            DrawHeaderLine(canvas, Description, descriptionFont, _descriptionPaint, rect.Left, ref y);
+    }
+
+    private static void DrawHeaderLine(
+        SKCanvas canvas,
+        string text,
+        SKFont font,
+        SKPaint paint,
+        float left,
+        ref float top)
+    {
+        var metrics = font.Metrics;
+        // Skia ascent is negative; baseline sits |ascent| below the top so glyphs hug the edge.
+        var baseline = top - metrics.Ascent;
+        canvas.DrawText(text, left, baseline, SKTextAlign.Left, font, paint);
+        top += GetTightLineHeight(font);
     }
 
     private SKFont CreateHeaderFont(bool title)
     {
         var font = CreateRenderFont(Font);
-        if (title)
-        {
-            font.Embolden = true;
-            font.Size += 1.5f * ScaleFactor;
-        }
-        else
+        font.Embolden = false;
+
+        if (!title)
         {
             font.Size = Math.Max(10f * ScaleFactor, font.Size * 0.9f);
+            return font;
         }
 
+        var family = Font.Typeface?.FamilyName ?? SKTypeface.Default.FamilyName;
+        var titleFace = SKTypeface.FromFamilyName(
+            family,
+            SKFontStyleWeight.SemiBold,
+            SKFontStyleWidth.Normal,
+            SKFontStyleSlant.Upright);
+        if (titleFace != null)
+            font.Typeface = titleFace;
+
+        font.Size += 1.5f * ScaleFactor;
         return font;
     }
 
-    private static float GetFontLineHeight(SKFont font)
+    private static float GetTightLineHeight(SKFont font)
     {
         var metrics = font.Metrics;
-        return MathF.Ceiling(metrics.Descent - metrics.Ascent + metrics.Leading);
+        // Prefer glyph box over Leading — large Leading was reserving empty air under the title.
+        return MathF.Ceiling(metrics.Descent - metrics.Ascent);
     }
 }

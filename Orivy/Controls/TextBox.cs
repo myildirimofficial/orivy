@@ -77,9 +77,8 @@ public class TextBox : ElementBase
         Padding = new Thickness(10, 6, 10, 6);
         Radius = new Radius(9);
         Border = new Thickness(1);
-        BorderColor = ColorScheme.Outline.WithAlpha(104);
-        BackColor = ColorScheme.Surface;
-        ForeColor = ColorScheme.ForeColor;
+        // Colors come from ConfigureVisualStyles only. Property assignments here would mark sticky
+        // colors and overwrite OnHover/OnFocused fills with the generic pointer brightness tint.
         MinimumSize = new SKSize(DefaultMinWidth, DefaultMinHeight);
         Size = new SKSize(DefaultWidth, DefaultHeight);
         TabStop = true;
@@ -88,7 +87,7 @@ public class TextBox : ElementBase
         ConfigureVisualStyles(styles =>
         {
             styles
-                .DefaultTransition(TimeSpan.FromMilliseconds(170), AnimationType.CubicEaseOut)
+                .DefaultTransition(TimeSpan.FromMilliseconds(220), AnimationType.CubicEaseOut)
                 .Base(baseStyle => baseStyle
                     .Background(ColorScheme.Surface)
                     .Foreground(ColorScheme.ForeColor)
@@ -102,12 +101,13 @@ public class TextBox : ElementBase
                 .OnFocused(rule => rule
                     .Background(ColorScheme.Surface.Brightness(0.02f))
                     .Border(1)
-                    .BorderColor(ColorScheme.Primary.WithAlpha(232))
-                    .Shadow(BoxShadow.None))
+                    .BorderColor(ColorScheme.Primary.WithAlpha(200))
+                    // Bootstrap 3 focus glow: box-shadow: 0 0 8px rgba(primary, .6)
+                    .Shadow(new BoxShadow(0f, 0f, 8f, 0, ColorScheme.Primary.WithAlpha(153))))
                 .OnInvalid(rule => rule
                     .Border(1)
                     .BorderColor(SKColors.IndianRed.WithAlpha(210))
-                    .Shadow(BoxShadow.None))
+                    .Shadow(new BoxShadow(0f, 0f, 8f, 0, SKColors.IndianRed.WithAlpha(120))))
                 .OnDisabled(rule => rule
                     .Background(ColorScheme.SurfaceVariant.WithAlpha(220))
                     .Foreground(ColorScheme.ForeColor.WithAlpha(138))

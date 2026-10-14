@@ -260,6 +260,8 @@ private IntPtr _hWnd;
     }
 
     private bool _showInTaskbar = true;
+    private WindowBase? _owner;
+
     [Category("Window")]
     public bool ShowInTaskbar
     {
@@ -269,14 +271,27 @@ private IntPtr _hWnd;
             if (_showInTaskbar == value) return;
             _showInTaskbar = value;
             if (IsHandleCreated)
-            {
-                var exStyle = GetWindowLong(Handle, (int)WindowLongIndexFlags.GWL_EXSTYLE);
-                if (value)
-                    exStyle &= ~(int)SetWindowLongFlags.WS_EX_TOOLWINDOW;
-                else
-                    exStyle |= (int)SetWindowLongFlags.WS_EX_TOOLWINDOW;
-                SetWindowLong(Handle, (int)WindowLongIndexFlags.GWL_EXSTYLE, exStyle);
-            }
+                ApplyShowInTaskbarStyle();
+        }
+    }
+
+    /// <summary>
+    /// Owner window for owned/tool windows. Owned HWNDs stay tied to the owner in the Alt+Tab
+    /// z-order and do not require a separate taskbar button.
+    /// </summary>
+    [Browsable(false)]
+    [DefaultValue(null)]
+    public WindowBase? Owner
+    {
+        get => _owner;
+        set
+        {
+            if (ReferenceEquals(_owner, value))
+                return;
+
+            _owner = value;
+            if (IsHandleCreated)
+                ApplyNativeOwner();
         }
     }
 
@@ -369,9 +384,9 @@ private IntPtr _hWnd;
             cp.ExStyle = 0;
 
             // ShowInTaskbar's setter only reaches SetWindowLong once IsHandleCreated is true, so the
-            // common "set before Show()" pattern needs the bit applied here too, at the window's
-            // initial creation.
-            if (!_showInTaskbar)
+            // common "set before Show()" pattern needs the bit applied here too. Skip TOOLWINDOW when
+            // an Owner is set — owned HWNDs stay out of the taskbar without orphaning Alt+Tab.
+            if (!_showInTaskbar && _owner == null)
                 cp.ExStyle |= (uint)SetWindowLongFlags.WS_EX_TOOLWINDOW;
 
             // Class styles
@@ -879,6 +894,8 @@ private IntPtr _hWnd;
         // MessageBox.Show() called from a Load handler never let ShowWindow run at all, leaving the
         // window permanently invisible.
         ShowWindow(_hWnd, 5);
+        ApplyNativeOwner();
+        ApplyShowInTaskbarStyle();
         Application.SetActiveForm(this);
     }
 
@@ -911,6 +928,8 @@ private IntPtr _hWnd;
         // sequence completes, deferred via BeginInvoke, so overlay dialogs opened from either handler
         // can actually render.
         ShowWindow(_hWnd, 5);
+        ApplyNativeOwner();
+        ApplyShowInTaskbarStyle();
         Application.SetActiveForm(this);
 
         MSG msg;
@@ -938,12 +957,14 @@ private IntPtr _hWnd;
 
     public void Show(WindowBase owner)
     {
+        Owner = owner;
         var previousActive = Application.ActiveForm;
         if (owner != null)
             Application.SetActiveForm(owner);
         try
         {
             Show();
+            ApplyNativeOwner();
         }
         finally
         {
@@ -954,6 +975,7 @@ private IntPtr _hWnd;
 
     public DialogResult ShowDialog(WindowBase owner)
     {
+        Owner = owner;
         var previousActive = Application.ActiveForm;
         if (owner != null)
             Application.SetActiveForm(owner);
@@ -966,6 +988,38 @@ private IntPtr _hWnd;
             if (previousActive != null)
                 Application.SetActiveForm(previousActive);
         }
+    }
+
+    private void ApplyNativeOwner()
+    {
+        if (!IsHandleCreated)
+            return;
+
+        var ownerHwnd = _owner is { IsHandleCreated: true } ? _owner.Handle : IntPtr.Zero;
+        if (IntPtr.Size == 8)
+            SetWindowLongPtr64(Handle, (int)WindowLongIndexFlags.GWLP_HWNDPARENT, ownerHwnd);
+        else
+            SetWindowLong32(Handle, (int)WindowLongIndexFlags.GWLP_HWNDPARENT, ownerHwnd.ToInt32());
+    }
+
+    private void ApplyShowInTaskbarStyle()
+    {
+        if (!IsHandleCreated)
+            return;
+
+        var exStyle = (int)GetWindowLong(Handle, WindowLongIndexFlags.GWL_EXSTYLE);
+        // Owned windows are already omitted from the taskbar; prefer a real owner link over
+        // WS_EX_TOOLWINDOW so Alt+Tab does not drop the child as an orphan tool window.
+        var hideFromTaskbar = !_showInTaskbar && _owner == null;
+        if (hideFromTaskbar)
+            exStyle |= (int)SetWindowLongFlags.WS_EX_TOOLWINDOW;
+        else
+            exStyle &= ~(int)SetWindowLongFlags.WS_EX_TOOLWINDOW;
+
+        if (IntPtr.Size == 8)
+            SetWindowLongPtr64(Handle, (int)WindowLongIndexFlags.GWL_EXSTYLE, (IntPtr)exStyle);
+        else
+            SetWindowLong32(Handle, (int)WindowLongIndexFlags.GWL_EXSTYLE, exStyle);
     }
 
     public void Close()

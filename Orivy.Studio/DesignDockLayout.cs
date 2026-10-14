@@ -24,16 +24,20 @@ internal static class DesignDockLayout
         if (descriptor.Name == "Location")
             return !AllowsLocation(control.Dock);
 
-        // Fill owns both axes. Top/Bottom still allow Height (and Left/Right Width) via Size;
-        // ClampSize keeps the layout-owned axis when the inspector commits.
+        // Fill owns both axes. AutoSize owns Size from content. Top/Bottom still allow Height
+        // (and Left/Right Width) via Size / Min / Max; ClampSize keeps the layout-owned axis on commit.
         if (descriptor.Name == "Size")
+            return control.AutoSize || control.Dock == DockStyle.Fill;
+
+        // Same Dock axis ownership as Size — Fill locks Min/Max entirely; partial docks clamp on commit.
+        if (descriptor.Name is "MinimumSize" or "MaximumSize")
             return control.Dock == DockStyle.Fill;
 
         if (descriptor.Name == "Width")
-            return !AllowsWidth(control.Dock);
+            return control.AutoSize || !AllowsWidth(control.Dock);
 
         if (descriptor.Name == "Height")
-            return !AllowsHeight(control.Dock);
+            return control.AutoSize || !AllowsHeight(control.Dock);
 
         return false;
     }

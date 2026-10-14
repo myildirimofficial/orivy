@@ -2068,6 +2068,9 @@ public static class CodeImporter
         // Dock/Anchor layout during Controls.Add rewrites right-anchored Location into overflow
         // storage (negative X). The designer must keep the file's coordinates so drag stays 1:1
         // and CodeMerger does not persist those rewritten values over the original source.
+        // Layout-owned dock axes are NOT restored from the file Size: writing Dock.Top + Width=800
+        // onto a 640-wide form after Add undoes the dock stretch; RelayoutRoot then has to fight a
+        // stale Size. Height for Top/Bottom (Width for Left/Right) is still taken from the file.
         foreach (var (name, control) in instances)
         {
             if (!nodes.TryGetValue(name, out var info))
@@ -2075,7 +2078,7 @@ public static class CodeImporter
             if (info.HasLocation)
                 control.Location = new SKPoint(info.X, info.Y);
             if (info.HasSize)
-                control.Size = new SKSize(info.W, info.H);
+                RestoreImportedSize(control, info);
         }
 
         ApplyImportedGridPlacements(instances, nodes);
@@ -2098,6 +2101,28 @@ public static class CodeImporter
         surface.Commands.Clear();
         surface.NotifyStructureChanged();
         return skipped;
+    }
+
+    /// <summary>Applies file Size only on axes the control still owns while docked; layout-owned
+    /// axes stay for <see cref="DesignSurface.RelayoutRoot"/>.</summary>
+    private static void RestoreImportedSize(ElementBase control, NodeInfo info)
+    {
+        switch (info.Dock)
+        {
+            case DockStyle.Top:
+            case DockStyle.Bottom:
+                control.Size = new SKSize(control.Width, info.H);
+                break;
+            case DockStyle.Left:
+            case DockStyle.Right:
+                control.Size = new SKSize(info.W, control.Height);
+                break;
+            case DockStyle.Fill:
+                break;
+            default:
+                control.Size = new SKSize(info.W, info.H);
+                break;
+        }
     }
 
     /// <summary>Best-effort resolution of an unrecognized declared type down to the nearest catalog

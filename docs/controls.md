@@ -112,11 +112,14 @@ See `Orivy/Controls/ElementBase.cs` for exact dispatch code (`OnMouseDown`, `OnM
   - `TimePicker` adds `MinuteStep` and `Use24HourClock`, and uses separate hour/minute selection groups. Hours are always selected one by one; `MinuteStep` only affects minute choices.
   - Keyboard behavior: Enter/Space toggles the popup, Escape hides it. DatePicker arrow keys move by day/week; TimePicker arrow keys step by `MinuteStep`.
 
-- `Card`, `Badge`, `Breadcrumb`, `Accordion`, and `Collapse`
-  - `Card` is a theme-aware container with `Title`, `Description`, `HeaderGap`, optional image/media placement, and normal `Controls` composition.
+- `Card`, `Badge`, `Breadcrumb`, `Accordion`, `Collapse`, and `Carousel`
+  - `Card` is a theme-aware container with `Title`, `Description`, `HeaderGap`, optional image/media placement, and normal `Controls` composition. Default `Padding` is `8`, `HeaderGap` is `4` (air below the text block only). Titles use SemiBold and tight glyph metrics (no TextRenderer top inset).
   - `Breadcrumb` is a `Container`; add any `ElementBase` child to `Controls` and it will arrange items with chevron separators. `SetItems(...)` is only a convenience helper.
   - `Badge` provides small status labels. To place a badge on a button, add it to `button.Controls`, use `Anchor` for the reference edge, and use `Location` for the offset. Negative or overflowing child bounds are included in visual overflow calculations so auto-sized parents do not cut overlays.
   - `Accordion` coordinates multiple `Collapse` items; `Collapse` provides a single animated disclosure region.
+  - `Carousel` hosts `BackgroundImages` with Cover layout by default, optional auto-advance, and painted previous/next controls. Choose the chrome with `NavigationStyle` (`Glass`, `Minimal`, `Pill`, `Solid`, `Outline`, `Arrow`). Prefer `ShowNextBackgroundImage` / `ShowPreviousBackgroundImage` on `ElementBase` for programmatic navigation.
+  - `TextBox` / `ComboBox` focus uses an animated Bootstrap 3 soft glow. Visual styles no longer animate layout `Size` (that was the “slides wider on focus” bug). `Container` defaults `RenderImageAsContent = false` so tab-page `Image` glyphs stay strip-only.
+  - Owned windows: call `Show(owner)` / set `Owner` so the HWND parent link is applied. Prefer that over bare `ShowInTaskbar = false` + `WS_EX_TOOLWINDOW`, which drops the window from Alt+Tab.
 
 - `GridList` (`Orivy/Controls/GridList.cs` + `GridList.Models.cs`) — the ListView/DataGrid equivalent
   - Columns (`GridListColumn`: `Text`, `Width`/`Min`/`Max`, `SizeMode` Fixed/Auto/Fill, `Sortable`, `Resizable`, `ShowCheckBox`, per-column `BackColor`/`ForeColor`) and rows (`GridListItem` with `Cells`).
@@ -134,7 +137,7 @@ See `Orivy/Controls/ElementBase.cs` for exact dispatch code (`OnMouseDown`, `OnM
 - `PropertyGrid` (`Orivy/Controls/PropertyGrid.cs`) — WinForms PropertyGrid equivalent built on `GridList`
   - `SelectedObject` reflects browsable properties, honoring `[Category]`, `[Description]`, `[DisplayName]`, `[ReadOnly]`, `[Browsable]`, and custom `TypeConverter`s (including `ExpandableObjectConverter`).
   - `PropertySort` (Categorized/Alphabetical/NoSort) with animated expand/collapse chevrons for nested objects, collections, and arrays (elements shown as `[0]`, `[1]`, … and editable when the list is writable).
-  - Type-specific inline editors, all Orivy controls: `TextBox` (strings), `NumericUpDown` (numbers), drop-down picker (bool/enum), `DatePicker` (DateTime, calendar auto-opens), `ColorPicker` popup (`SKColor`/`System.Drawing.Color`). Enter/F2 edits the highlighted row; Esc cancels.
+  - Type-specific inline editors, all Orivy controls: `TextBox` (strings), `NumericUpDown` (numbers), drop-down picker (bool/enum), `DatePicker` (DateTime, calendar auto-opens), `ColorPicker` popup (`SKColor`/`System.Drawing.Color`). Compact text editing also covers `SKSize`/`SKPoint`/`SKRect`, `Thickness` (`10` or `10, 20, 10, 20`), and `Radius`. Enter/F2 edits the highlighted row; Esc cancels.
   - Collection management: right-click a collection or element row for Add / Remove / Move up / Move down; programmatic access via `TryGetSelectedCollectionElement(out list, out index)` + `Refresh()` (keeps expansion while re-syncing rows). `ExpandAllGridItems()`/`CollapseAllGridItems()` mirror WinForms.
   - Events: `PropertyValueChanged`, `SelectedObjectChanged`, `SelectedPropertyChanged` (pair with `SelectedPropertyDescription` for a help pane).
 

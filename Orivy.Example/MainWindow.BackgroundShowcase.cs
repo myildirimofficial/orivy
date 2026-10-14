@@ -17,7 +17,7 @@ internal partial class MainWindow
 
     private Container? _backgroundPanel;
 
-    private Container? _backgroundHero;
+    private Carousel? _backgroundHero;
 
     private Element? _backgroundHeroCaption;
 
@@ -26,6 +26,8 @@ internal partial class MainWindow
     private Element? _backgroundStatusCard;
 
     private Button? _backgroundPlayPauseButton;
+
+    private ButtonGroup<CarouselNavigationStyle>? _backgroundNavStyleGroup;
 
     private int _backgroundTransitionDurationPreset = 420;
 
@@ -60,23 +62,24 @@ internal partial class MainWindow
             Text = "Background Image Showcase\nAsset-backed imagery, caption metadata, transition duration, slideshow interval, repeat behavior and backdrop materials are all driven directly by ElementBase.",
         };
 
-        _backgroundHero = new Container
+        _backgroundHero = new Carousel
         {
             Name = "backgroundHero",
             Dock = DockStyle.Top,
             Height = 492,
-            BackColor = SKColors.Transparent,
             Margin = new Thickness(0, 0, 0, 18),
             Padding = new Thickness(18),
             Radius = new Radius(22),
             Border = new Thickness(0),
-            BorderColor = ColorScheme.BackColor.WithAlpha(25),
-            BackgroundImageLayout = ImageLayout.Zoom,
+            BackgroundImageLayout = ImageLayout.Cover,
             BackgroundImageTransitionEffect = BackgroundImageTransitionEffect.ScaleFade,
             BackgroundImageTransitionDurationMs = _backgroundTransitionDurationPreset,
             BackgroundImageSlideshowEnabled = true,
             BackgroundImageSlideshowRepeat = true,
             BackgroundImageSlideshowIntervalMs = _backgroundIntervalPreset,
+            ShowNavigation = true,
+            NavigationVisibleOnHoverOnly = false,
+            NavigationStyle = CarouselNavigationStyle.Glass,
         };
 
         _backgroundHero.ConfigureVisualStyles(s => s.Base(b => b
@@ -108,21 +111,11 @@ internal partial class MainWindow
         {
             Dock = DockStyle.Top,
             Height = 46,
-            Margin = new Thickness(0, 0, 0, 14),
+            Margin = new Thickness(0, 0, 0, 10),
             Radius = new Radius(0),
             Border = new Thickness(0),
             BackColor = SKColors.Transparent,
         };
-
-        var previousButton = new Button
-        {
-            Text = "Previous",
-            Dock = DockStyle.Left,
-            Width = 128,
-            Height = 38,
-            Margin = new Thickness(0, 0, 10, 0),
-        };
-        previousButton.Click += BackgroundPreviousButton_Click;
 
         _backgroundPlayPauseButton = new Button
         {
@@ -130,22 +123,49 @@ internal partial class MainWindow
             Dock = DockStyle.Left,
             Width = 168,
             Height = 38,
-            Margin = new Thickness(0, 0, 10, 0),
         };
         _backgroundPlayPauseButton.Click += BackgroundPlayPauseButton_Click;
 
-        var nextButton = new Button
-        {
-            Text = "Next",
-            Dock = DockStyle.Left,
-            Width = 112,
-            Height = 38,
-        };
-        nextButton.Click += BackgroundNextButton_Click;
-
-        actionRow.Controls.Add(previousButton);
         actionRow.Controls.Add(_backgroundPlayPauseButton);
-        actionRow.Controls.Add(nextButton);
+
+        var navStyleLabel = new Element
+        {
+            Dock = DockStyle.Top,
+            Height = 22,
+            Margin = new Thickness(0, 0, 0, 6),
+            BackColor = SKColors.Transparent,
+            Border = new Thickness(0),
+            ForeColor = ColorScheme.ForeColor.WithAlpha(ColorScheme.IsDarkMode ? (byte)180 : (byte)160),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = "Carousel navigation style",
+        };
+
+        _backgroundNavStyleGroup = new ButtonGroup<CarouselNavigationStyle>
+        {
+            Name = "backgroundNavStyleGroup",
+            Dock = DockStyle.Top,
+            Margin = new Thickness(0, 0, 0, 14),
+            Alignment = ContentAlignment.MiddleLeft,
+            Orientation = Orientation.Horizontal,
+            Gap = 0,
+            LabelSelector = style => style switch
+            {
+                CarouselNavigationStyle.Glass => "Glass",
+                CarouselNavigationStyle.Minimal => "Minimal",
+                CarouselNavigationStyle.Pill => "Pill",
+                CarouselNavigationStyle.Solid => "Solid",
+                CarouselNavigationStyle.Outline => "Outline",
+                CarouselNavigationStyle.Arrow => "Arrow",
+                _ => style.ToString(),
+            },
+        };
+        _backgroundNavStyleGroup.ConfigureButton = (button, _) =>
+        {
+            button.Padding = new Thickness(12, 6, 12, 6);
+            button.Height = 34;
+        };
+        _backgroundNavStyleGroup.SelectedValueChanged += BackgroundNavStyleGroup_SelectedValueChanged;
+        _backgroundNavStyleGroup.SetSelectedValue(CarouselNavigationStyle.Glass);
 
         _backgroundStatusCard = new Element
         {
@@ -163,8 +183,11 @@ internal partial class MainWindow
             .BorderColor(ColorScheme.Outline.WithAlpha(94))
             .Radius(18)));
 
+        // Dock.Top: last added sits closest to the top edge.
         _backgroundPanel.Controls.Add(_backgroundStatusCard);
         _backgroundPanel.Controls.Add(actionRow);
+        _backgroundPanel.Controls.Add(_backgroundNavStyleGroup);
+        _backgroundPanel.Controls.Add(navStyleLabel);
         _backgroundPanel.Controls.Add(_backgroundHero);
         _backgroundPanel.Controls.Add(header);
 
@@ -413,16 +436,6 @@ internal partial class MainWindow
         }
     }
 
-    private void BackgroundPreviousButton_Click(object? sender, EventArgs e)
-    {
-        MoveBackgroundSlide(-1);
-    }
-
-    private void BackgroundNextButton_Click(object? sender, EventArgs e)
-    {
-        MoveBackgroundSlide(1);
-    }
-
     private void BackgroundPlayPauseButton_Click(object? sender, EventArgs e)
     {
         if (_backgroundHero == null)
@@ -431,22 +444,12 @@ internal partial class MainWindow
         SetBackgroundSlideshowEnabled(!_backgroundHero.BackgroundImageSlideshowEnabled);
     }
 
-    private void MoveBackgroundSlide(int delta)
+    private void BackgroundNavStyleGroup_SelectedValueChanged(object? sender, ButtonGroupSelectionChangedEventArgs<CarouselNavigationStyle> e)
     {
-        if (_backgroundHero == null || _backgroundSlides.Count == 0)
+        if (_backgroundHero == null)
             return;
 
-        var nextIndex = _backgroundHero.BackgroundImageIndex + delta;
-        if (_backgroundHero.BackgroundImageSlideshowRepeat)
-        {
-            nextIndex = (nextIndex % _backgroundSlides.Count + _backgroundSlides.Count) % _backgroundSlides.Count;
-        }
-        else
-        {
-            nextIndex = Math.Clamp(nextIndex, 0, _backgroundSlides.Count - 1);
-        }
-
-        _backgroundHero.BackgroundImageIndex = nextIndex;
+        _backgroundHero.NavigationStyle = e.SelectedValue;
         UpdateBackgroundShowcaseStatus();
     }
 
@@ -484,7 +487,7 @@ internal partial class MainWindow
         _backgroundHeroCaption.Text = caption.ToString();
         ApplyBackgroundCaptionVisuals(activeFrame);
         _backgroundStatusCard.Text =
-            $"Background Slideshow\nScene {index + 1}/{_backgroundSlides.Count} - Layout: {_backgroundHero.BackgroundImageLayout} - Effect: {_backgroundHero.BackgroundImageTransitionEffect} - Duration: {_backgroundTransitionDurationPreset} ms\nCaption: {activeFrame.CaptionDesignMode} - Align: {activeFrame.CaptionLayout} - Slideshow: {(_backgroundHero.BackgroundImageSlideshowEnabled ? "Active" : "Passive")} - Repeat: {(_backgroundHero.BackgroundImageSlideshowRepeat ? "Active" : "Passive")} - Interval: {_backgroundIntervalPreset} ms - Window Background: {(_windowBackgroundEnabled ? "Active" : "Passive")} ({_windowBackgroundMode})\nWindow Blur: {_windowBackgroundBlurAmountPreset} px - Mode: {BackgroundImageBlurMode} - Backdrop Deck: Tint / Glass / Acrylic / Mica\nUse the Backgrounds menu to switch layout, effect, duration, caption design and slideshow mode in real time. Use the Window Background menu to mirror the active scene across the window and test blur modes on the root window surface.";
+            $"Background Carousel\nScene {index + 1}/{_backgroundSlides.Count} - Layout: {_backgroundHero.BackgroundImageLayout} - Nav: {_backgroundHero.NavigationStyle} - Effect: {_backgroundHero.BackgroundImageTransitionEffect} - Duration: {_backgroundTransitionDurationPreset} ms\nCaption: {activeFrame.CaptionDesignMode} - Align: {activeFrame.CaptionLayout} - Slideshow: {(_backgroundHero.BackgroundImageSlideshowEnabled ? "Active" : "Passive")} - Repeat: {(_backgroundHero.BackgroundImageSlideshowRepeat ? "Active" : "Passive")} - Interval: {_backgroundIntervalPreset} ms - Window Background: {(_windowBackgroundEnabled ? "Active" : "Passive")} ({_windowBackgroundMode})\nWindow Blur: {_windowBackgroundBlurAmountPreset} px - Mode: {BackgroundImageBlurMode} - Backdrop Deck: Tint / Glass / Acrylic / Mica\nUse the navigation style group to preview Glass / Minimal / Pill / Solid / Outline / Arrow chrome. Use the Backgrounds menu for layout, effect, duration and slideshow mode.";
 
         if (_backgroundPlayPauseButton != null)
             _backgroundPlayPauseButton.Text = _backgroundHero.BackgroundImageSlideshowEnabled ? "Pause Slideshow" : "Start Slideshow";

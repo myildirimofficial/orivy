@@ -37,6 +37,10 @@ public abstract partial class ElementBase
     private float _backgroundImageBlurAmount;
     private BackgroundImageBlurMode _backgroundImageBlurMode = BackgroundImageBlurMode.Normal;
 
+    /// <summary>Number of frames in <see cref="BackgroundImages"/> without allocating a copy.</summary>
+    [Browsable(false)]
+    public int BackgroundImageCount => _backgroundImages.Length;
+
     [Category("Appearance")]
     public BackgroundImageFrame[] BackgroundImages
     {
@@ -234,6 +238,26 @@ public abstract partial class ElementBase
             RestartBackgroundImageSlideshowIfRunning();
             Invalidate();
         }
+    }
+
+    /// <summary>Advances to the next background image, wrapping when slideshow repeat is enabled.</summary>
+    public void ShowNextBackgroundImage() => MoveBackgroundImageSlideshow(1);
+
+    /// <summary>Moves to the previous background image, wrapping when slideshow repeat is enabled.</summary>
+    public void ShowPreviousBackgroundImage() => MoveBackgroundImageSlideshow(-1);
+
+    private void MoveBackgroundImageSlideshow(int delta)
+    {
+        if (_backgroundImages.Length == 0)
+            return;
+
+        var nextIndex = _backgroundImageIndex + delta;
+        if (_backgroundImageSlideshowRepeat)
+            nextIndex = (nextIndex % _backgroundImages.Length + _backgroundImages.Length) % _backgroundImages.Length;
+        else
+            nextIndex = Math.Clamp(nextIndex, 0, _backgroundImages.Length - 1);
+
+        BackgroundImageIndex = nextIndex;
     }
 
     [Category("Appearance")]
