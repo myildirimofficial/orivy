@@ -33,6 +33,7 @@ public class Button : ElementBase
         Size = new SKSize(45, 24);
         TabStop = true;
         TextAlign = ContentAlignment.MiddleCenter;
+        TextImageRelation = TextImageRelation.ImageBeforeText;
 
         _dropDownChevronAnimation = new AnimationManager(true)
         {

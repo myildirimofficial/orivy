@@ -8,6 +8,8 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using static Orivy.Native.Windows.Methods;
 
 namespace Orivy.Controls;
@@ -492,14 +494,13 @@ private IntPtr _hWnd;
     {
         ArgumentNullException.ThrowIfNull(action);
 
-        var uiThreadId = IsHandleCreated ? GetWindowThreadProcessId(Handle, out _) : 0;
-        if (uiThreadId != 0 && Environment.CurrentManagedThreadId == uiThreadId)
+        if (CheckAccess())
         {
             action();
             return;
         }
 
-        var resetEvent = new System.Threading.ManualResetEventSlim(false);
+        var resetEvent = new ManualResetEventSlim(false);
         Exception? caughtException = null;
 
         BeginInvoke(() =>
@@ -523,6 +524,92 @@ private IntPtr _hWnd;
         if (caughtException != null)
             throw new InvalidOperationException("Invoke failed.", caughtException);
     }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when the caller is already on this window's native UI thread.
+    /// </summary>
+    public bool CheckAccess()
+    {
+        if (!IsHandleCreated)
+            return false;
+
+        var windowThreadId = (uint)GetWindowThreadProcessId(Handle, out _);
+        return windowThreadId == GetCurrentThreadId();
+    }
+
+    /// <summary>
+    /// Runs <paramref name="func"/> on this window's UI thread and returns its task.
+    /// </summary>
+    internal Task InvokeAsync(Func<Task> func)
+    {
+        ArgumentNullException.ThrowIfNull(func);
+
+        if (CheckAccess())
+            return func();
+
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        BeginInvoke(() =>
+        {
+            _ = RunAsync();
+
+            async Task RunAsync()
+            {
+                try
+                {
+                    await func().ConfigureAwait(true);
+                    tcs.TrySetResult();
+                }
+                catch (OperationCanceledException ex)
+                {
+                    tcs.TrySetCanceled(ex.CancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                }
+            }
+        });
+
+        return tcs.Task;
+    }
+
+    /// <summary>
+    /// Runs <paramref name="func"/> on this window's UI thread and returns its task result.
+    /// </summary>
+    internal Task<T> InvokeAsync<T>(Func<Task<T>> func)
+    {
+        ArgumentNullException.ThrowIfNull(func);
+
+        if (CheckAccess())
+            return func();
+
+        var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        BeginInvoke(() =>
+        {
+            _ = RunAsync();
+
+            async Task RunAsync()
+            {
+                try
+                {
+                    tcs.TrySetResult(await func().ConfigureAwait(true));
+                }
+                catch (OperationCanceledException ex)
+                {
+                    tcs.TrySetCanceled(ex.CancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                }
+            }
+        });
+
+        return tcs.Task;
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
 
     /// <summary>
     /// Posts the specified action to the UI thread that owns this window.
@@ -639,6 +726,10 @@ private IntPtr _hWnd;
         };
 
         RegisterClassEx(ref wc);
+
+        // Install before HWND creation so Load/Shown and any early await/Progress capture the
+        // UI SynchronizationContext — callers should not need BeginInvoke for normal async UI.
+        Application.EnsureSynchronizationContext();
 
         // For CenterScreen, create window hidden first, then position and show
         var createStyle = (uint)cp.Style;
@@ -871,21 +962,6 @@ private IntPtr _hWnd;
     /// already visible window has no additional effect.</remarks>
     public override void Show()
     {
-        if (!IsHandleCreated)
-            CreateHandle();
-
-        if (_hWnd == IntPtr.Zero)
-            return;
-
-        _closeRequested = false;
-        _closeMessagePosted = false;
-        _formClosed = false;
-        Application.RegisterForm(this);
-        if (_formStartPosition == FormStartPosition.CenterScreen)
-            CenterToScreen();
-        else if (_formStartPosition == FormStartPosition.CenterParent)
-            CenterToParent();
-
         // Load and Shown are both deferred until after WM_SHOWWINDOW's DefWindowProc call (see the
         // WM_SHOWWINDOW case in WndProc). Orivy's MessageBox/notification dialogs are in-window
         // overlays rendered by the owner's own surface, not separate native top-level windows, so
@@ -893,11 +969,38 @@ private IntPtr _hWnd;
         // show/paint. Firing Load synchronously here (before ShowWindow) meant a blocking
         // MessageBox.Show() called from a Load handler never let ShowWindow run at all, leaving the
         // window permanently invisible.
-        ShowWindow(_hWnd, 5);
-        ApplyNativeOwner();
-        ApplyShowInTaskbarStyle();
-        Application.SetActiveForm(this);
+        TryShowNativeWindow(modal: false);
     }
+
+    /// <summary>
+    /// Displays the window and returns a task that completes when the window is closed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Safe to call from any thread; the window is created on the UI thread when needed.
+    /// After <c>await</c>, execution resumes on the UI thread via <see cref="SynchronizationContext"/>
+    /// — no <c>BeginInvoke</c>/<c>Invoke</c> required for normal UI follow-up work.
+    /// </para>
+    /// <para>
+    /// A running message loop (<see cref="Application.Run"/> or <see cref="ShowDialog()"/>) is required
+    /// for the window to process input and complete the task.
+    /// </para>
+    /// </remarks>
+    /// <param name="cancellationToken">
+    /// When signaled, closes the window with <see cref="DialogResult.Cancel"/> and cancels the returned task.
+    /// </param>
+    public Task ShowAsync(CancellationToken cancellationToken = default)
+        => ShowAsyncCore(owner: null, cancellationToken);
+
+    /// <summary>
+    /// Displays the window owned by <paramref name="owner"/> and returns a task that completes when it is closed.
+    /// </summary>
+    /// <param name="owner">Owner window used for z-order / ownership.</param>
+    /// <param name="cancellationToken">
+    /// When signaled, closes the window with <see cref="DialogResult.Cancel"/> and cancels the returned task.
+    /// </param>
+    public Task ShowAsync(WindowBase owner, CancellationToken cancellationToken = default)
+        => ShowAsyncCore(owner, cancellationToken);
 
     /// <summary>
     /// Displays the dialog window and starts its message loop, blocking the calling thread until the dialog is closed.
@@ -907,41 +1010,71 @@ private IntPtr _hWnd;
     /// method should be called from a thread that can safely run a message loop, such as the main UI thread.</remarks>
     public DialogResult ShowDialog()
     {
-        if (!IsHandleCreated)
-            CreateHandle();
-
-        if (_hWnd == IntPtr.Zero)
-            return DialogResult.None;
-
-        _closeRequested = false;
-        _closeMessagePosted = false;
-        _formClosed = false;
-        _isModal = true;
-        DialogResult = DialogResult.None;
-        Application.RegisterForm(this);
-        if (_formStartPosition == FormStartPosition.CenterScreen)
-            CenterToScreen();
-        else if (_formStartPosition == FormStartPosition.CenterParent)
-            CenterToParent();
-
         // See the comment in Show() — Load and Shown both fire after WM_SHOWWINDOW's native show
         // sequence completes, deferred via BeginInvoke, so overlay dialogs opened from either handler
         // can actually render.
-        ShowWindow(_hWnd, 5);
-        ApplyNativeOwner();
-        ApplyShowInTaskbarStyle();
-        Application.SetActiveForm(this);
+        if (!TryShowNativeWindow(modal: true))
+            return DialogResult.None;
 
-        MSG msg;
-        while (!_formClosed && !Application.ExitRequested && GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
+        // Splash / pre-Run modal dialogs need a UI SynchronizationContext so await continuations
+        // (e.g. ShowDialogAsync from Load) resume on this message loop instead of a thread-pool thread.
+        Application.EnterMessageLoop();
+        try
         {
-            TranslateMessage(ref msg);
-            DispatchMessage(ref msg);
+            MSG msg;
+            while (!_formClosed && !Application.ExitRequested && GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
+            {
+                TranslateMessage(ref msg);
+                DispatchMessage(ref msg);
+            }
+        }
+        finally
+        {
+            Application.ExitMessageLoop();
+            _isModal = false;
         }
 
-        _isModal = false;
         return DialogResult;
     }
+
+    /// <summary>
+    /// Displays the dialog without blocking the calling thread and returns a task that completes with
+    /// <see cref="DialogResult"/> when the dialog is closed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Preferred async dialog API. Example (no manual marshaling):
+    /// <code>
+    /// var result = await dialog.ShowDialogAsync(this);
+    /// // still on the UI thread — update controls freely
+    /// </code>
+    /// </para>
+    /// <para>
+    /// Unlike <see cref="ShowDialog()"/>, this does not run a nested message loop; the existing
+    /// <see cref="Application.Run"/> / outer modal loop keeps dispatching messages. When an owner
+    /// is supplied, it is disabled while the dialog is open. Safe to call from a background thread;
+    /// show/create is marshaled to the UI thread automatically.
+    /// </para>
+    /// </remarks>
+    /// <param name="cancellationToken">
+    /// When signaled, closes the dialog with <see cref="DialogResult.Cancel"/> and cancels the returned task.
+    /// </param>
+    public Task<DialogResult> ShowDialogAsync(CancellationToken cancellationToken = default)
+        => ShowDialogAsyncCore(owner: null, cancellationToken);
+
+    /// <summary>
+    /// Displays the dialog owned by <paramref name="owner"/> without blocking the calling thread.
+    /// </summary>
+    /// <remarks>
+    /// See <see cref="ShowDialogAsync(CancellationToken)"/>. Prefer passing an owner so modality and
+    /// UI-thread marshaling have a clear target.
+    /// </remarks>
+    /// <param name="owner">Owner window; disabled while the dialog is open.</param>
+    /// <param name="cancellationToken">
+    /// When signaled, closes the dialog with <see cref="DialogResult.Cancel"/> and cancels the returned task.
+    /// </param>
+    public Task<DialogResult> ShowDialogAsync(WindowBase owner, CancellationToken cancellationToken = default)
+        => ShowDialogAsyncCore(owner, cancellationToken);
 
     /// <summary>
     /// Hides the window associated with this instance.
@@ -988,6 +1121,223 @@ private IntPtr _hWnd;
             if (previousActive != null)
                 Application.SetActiveForm(previousActive);
         }
+    }
+
+    private static WindowBase? ResolveUiHost(WindowBase? owner)
+    {
+        if (owner is { IsHandleCreated: true })
+            return owner;
+
+        return Application.FindUiInvokeTarget();
+    }
+
+    /// <summary>
+    /// Creates the native handle (if needed), registers the form, centers it, and calls ShowWindow.
+    /// Shared by sync/async Show and ShowDialog paths.
+    /// </summary>
+    /// <returns><see langword="false"/> when the native window handle could not be created.</returns>
+    private bool TryShowNativeWindow(bool modal)
+    {
+        if (!IsHandleCreated)
+            CreateHandle();
+
+        if (_hWnd == IntPtr.Zero)
+            return false;
+
+        _closeRequested = false;
+        _closeMessagePosted = false;
+        _formClosed = false;
+        _isModal = modal;
+        if (modal)
+            DialogResult = DialogResult.None;
+
+        Application.RegisterForm(this);
+        if (_formStartPosition == FormStartPosition.CenterScreen)
+            CenterToScreen();
+        else if (_formStartPosition == FormStartPosition.CenterParent)
+            CenterToParent();
+
+        ShowWindow(_hWnd, 5);
+        ApplyNativeOwner();
+        ApplyShowInTaskbarStyle();
+        Application.SetActiveForm(this);
+        return true;
+    }
+
+    private Task ShowAsyncCore(WindowBase? owner, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+            return Task.FromCanceled(cancellationToken);
+
+        var uiHost = ResolveUiHost(owner);
+        if (uiHost != null && !uiHost.CheckAccess())
+            return uiHost.InvokeAsync(() => ShowAsyncCore(owner, cancellationToken));
+
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationTokenRegistration registration = default;
+
+        void Cleanup()
+        {
+            FormClosed -= OnClosed;
+            registration.Dispose();
+        }
+
+        void OnClosed(object? sender, FormClosedEventArgs e)
+        {
+            Cleanup();
+
+            if (cancellationToken.IsCancellationRequested)
+                tcs.TrySetCanceled(cancellationToken);
+            else
+                tcs.TrySetResult();
+        }
+
+        FormClosed += OnClosed;
+
+        if (cancellationToken.CanBeCanceled)
+        {
+            registration = cancellationToken.Register(() =>
+            {
+                if (_hWnd != IntPtr.Zero)
+                    Close(DialogResult.Cancel);
+                else
+                {
+                    Cleanup();
+                    tcs.TrySetCanceled(cancellationToken);
+                }
+            });
+        }
+
+        var previousActive = owner != null ? Application.ActiveForm : null;
+        try
+        {
+            if (owner != null)
+            {
+                Owner = owner;
+                Application.SetActiveForm(owner);
+            }
+
+            if (!TryShowNativeWindow(modal: false))
+            {
+                Cleanup();
+                return Task.CompletedTask;
+            }
+
+            ApplyNativeOwner();
+        }
+        catch
+        {
+            Cleanup();
+            throw;
+        }
+        finally
+        {
+            // Match Show(WindowBase): restore the prior active form as soon as the window is shown.
+            if (previousActive != null)
+                Application.SetActiveForm(previousActive);
+        }
+
+        if (_formClosed)
+        {
+            Cleanup();
+            tcs.TrySetResult();
+        }
+
+        return tcs.Task;
+    }
+
+    private Task<DialogResult> ShowDialogAsyncCore(WindowBase? owner, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+            return Task.FromCanceled<DialogResult>(cancellationToken);
+
+        // Window HWNDs must be created and pumped on the UI thread. Callers often await after
+        // Task.Run / ConfigureAwait(false); marshal show onto a live window's thread when needed.
+        var uiHost = ResolveUiHost(owner);
+        if (uiHost != null && !uiHost.CheckAccess())
+            return uiHost.InvokeAsync(() => ShowDialogAsyncCore(owner, cancellationToken));
+
+        var tcs = new TaskCompletionSource<DialogResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var previousActive = Application.ActiveForm;
+        var ownerDisabled = false;
+        CancellationTokenRegistration registration = default;
+
+        void Cleanup()
+        {
+            FormClosed -= OnClosed;
+            registration.Dispose();
+            _isModal = false;
+
+            if (ownerDisabled && owner is { IsHandleCreated: true })
+                EnableWindow(owner.Handle, true);
+
+            if (previousActive != null)
+                Application.SetActiveForm(previousActive);
+        }
+
+        void OnClosed(object? sender, FormClosedEventArgs e)
+        {
+            var result = DialogResult;
+            Cleanup();
+
+            if (cancellationToken.IsCancellationRequested)
+                tcs.TrySetCanceled(cancellationToken);
+            else
+                tcs.TrySetResult(result);
+        }
+
+        FormClosed += OnClosed;
+
+        if (cancellationToken.CanBeCanceled)
+        {
+            registration = cancellationToken.Register(() =>
+            {
+                if (_hWnd != IntPtr.Zero)
+                    Close(DialogResult.Cancel);
+                else
+                {
+                    Cleanup();
+                    tcs.TrySetCanceled(cancellationToken);
+                }
+            });
+        }
+
+        try
+        {
+            if (owner != null)
+            {
+                Owner = owner;
+                Application.SetActiveForm(owner);
+
+                if (owner.IsHandleCreated)
+                {
+                    EnableWindow(owner.Handle, false);
+                    ownerDisabled = true;
+                }
+            }
+
+            if (!TryShowNativeWindow(modal: true))
+            {
+                Cleanup();
+                return Task.FromResult(DialogResult.None);
+            }
+
+            ApplyNativeOwner();
+        }
+        catch
+        {
+            Cleanup();
+            throw;
+        }
+
+        if (_formClosed)
+        {
+            var result = DialogResult;
+            Cleanup();
+            tcs.TrySetResult(result);
+        }
+
+        return tcs.Task;
     }
 
     private void ApplyNativeOwner()

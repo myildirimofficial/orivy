@@ -129,6 +129,9 @@ public class ProgressBar : ElementBase
             if (Math.Abs(_value - normalized) < 0.001f)
                 return;
 
+            if (PostToUiThreadIfRequired(() => Value = normalized))
+                return;
+
             _value = normalized;
             StartValueAnimation(normalized);
         }

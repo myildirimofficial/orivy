@@ -229,6 +229,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
     private ContentAlignment _imageAlign = ContentAlignment.MiddleCenter;
+    private TextImageRelation _textImageRelation = TextImageRelation.Overlay;
+    private float _imageTextSpacing = 6f;
+
     [Category("Appearance")]
     public ContentAlignment ImageAlign
     {
@@ -238,6 +241,44 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             if (_imageAlign == value) return;
             _imageAlign = value;
             OnImageAlignChanged(EventArgs.Empty);
+            Invalidate();
+        }
+    }
+
+    /// <summary>
+    /// How <see cref="Image"/> and <see cref="Text"/> share the content area.
+    /// Default <see cref="TextImageRelation.Overlay"/> keeps historical behaviour;
+    /// <see cref="Button"/> defaults to <see cref="TextImageRelation.ImageBeforeText"/>.
+    /// </summary>
+    [Category("Appearance")]
+    [DefaultValue(TextImageRelation.Overlay)]
+    public TextImageRelation TextImageRelation
+    {
+        get => _textImageRelation;
+        set
+        {
+            if (_textImageRelation == value)
+                return;
+
+            _textImageRelation = value;
+            InvalidateMeasure();
+            Invalidate();
+        }
+    }
+
+    [Category("Appearance")]
+    [DefaultValue(6f)]
+    public float ImageTextSpacing
+    {
+        get => _imageTextSpacing;
+        set
+        {
+            var normalized = Math.Max(0f, value);
+            if (Math.Abs(_imageTextSpacing - normalized) < 0.001f)
+                return;
+
+            _imageTextSpacing = normalized;
+            InvalidateMeasure();
             Invalidate();
         }
     }
@@ -1184,6 +1225,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
             if (_visible == value)
                 return;
 
+            if (PostToUiThreadIfRequired(() => Visible = value))
+                return;
+
             _visible = value;
 
             OnVisibleChanged(EventArgs.Empty);
@@ -1199,6 +1243,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         set
         {
             if (_enabled == value)
+                return;
+
+            if (PostToUiThreadIfRequired(() => Enabled = value))
                 return;
 
             _enabled = value;
@@ -1217,6 +1264,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         get => _backColor;
         set
         {
+            if (PostToUiThreadIfRequired(() => BackColor = value))
+                return;
+
             MarkStickyBackColor(value);
 
             if (_backColor == value)
@@ -1245,6 +1295,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         get => _foreColor == SKColors.Transparent ? ColorScheme.ForeColor : _foreColor;
         set
         {
+            if (PostToUiThreadIfRequired(() => ForeColor = value))
+                return;
+
             MarkStickyForeColor(value);
 
             if (_foreColor == value)
@@ -1355,6 +1408,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         set
         {
             if (_text == value)
+                return;
+
+            if (PostToUiThreadIfRequired(() => Text = value))
                 return;
 
             _text = string.IsNullOrEmpty(value)
@@ -2122,6 +2178,9 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     public virtual void Invalidate()
     {
         CheckDisposed();
+
+        if (PostToUiThreadIfRequired(Invalidate))
+            return;
 
         MarkDirty();
 
@@ -2908,7 +2967,20 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
             RenderMotionEffects(targetCanvas, elementRect);
 
+            // Paint handlers draw into the shared window canvas. Without a clip they can
+            // spill outside this element (e.g. Map plugin). Radius already clips via shapeClip;
+            // when Radius is empty we still need an explicit bounds clip around OnPaint.
+            var paintClipSaveCount = -1;
+            if (!hasRadius)
+            {
+                paintClipSaveCount = targetCanvas.Save();
+                targetCanvas.ClipRect(elementRect);
+            }
+
             OnPaint(targetCanvas);
+
+            if (paintClipSaveCount >= 0)
+                targetCanvas.RestoreToCount(paintClipSaveCount);
 
             if (_manualLoading)
                 RenderRemoteImageLoadingSpinner(targetCanvas, elementRect);
@@ -3435,71 +3507,17 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     private void RenderContentImage(SKCanvas canvas, SKRect elementRect)
     {
-        var padL = MathF.Max(0f, Padding.Left);
-        var padT = MathF.Max(0f, Padding.Top);
-        var padR = MathF.Max(0f, Padding.Right);
-        var padB = MathF.Max(0f, Padding.Bottom);
-
-        var content = new SKRect(
-            elementRect.Left + padL,
-            elementRect.Top + padT,
-            elementRect.Right - padR,
-            elementRect.Bottom - padB);
-
-        if (content.Width <= 0f || content.Height <= 0f)
-            content = elementRect;
-
         if (_image == null)
         {
-            RenderImageSlot(canvas, content);
+            RenderImageSlot(canvas, GetPaddedContentRect(elementRect));
             return;
         }
 
-        var srcW = _image.Width;
-        var srcH = _image.Height;
-        if (srcW <= 0 || srcH <= 0)
-        {
-            RenderImageSlot(canvas, content);
+        ComputeImageAndTextRects(elementRect, out var imageRect, out _);
+        if (imageRect.Width <= 0f || imageRect.Height <= 0f)
             return;
-        }
 
-        var scale = MathF.Min(content.Width / srcW, content.Height / srcH);
-        var drawW = srcW * scale;
-        var drawH = srcH * scale;
-
-        var x = content.Left + (content.Width - drawW) / 2f;
-        var y = content.Top + (content.Height - drawH) / 2f;
-
-        // Honour ImageAlign for non-centered placements.
-        switch (_imageAlign)
-        {
-            case ContentAlignment.TopLeft:
-            case ContentAlignment.MiddleLeft:
-            case ContentAlignment.BottomLeft:
-                x = content.Left;
-                break;
-            case ContentAlignment.TopRight:
-            case ContentAlignment.MiddleRight:
-            case ContentAlignment.BottomRight:
-                x = content.Right - drawW;
-                break;
-        }
-
-        switch (_imageAlign)
-        {
-            case ContentAlignment.TopLeft:
-            case ContentAlignment.TopCenter:
-            case ContentAlignment.TopRight:
-                y = content.Top;
-                break;
-            case ContentAlignment.BottomLeft:
-            case ContentAlignment.BottomCenter:
-            case ContentAlignment.BottomRight:
-                y = content.Bottom - drawH;
-                break;
-        }
-
-        RenderImageSlot(canvas, SKRect.Create(x, y, drawW, drawH));
+        RenderImageSlot(canvas, imageRect);
     }
 
     private void RenderDefaultText(SKCanvas canvas)
@@ -3512,21 +3530,148 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         if (paint.Color.Alpha == 0)
             return;
 
-        var displayRectangle = DisplayRectangle;
-        if (displayRectangle.Width <= 0f || displayRectangle.Height <= 0f)
+        var elementRect = new SKRect(0f, 0f, Width, Height);
+        ComputeImageAndTextRects(elementRect, out _, out var textRect);
+        if (textRect.Width <= 0f || textRect.Height <= 0f)
+            return;
+
+        TextRenderer.DrawText(canvas, _text, textRect, paint, GetDefaultTextRenderFont(), TextAlign, AutoEllipsis, UseMnemonic, WrapMode);
+    }
+
+    private SKRect GetPaddedContentRect(SKRect elementRect)
+    {
+        var padL = MathF.Max(0f, Padding.Left);
+        var padT = MathF.Max(0f, Padding.Top);
+        var padR = MathF.Max(0f, Padding.Right);
+        var padB = MathF.Max(0f, Padding.Bottom);
+
+        var content = new SKRect(
+            elementRect.Left + padL,
+            elementRect.Top + padT,
+            elementRect.Right - padR,
+            elementRect.Bottom - padB);
+
+        if (content.Width <= 0f || content.Height <= 0f)
+            return elementRect;
+
+        return content;
+    }
+
+    private void ComputeImageAndTextRects(SKRect elementRect, out SKRect imageRect, out SKRect textRect)
+    {
+        var content = GetPaddedContentRect(elementRect);
+        imageRect = SKRect.Empty;
+        textRect = content;
+
+        var hasImage = _image != null && _image.Width > 0 && _image.Height > 0;
+        var hasText = !string.IsNullOrEmpty(_text) && this is not Container;
+
+        if (!hasImage)
+            return;
+
+        var srcW = (float)_image!.Width;
+        var srcH = (float)_image.Height;
+        var spacing = _imageTextSpacing * Math.Max(1f, ScaleFactor);
+
+        if (!hasText || _textImageRelation == TextImageRelation.Overlay)
         {
-            // Padding alone can consume the whole box once a nested Dock/Anchor child gets
-            // squeezed small enough (e.g. Size.Width <= Padding.Left + Padding.Right) — the
-            // padded DisplayRectangle then has literally no room, and text used to vanish
-            // completely instead of just overflowing its tiny box, the same failure mode fixed
-            // for wrapping in TextWrapper.WrapText. Fall back to the raw (unpadded) bounds so
-            // there's still something to draw.
-            displayRectangle = new SKRect(0f, 0f, Width, Height);
-            if (displayRectangle.Width <= 0f || displayRectangle.Height <= 0f)
-                return;
+            var scale = MathF.Min(content.Width / srcW, content.Height / srcH);
+            var drawW = srcW * scale;
+            var drawH = srcH * scale;
+            imageRect = AlignRectInBounds(content, drawW, drawH, _imageAlign);
+            textRect = content;
+            return;
         }
 
-        TextRenderer.DrawText(canvas, _text, displayRectangle, paint, GetDefaultTextRenderFont(), TextAlign, AutoEllipsis, UseMnemonic, WrapMode);
+        // Keep icons crisp and compact next to labels instead of stretching to fill the control.
+        var maxIcon = MathF.Min(content.Height, 18f * Math.Max(1f, ScaleFactor));
+        var iconScale = MathF.Min(1f, maxIcon / MathF.Max(srcW, srcH));
+        var drawIconW = srcW * iconScale;
+        var drawIconH = srcH * iconScale;
+
+        switch (_textImageRelation)
+        {
+            case TextImageRelation.ImageBeforeText:
+            {
+                imageRect = AlignRectInBounds(
+                    new SKRect(content.Left, content.Top, content.Left + drawIconW, content.Bottom),
+                    drawIconW,
+                    drawIconH,
+                    ContentAlignment.MiddleLeft);
+                textRect = new SKRect(content.Left + drawIconW + spacing, content.Top, content.Right, content.Bottom);
+                break;
+            }
+            case TextImageRelation.TextBeforeImage:
+            {
+                imageRect = AlignRectInBounds(
+                    new SKRect(content.Right - drawIconW, content.Top, content.Right, content.Bottom),
+                    drawIconW,
+                    drawIconH,
+                    ContentAlignment.MiddleRight);
+                textRect = new SKRect(content.Left, content.Top, content.Right - drawIconW - spacing, content.Bottom);
+                break;
+            }
+            case TextImageRelation.ImageAboveText:
+            {
+                imageRect = AlignRectInBounds(
+                    new SKRect(content.Left, content.Top, content.Right, content.Top + drawIconH),
+                    drawIconW,
+                    drawIconH,
+                    ContentAlignment.TopCenter);
+                textRect = new SKRect(content.Left, content.Top + drawIconH + spacing, content.Right, content.Bottom);
+                break;
+            }
+            case TextImageRelation.TextAboveImage:
+            {
+                imageRect = AlignRectInBounds(
+                    new SKRect(content.Left, content.Bottom - drawIconH, content.Right, content.Bottom),
+                    drawIconW,
+                    drawIconH,
+                    ContentAlignment.BottomCenter);
+                textRect = new SKRect(content.Left, content.Top, content.Right, content.Bottom - drawIconH - spacing);
+                break;
+            }
+            default:
+                imageRect = AlignRectInBounds(content, drawIconW, drawIconH, _imageAlign);
+                textRect = content;
+                break;
+        }
+    }
+
+    private static SKRect AlignRectInBounds(SKRect bounds, float width, float height, ContentAlignment align)
+    {
+        var x = bounds.Left + (bounds.Width - width) / 2f;
+        var y = bounds.Top + (bounds.Height - height) / 2f;
+
+        switch (align)
+        {
+            case ContentAlignment.TopLeft:
+            case ContentAlignment.MiddleLeft:
+            case ContentAlignment.BottomLeft:
+                x = bounds.Left;
+                break;
+            case ContentAlignment.TopRight:
+            case ContentAlignment.MiddleRight:
+            case ContentAlignment.BottomRight:
+                x = bounds.Right - width;
+                break;
+        }
+
+        switch (align)
+        {
+            case ContentAlignment.TopLeft:
+            case ContentAlignment.TopCenter:
+            case ContentAlignment.TopRight:
+                y = bounds.Top;
+                break;
+            case ContentAlignment.BottomLeft:
+            case ContentAlignment.BottomCenter:
+            case ContentAlignment.BottomRight:
+                y = bounds.Bottom - height;
+                break;
+        }
+
+        return SKRect.Create(x, y, width, height);
     }
 
     private void EnsureFocusAdornerResources()
@@ -4312,6 +4457,24 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// When called off the UI thread, posts <paramref name="action"/> to the owning window and
+    /// returns <see langword="true"/>. Callers should then return; the action re-enters on the UI thread.
+    /// This lets app code assign control properties directly from background work without
+    /// <c>BeginInvoke</c> / <c>BindToUiThread</c>.
+    /// </summary>
+    protected bool PostToUiThreadIfRequired(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        var window = this as WindowBase ?? GetParentWindow();
+        if (window is not { IsHandleCreated: true } || window.CheckAccess())
+            return false;
+
+        window.BeginInvoke(action);
+        return true;
     }
 
     public virtual void  OnMouseUp(MouseEventArgs e)

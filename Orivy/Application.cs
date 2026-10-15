@@ -10,16 +10,35 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using static Orivy.Native.Windows.Methods;
 
 namespace Orivy;
 
+/// <summary>
+/// Application lifetime, message loop, and UI-thread async helpers.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Orivy installs a UI <see cref="SynchronizationContext"/> for the message loop (WinForms-style).
+/// After <c>await</c>, execution resumes on the UI thread — do any UI work directly.
+/// </para>
+/// <para>
+/// Control properties such as <c>Text</c>, <c>Visible</c>, <c>Enabled</c>, colors, and
+/// <c>ProgressBar.Value</c> may also be assigned from a background thread; Orivy marshals those
+/// updates to the UI thread automatically. Prefer writing <c>label.Text = "…"</c> over
+/// <see cref="BindToUiThread{T}(Action{T})"/> / <c>BeginInvoke</c>.
+/// </para>
+/// </remarks>
 public class Application
 {
     private static readonly List<WindowBase> _openForms = new();
     private static SKFont? _defaultFont;
     private static WindowBase _activeForm = null!;
     private static bool _dpiAwarenessSet;
+    private static int _messageLoopDepth;
+    private static OrivySynchronizationContext? _uiSynchronizationContext;
 
     /// <summary>
     /// Static constructor ensures DPI awareness is set before ANY window is created.
@@ -79,26 +98,248 @@ public class Application
     {
         ArgumentNullException.ThrowIfNull(action);
 
-        var window = _activeForm;
-        if (window == null || !window.IsHandleCreated)
-        {
-            for (var i = 0; i < _openForms.Count; i++)
-            {
-                if (_openForms[i].IsHandleCreated)
-                {
-                    window = _openForms[i];
-                    break;
-                }
-            }
-        }
-
-        if (window == null || !window.IsHandleCreated)
+        var window = FindUiInvokeTarget();
+        if (window == null)
         {
             action();
             return;
         }
 
         window.BeginInvoke(action);
+    }
+
+    /// <summary>
+    /// Finds a window with a live HWND that can marshal work onto the UI thread.
+    /// </summary>
+    internal static WindowBase? FindUiInvokeTarget()
+    {
+        if (_activeForm is { IsHandleCreated: true })
+            return _activeForm;
+
+        for (var i = 0; i < _openForms.Count; i++)
+        {
+            if (_openForms[i].IsHandleCreated)
+                return _openForms[i];
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Installs <see cref="OrivySynchronizationContext"/> on the current (UI) thread so
+    /// <c>await</c> continuations resume on the UI message loop (WinForms-compatible).
+    /// </summary>
+    /// <remarks>
+    /// Call only from the UI thread (<see cref="Controls.WindowBase"/> handle creation / message loop).
+    /// Does not attach the context to thread-pool threads.
+    /// </remarks>
+    internal static void EnsureSynchronizationContext()
+    {
+        _uiSynchronizationContext ??= new OrivySynchronizationContext();
+
+        if (SynchronizationContext.Current is OrivySynchronizationContext)
+            return;
+
+        SynchronizationContext.SetSynchronizationContext(_uiSynchronizationContext);
+    }
+
+    private static OrivySynchronizationContext GetUiSynchronizationContext()
+        => _uiSynchronizationContext
+           ?? throw new InvalidOperationException(
+               "UI SynchronizationContext is not available yet. Create/show a window first.");
+
+    /// <summary>
+    /// Gets whether the caller is already on the UI thread that owns an open window.
+    /// </summary>
+    public static bool IsUiThread
+    {
+        get
+        {
+            var window = FindUiInvokeTarget();
+            return window != null && window.CheckAccess();
+        }
+    }
+
+    /// <summary>
+    /// Yields once to the UI message loop, then continues on the UI thread.
+    /// </summary>
+    /// <remarks>
+    /// Use between chunks of work that must stay on the UI thread so paint/input/animations
+    /// can run without <c>Task.Run</c> / a background thread. A single long chunk still blocks
+    /// until it returns; yield between steps, not instead of splitting work.
+    /// </remarks>
+    public static Task YieldAsync()
+    {
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var window = FindUiInvokeTarget();
+        if (window == null)
+        {
+            // No HWND yet — nothing to pump; complete on the next thread-pool turn.
+            ThreadPool.QueueUserWorkItem(_ => tcs.TrySetResult());
+            return tcs.Task;
+        }
+
+        window.BeginInvoke(() => tcs.TrySetResult());
+        return tcs.Task;
+    }
+
+    /// <summary>
+    /// Runs <paramref name="action"/> on the UI thread (inline if already there).
+    /// Use for arbitrary UI work from a background thread — not limited to progress updates.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// await Task.Run(async () =>
+    /// {
+    ///     var data = LoadData();
+    ///     await Application.InvokeAsync(() =>
+    ///     {
+    ///         titleLabel.Text = data.Title;
+    ///         list.Items.Clear();
+    ///         // …any UI work
+    ///     });
+    /// });
+    /// </code>
+    /// </example>
+    public static Task InvokeAsync(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        var window = FindUiInvokeTarget();
+        if (window == null)
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        if (window.CheckAccess())
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        window.BeginInvoke(() =>
+        {
+            try
+            {
+                action();
+                tcs.TrySetResult();
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        });
+        return tcs.Task;
+    }
+
+    /// <summary>
+    /// Runs <paramref name="func"/> on the UI thread and returns its result.
+    /// </summary>
+    public static Task<T> InvokeAsync<T>(Func<T> func)
+    {
+        ArgumentNullException.ThrowIfNull(func);
+
+        var window = FindUiInvokeTarget();
+        if (window == null || window.CheckAccess())
+            return Task.FromResult(func());
+
+        var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        window.BeginInvoke(() =>
+        {
+            try
+            {
+                tcs.TrySetResult(func());
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        });
+        return tcs.Task;
+    }
+
+    /// <summary>
+    /// Runs an async UI operation on the UI thread and returns when it completes.
+    /// </summary>
+    public static Task InvokeAsync(Func<Task> func)
+    {
+        ArgumentNullException.ThrowIfNull(func);
+
+        var window = FindUiInvokeTarget();
+        if (window == null || window.CheckAccess())
+            return func();
+
+        return window.InvokeAsync(func);
+    }
+
+    /// <summary>
+    /// Runs an async UI operation on the UI thread and returns its result.
+    /// </summary>
+    public static Task<T> InvokeAsync<T>(Func<Task<T>> func)
+    {
+        ArgumentNullException.ThrowIfNull(func);
+
+        var window = FindUiInvokeTarget();
+        if (window == null || window.CheckAccess())
+            return func();
+
+        return window.InvokeAsync(func);
+    }
+
+    /// <summary>
+    /// Wraps a callback so every invocation is posted to the UI thread — any UI work is allowed inside.
+    /// </summary>
+    /// <remarks>
+    /// For one-shot / awaited UI work prefer <see cref="InvokeAsync(Action)"/>.
+    /// Use this when a background API takes a synchronous callback (events, progress delegates, …).
+    /// </remarks>
+    public static Action BindToUiThread(Action callback)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        var context = GetUiSynchronizationContext();
+        return () => context.Post(_ => callback(), null);
+    }
+
+    /// <inheritdoc cref="BindToUiThread(Action)"/>
+    public static Action<T> BindToUiThread<T>(Action<T> callback)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        var context = GetUiSynchronizationContext();
+        return value => context.Post(_ => callback(value), null);
+    }
+
+    /// <inheritdoc cref="BindToUiThread(Action)"/>
+    public static Action<T1, T2> BindToUiThread<T1, T2>(Action<T1, T2> callback)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        var context = GetUiSynchronizationContext();
+        return (a, b) => context.Post(_ => callback(a, b), null);
+    }
+
+    /// <summary>
+    /// Marks that a UI message loop is running on this thread (<see cref="Run"/> or modal
+    /// <c>ShowDialog</c>) and ensures a UI <see cref="SynchronizationContext"/> is installed.
+    /// </summary>
+    internal static void EnterMessageLoop()
+    {
+        EnsureSynchronizationContext();
+        _messageLoopDepth++;
+        MessageLoop = true;
+    }
+
+    /// <summary>
+    /// Leaves a nested UI message loop. Clears <see cref="MessageLoop"/> when the outermost loop exits.
+    /// </summary>
+    internal static void ExitMessageLoop()
+    {
+        if (_messageLoopDepth > 0)
+            _messageLoopDepth--;
+
+        if (_messageLoopDepth == 0)
+            MessageLoop = false;
     }
 
     /// <summary>
@@ -184,7 +425,7 @@ public class Application
                 window.CreateHandle();
 
             // Set before Show() so Application.MessageLoop is already true during Load/Shown handlers.
-            MessageLoop = true;
+            EnterMessageLoop();
             window.Show();
 
             while (!ExitRequested)
@@ -214,7 +455,7 @@ public class Application
 		}
         finally
         {
-            MessageLoop = false;
+            ExitMessageLoop();
             RaiseApplicationExit();
         }
     }

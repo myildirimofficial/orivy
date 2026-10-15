@@ -130,6 +130,12 @@ public partial class WindowBase
 
     public override void Invalidate()
     {
+        if (IsHandleCreated && !CheckAccess())
+        {
+            BeginInvoke(Invalidate);
+            return;
+        }
+
         MarkDirty();
 
         if (!CanInvalidateWindowSurface())

@@ -18,7 +18,7 @@ public partial class TabView : ElementBase
     private const float TabHorizontalPadding = 14f;
     private const float TabVerticalInset = 4f;
     private const float TabIndicatorHeight = 3f;
-    private const float TabIconSize = 24f;
+    private const float TabIconSize = 18f;
     private const float TabIconSpacing = 4f;
     private const float TabCloseButtonSize = 18f;
     private const float TabCloseButtonSpacing = 8f;
@@ -38,7 +38,7 @@ public partial class TabView : ElementBase
     private const float TabHoverAnimationStep = 0.18f;
     private const float TabDragThreshold = 6f;
     private const float TitleBarTabHorizontalPadding = 8f;
-    private const float TitleBarTabIconSize = 24f;
+    private const float TitleBarTabIconSize = 18f;
     private const float TitleBarTabIconSpacing = 4f;
     private const float TitleBarTabCloseButtonSize = 20f;
     private const float TitleBarTabCloseButtonInset = 4.5f;
@@ -125,7 +125,7 @@ public partial class TabView : ElementBase
     private TabViewMode _tabMode = TabViewMode.Embedded;
     private SKColor _tabStripBackground = SKColors.Transparent;
     private TabViewStyle? _customTabStyle;
-    private bool _allowTabDrag = true;
+    private bool _allowTabDrag = false;
     private List<ElementBase>? _pageOrder;
     private int _dragTabSourceIndex = -1;
     private bool _isDraggingTab;
@@ -571,7 +571,7 @@ public partial class TabView : ElementBase
     }
 
     [Category("Behavior")]
-    [DefaultValue(true)]
+    [DefaultValue(false)]
     [Description("Allows the user to reorder tabs by dragging within the embedded tab strip.")]
     public bool AllowTabDrag
     {

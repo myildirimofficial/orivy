@@ -458,7 +458,8 @@ public partial class Window : WindowBase
     }
 
     /// <summary>
-    ///     Gets or sets whether to show the title bar of the form
+    ///     Gets or sets whether to show the title bar of the form.
+    ///     When false, <see cref="Padding"/> top is cleared so content is not inset by title height.
     /// </summary>
     [Category("Window")]
     public bool ShowTitle
@@ -466,9 +467,30 @@ public partial class Window : WindowBase
         get => showTitle;
         set
         {
+            if (showTitle == value)
+                return;
+
             showTitle = value;
+            // Recalc Padding.Top (and reflow children) so hiding the title bar does not leave
+            // an empty chrome band above content.
             CalcSystemBoxPos();
+            InvalidateMeasureRecursive();
+            PerformLayout();
             Invalidate();
+        }
+    }
+
+    /// <summary>
+    /// Window owns <see cref="Thickness.Top"/> for the custom title bar. Hidden title → top 0;
+    /// visible title → at least the DPI-scaled title bar height (ignores a stale larger/smaller Top).
+    /// </summary>
+    public override Thickness Padding
+    {
+        get => base.Padding;
+        set
+        {
+            var chromeTop = showTitle ? (int)MathF.Ceiling(_titleBarBottomDPI) : 0;
+            base.Padding = new Thickness(value.Left, chromeTop, value.Right, value.Bottom);
         }
     }
 
@@ -1262,11 +1284,15 @@ public partial class Window : WindowBase
         // Hosted controls sit left of ExtendBox and further shrink the trailing content edge.
         SyncTitleBarControlsLayout();
 
-        Padding = new Thickness(
-            (int)MathF.Ceiling(_titleBarLeftInsetDPI),
-            (int)(showTitle ? MathF.Ceiling(_titleBarBottomDPI) : 0),
-            (int)MathF.Ceiling(_titleBarRightInsetDPI),
-            Padding.Bottom);
+        // Padding.Top is enforced by the Padding override from ShowTitle / title height.
+        // When the title bar is hidden, also drop left/right title insets so no empty chrome remains.
+        Padding = showTitle
+            ? new Thickness(
+                (int)MathF.Ceiling(_titleBarLeftInsetDPI),
+                (int)MathF.Ceiling(_titleBarBottomDPI),
+                (int)MathF.Ceiling(_titleBarRightInsetDPI),
+                Padding.Bottom)
+            : new Thickness(0, 0, 0, Padding.Bottom);
 
         SyncTitleBarMenuStripLayout();
     }

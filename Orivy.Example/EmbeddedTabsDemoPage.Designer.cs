@@ -57,6 +57,7 @@ internal sealed partial class EmbeddedTabsDemoPage
             LockInputDuringTransition = true,
             TextAlign                   = ContentAlignment.MiddleCenter,
             TabOverflowMode             = TabOverflowMode.Scroll,
+            AllowTabDrag                = true,
             MinimumSize = new SKSize(0, 300)
         };
         _embeddedTabView = embeddedTabView;

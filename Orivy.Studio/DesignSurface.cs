@@ -266,10 +266,13 @@ public sealed class DesignSurface : Element
 
     private void ApplyDesignHostChrome(Thickness? importedPadding = null)
     {
+        // Top is owned by the simulated title bar — never keep a stale imported Top when
+        // ShowTitle is false (chrome is hidden but Dock/Anchor would still inset by TitleHeight).
         var titlePad = DesignShowTitle ? (int)MathF.Ceiling(DesignTitleHeight) : 0;
+        var pad = importedPadding ?? Thickness.Empty;
         _root.Radius = new Radius(0);
         _root.Border = new Thickness(1);
-        _root.Padding = importedPadding ?? new Thickness(0, titlePad, 0, 0);
+        _root.Padding = new Thickness(pad.Left, titlePad, pad.Right, pad.Bottom);
         _root.ConfigureVisualStyles(styles => styles.Base(b => b
             .Background(ColorScheme.Surface)
             .BorderColor(ColorScheme.Outline)), clearExisting: true);

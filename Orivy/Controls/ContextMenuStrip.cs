@@ -502,8 +502,10 @@ public class ContextMenuStrip : MenuStrip
             return;
         }
 
-        item.OnClick();
+        // Close before invoking Click so modal/non-modal windows opened from the
+        // handler cannot leave the ExtendBox / popup menu stuck open underneath.
         ClosePopupChain();
+        item.OnClick();
     }
 
     private void ClosePopupChain()
@@ -1192,8 +1194,8 @@ public class ContextMenuStrip : MenuStrip
                     OnItemClicked(item);
                 else
                 {
-                    item.OnClick();
                     ClosePopupChain();
+                    item.OnClick();
                 }
 
                 return true;

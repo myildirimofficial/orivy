@@ -53,11 +53,48 @@ public class ButtonGroup<TValue> : Container
         }
     }
 
-    public SKColor SelectedBackColor { get; set; } = SKColor.Empty;
+    private SKColor _selectedBackColor = SKColor.Empty;
+    private SKColor _selectedForeColor = SKColor.Empty;
+    private SKColor _selectedBorderColor = SKColor.Empty;
 
-    public SKColor SelectedForeColor { get; set; } = SKColor.Empty;
+    public SKColor SelectedBackColor
+    {
+        get => _selectedBackColor;
+        set
+        {
+            if (_selectedBackColor == value)
+                return;
+            _selectedBackColor = value;
+            ApplySelectionStyleToButtons(this);
+            Invalidate();
+        }
+    }
 
-    public SKColor SelectedBorderColor { get; set; } = SKColor.Empty;
+    public SKColor SelectedForeColor
+    {
+        get => _selectedForeColor;
+        set
+        {
+            if (_selectedForeColor == value)
+                return;
+            _selectedForeColor = value;
+            ApplySelectionStyleToButtons(this);
+            Invalidate();
+        }
+    }
+
+    public SKColor SelectedBorderColor
+    {
+        get => _selectedBorderColor;
+        set
+        {
+            if (_selectedBorderColor == value)
+                return;
+            _selectedBorderColor = value;
+            ApplySelectionStyleToButtons(this);
+            Invalidate();
+        }
+    }
 
     [Category("Data")]
     [Description("Values shown as segmented buttons. Edit this list in Studio; do not nest Button children.")]
@@ -83,9 +120,13 @@ public class ButtonGroup<TValue> : Container
             _configureButton = value;
             for (var i = 0; i < _autoButtons.Count; i++)
             {
-                if (TryGetButtonValue(_autoButtons[i], out var itemValue))
-                    value?.Invoke(_autoButtons[i], itemValue);
-                ApplyButtonSelectionStyle(_autoButtons[i]);
+                var button = _autoButtons[i];
+                if (TryGetButtonValue(button, out var itemValue))
+                    value?.Invoke(button, itemValue);
+
+                // Keep segmented-radius source in sync with ConfigureButton (e.g. Radius).
+                _buttonOriginalRadii[button] = button.Radius;
+                ApplyButtonSelectionStyle(button);
             }
             PerformLayout();
             Invalidate();
@@ -749,38 +790,53 @@ public class ButtonGroup<TValue> : Container
         var selectedBack = SelectedBackColor == SKColor.Empty ? ColorScheme.Primary : SelectedBackColor;
         var selectedFore = SelectedForeColor == SKColor.Empty ? SKColors.White : SelectedForeColor;
         var selectedBorder = SelectedBorderColor == SKColor.Empty ? selectedBack.Brightness(-0.16f) : SelectedBorderColor;
+        var joined = Gap == 0;
 
-        button.ConfigureVisualStyles(styles => styles
-            .DefaultTransition(TimeSpan.FromMilliseconds(120), AnimationType.CubicEaseOut)
-            .Base(rule => rule
-                .Background(ColorScheme.Surface)
-                .Foreground(ColorScheme.ForeColor)
-                .Border(1)
-                .BorderColor(ColorScheme.Outline.WithAlpha(120))
-                .Radius(10)
-                .Shadow(BoxShadow.None))
-            .OnHover(rule => rule
-                .Background(ColorScheme.SurfaceContainerHigh)
-                .BorderColor(ColorScheme.Primary.WithAlpha(118)))
-            .OnPressed(rule => rule
-                .Background(ColorScheme.Primary.WithAlpha(38))
-                .BorderColor(ColorScheme.Primary.WithAlpha(160))
-                .Scale(0.99f))
-            .OnChecked(rule => rule
-                .Background(selectedBack)
-                .Foreground(selectedFore)
-                .BorderColor(selectedBorder)
-                .Shadow(new BoxShadow(0f, 6f, 14f, 0, selectedBack.WithAlpha(30))))
-            .OnFocused(rule => rule
-                .Border(2)
-                .BorderColor(ColorScheme.Primary.WithAlpha(210)))
-            .OnDisabled(rule => rule
-                .Background(ColorScheme.SurfaceVariant)
-                .Foreground(ColorScheme.ForeColor.WithAlpha(150))
-                .BorderColor(ColorScheme.Outline.WithAlpha(80))
-                .Opacity(0.72f)
-                .Shadow(BoxShadow.None)),
-            clearExisting: true);
+        // When Gap is 0 the group applies segmented corner radii on Button.Radius.
+        // Do not force a per-button Radius / drop shadow here or the segments look separated.
+        button.ConfigureVisualStyles(styles =>
+        {
+            styles
+                .DefaultTransition(TimeSpan.FromMilliseconds(120), AnimationType.CubicEaseOut)
+                .Base(rule =>
+                {
+                    var baseRule = rule
+                        .Background(ColorScheme.Surface)
+                        .Foreground(ColorScheme.ForeColor)
+                        .Border(1)
+                        .BorderColor(ColorScheme.Outline.WithAlpha(120))
+                        .Shadow(BoxShadow.None);
+                    if (!joined)
+                        baseRule.Radius(10);
+                })
+                .OnHover(rule => rule
+                    .Background(ColorScheme.SurfaceContainerHigh)
+                    .BorderColor(ColorScheme.Primary.WithAlpha(118)))
+                .OnPressed(rule => rule
+                    .Background(ColorScheme.Primary.WithAlpha(38))
+                    .BorderColor(ColorScheme.Primary.WithAlpha(160))
+                    .Scale(0.99f))
+                .OnChecked(rule =>
+                {
+                    var checkedRule = rule
+                        .Background(selectedBack)
+                        .Foreground(selectedFore)
+                        .BorderColor(selectedBorder);
+                    if (joined)
+                        checkedRule.Shadow(BoxShadow.None);
+                    else
+                        checkedRule.Shadow(new BoxShadow(0f, 6f, 14f, 0, selectedBack.WithAlpha(30)));
+                })
+                .OnFocused(rule => rule
+                    .Border(joined ? 1 : 2)
+                    .BorderColor(ColorScheme.Primary.WithAlpha(210)))
+                .OnDisabled(rule => rule
+                    .Background(ColorScheme.SurfaceVariant)
+                    .Foreground(ColorScheme.ForeColor.WithAlpha(150))
+                    .BorderColor(ColorScheme.Outline.WithAlpha(80))
+                    .Opacity(0.72f)
+                    .Shadow(BoxShadow.None));
+        }, clearExisting: true);
     }
 
     private static List<Button> GetDirectButtons(ElementBase parent)
