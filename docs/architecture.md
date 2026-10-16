@@ -18,7 +18,8 @@ This architecture reference explains how Orivy is composed into consistent layer
 - `Window` (Orivy/Controls/Window.cs)
   - Higher-level window semantics (title bar, content panel, page transitions, and in-window overlays).
   - Contains specific rendering for decorated chrome and tab-like interactions.
-  - `ShowTitle` owns `Padding.Top`: visible title insets by the DPI-scaled title height; hidden title clears top padding so Dock/Anchor content is not left with an empty title-sized gap.
+  - `ShowTitle` owns `Padding.Top` only: visible title insets by the DPI-scaled title height; hidden title clears top padding so Dock/Anchor use the full client. Child `Location` values are left unchanged (including title-band Y); Studio and runtime stay coordinate-identical.
+  - `WindowBase` honors `MinimumSize` / `MaximumSize` during interactive resize via `WM_GETMINMAXINFO` (`ptMinTrackSize` / `ptMaxTrackSize`); `Size` syncs the HWND to the constrained size.
 
 ## 2. UI model and control tree
 

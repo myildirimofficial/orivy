@@ -119,6 +119,7 @@ See `Orivy/Controls/ElementBase.cs` for exact dispatch code (`OnMouseDown`, `OnM
   - `Accordion` coordinates multiple `Collapse` items; `Collapse` provides a single animated disclosure region.
   - `Carousel` hosts `BackgroundImages` with Cover layout by default, optional auto-advance, and painted previous/next controls. Choose the chrome with `NavigationStyle` (`Glass`, `Minimal`, `Pill`, `Solid`, `Outline`, `Arrow`). Prefer `ShowNextBackgroundImage` / `ShowPreviousBackgroundImage` on `ElementBase` for programmatic navigation.
   - `TextBox` / `ComboBox` focus uses an animated Bootstrap 3 soft glow. Visual styles no longer animate layout `Size` (that was the “slides wider on focus” bug). `Container` defaults `RenderImageAsContent = false` so tab-page `Image` glyphs stay strip-only.
+  - `TextBox.Text` and paste share the same normalization: CRLF → LF, single-line flattens newlines, `AcceptsTab == false` expands `\t` to four spaces (raw string literals with tabs no longer disappear in layout), and other control characters are stripped. With `AcceptsTab`, tab stops are honored for measure/caret/paint.
   - Owned windows: call `Show(owner)` / set `Owner` so the HWND parent link is applied. Prefer that over bare `ShowInTaskbar = false` + `WS_EX_TOOLWINDOW`, which drops the window from Alt+Tab.
 
 - `GridList` (`Orivy/Controls/GridList.cs` + `GridList.Models.cs`) — the ListView/DataGrid equivalent

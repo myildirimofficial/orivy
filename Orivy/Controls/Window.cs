@@ -471,8 +471,8 @@ public partial class Window : WindowBase
                 return;
 
             showTitle = value;
-            // Recalc Padding.Top (and reflow children) so hiding the title bar does not leave
-            // an empty chrome band above content.
+            // Only clear/restore Padding.Top — never rewrite child Location (that desyncs
+            // designer coordinates such as (8,160) from what is on screen).
             CalcSystemBoxPos();
             InvalidateMeasureRecursive();
             PerformLayout();
@@ -1157,18 +1157,6 @@ public partial class Window : WindowBase
         Invalidate();
     }
 
-    public override void  OnControlAdded(ElementEventArgs e)
-    {
-        base.OnControlAdded(e);
-
-        if (ShowTitle && !AllowAddControlOnTitle && !IsHostedTitleBarElement(e.Element) && e.Element.Location.Y < TitleHeight)
-        {
-            var newLoc = e.Element.Location;
-            newLoc.Y = Padding.Top;
-            e.Element.Location = newLoc;
-        }
-    }
-
     protected override bool IsCaptionHit(SKPoint clientPt)
     {
         // if title not shown, definitely not caption
@@ -1332,6 +1320,8 @@ public partial class Window : WindowBase
         if (IsHostedTitleBarElement(element))
             return true;
 
+        // Keep Location as designed (Studio/runtime parity). Title-band children are painted but
+        // skipped for hit-testing unless AllowAddControlOnTitle — so caption drag still works.
         return !ShowTitle || AllowAddControlOnTitle || element.Location.Y >= _titleBarBottomDPI;
     }
 

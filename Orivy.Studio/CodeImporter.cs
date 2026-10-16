@@ -1282,10 +1282,37 @@ public static class CodeImporter
                 }
                 return false;
 
+            // new SKFont(SKTypeface.FromFamilyName(...) ?? SKTypeface.Default, 12f)
+            case BinaryExpressionSyntax { RawKind: (int)SyntaxKind.CoalesceExpression } coalesce:
+                if (TryConvertValue(coalesce.Left, underlying, out value, objectLookup, designerFilePath) && value != null)
+                    return true;
+                return TryConvertValue(coalesce.Right, underlying, out value, objectLookup, designerFilePath);
+
+            case MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.Text: "SKTypeface" }, Name.Identifier.Text: "Default" }
+                when underlying == typeof(SKTypeface) || underlying.IsAssignableFrom(typeof(SKTypeface)):
+                value = SKTypeface.Default;
+                return true;
+
+            case InvocationExpressionSyntax
+            {
+                Expression: MemberAccessExpressionSyntax
+                {
+                    Name.Identifier.Text: "FromFamilyName",
+                    Expression: IdentifierNameSyntax { Identifier.Text: "SKTypeface" }
+                },
+                ArgumentList.Arguments: { Count: > 0 } typefaceArgs
+            } when underlying == typeof(SKTypeface) || underlying.IsAssignableFrom(typeof(SKTypeface)):
+                return TryBuildSKTypeface(typefaceArgs, out value);
+
             case ObjectCreationExpressionSyntax { ArgumentList: { } oceArgs } when underlying == typeof(SKColor):
                 return TryBuildSKColor(oceArgs.Arguments, out value);
             case ImplicitObjectCreationExpressionSyntax { ArgumentList: { } ioceColorArgs } when underlying == typeof(SKColor):
                 return TryBuildSKColor(ioceColorArgs.Arguments, out value);
+
+            case ObjectCreationExpressionSyntax { ArgumentList: { } oceFontArgs } when underlying == typeof(SKFont):
+                return TryBuildSKFont(oceFontArgs.Arguments, out value, objectLookup, designerFilePath);
+            case ImplicitObjectCreationExpressionSyntax { ArgumentList: { } ioceFontArgs } when underlying == typeof(SKFont):
+                return TryBuildSKFont(ioceFontArgs.Arguments, out value, objectLookup, designerFilePath);
 
             case ObjectCreationExpressionSyntax { ArgumentList: { } oceArgs2 }:
                 return TryConstruct(underlying, oceArgs2.Arguments, out value, objectLookup);
@@ -1295,6 +1322,77 @@ public static class CodeImporter
             default:
                 return false;
         }
+    }
+
+    private static bool TryBuildSKTypeface(SeparatedSyntaxList<ArgumentSyntax> args, out object? value)
+    {
+        value = null;
+        if (args.Count == 0)
+            return false;
+
+        if (args[0].Expression is not LiteralExpressionSyntax { Token.Value: string family }
+            || string.IsNullOrWhiteSpace(family))
+            return false;
+
+        var weight = SKFontStyleWeight.Normal;
+        var width = SKFontStyleWidth.Normal;
+        var slant = SKFontStyleSlant.Upright;
+
+        if (args.Count >= 2)
+            TryParseFontStyleEnum(args[1].Expression, ref weight, ref width, ref slant);
+        if (args.Count >= 3)
+            TryParseFontStyleEnum(args[2].Expression, ref weight, ref width, ref slant);
+        if (args.Count >= 4)
+            TryParseFontStyleEnum(args[3].Expression, ref weight, ref width, ref slant);
+
+        value = SKTypeface.FromFamilyName(family, weight, width, slant) ?? SKTypeface.Default;
+        return value != null;
+    }
+
+    private static void TryParseFontStyleEnum(ExpressionSyntax expr, ref SKFontStyleWeight weight, ref SKFontStyleWidth width, ref SKFontStyleSlant slant)
+    {
+        var name = expr switch
+        {
+            MemberAccessExpressionSyntax { Name.Identifier.Text: var member } => member,
+            IdentifierNameSyntax { Identifier.Text: var id } => id,
+            _ => null,
+        };
+        if (name == null)
+            return;
+
+        if (Enum.TryParse(name, ignoreCase: true, out SKFontStyleWeight parsedWeight))
+            weight = parsedWeight;
+        else if (Enum.TryParse(name, ignoreCase: true, out SKFontStyleWidth parsedWidth))
+            width = parsedWidth;
+        else if (Enum.TryParse(name, ignoreCase: true, out SKFontStyleSlant parsedSlant))
+            slant = parsedSlant;
+    }
+
+    private static bool TryBuildSKFont(
+        SeparatedSyntaxList<ArgumentSyntax> args,
+        out object? value,
+        Func<string, object?>? objectLookup,
+        string? designerFilePath)
+    {
+        value = null;
+        if (args.Count is < 1 or > 2)
+            return false;
+
+        if (!TryConvertValue(args[0].Expression, typeof(SKTypeface), out var typefaceObj, objectLookup, designerFilePath)
+            || typefaceObj is not SKTypeface typeface)
+            return false;
+
+        var size = 12f;
+        if (args.Count == 2)
+        {
+            if (!TryConvertValue(args[1].Expression, typeof(float), out var sizeObj, objectLookup, designerFilePath)
+                || sizeObj == null)
+                return false;
+            size = Convert.ToSingle(sizeObj, CultureInfo.InvariantCulture);
+        }
+
+        value = new SKFont(typeface, size);
+        return true;
     }
 
     private static bool IsNumericType(Type type) =>

@@ -43,6 +43,10 @@ private IntPtr _hWnd;
     // WM_QUIT terminates the caller's subsequent Application.Run(...) loop (e.g. a splash shown with
     // ShowDialog() before Application.Run(mainForm) would silently kill the whole app on close).
     private bool _isModal;
+    // Owner disabled for ShowDialogAsync modality; must be re-enabled + activated BEFORE this
+    // HWND is destroyed, otherwise Windows cannot activate the owner and picks another top-level window.
+    private WindowBase? _modalOwnerToRestore;
+    private bool _modalOwnerWasDisabled;
     private bool _updatingFromNative;
     protected bool enableFullDraggable;
 
@@ -297,11 +301,91 @@ private IntPtr _hWnd;
         }
     }
 
+    /// <summary>
+    /// Brings this top-level window above other windows and attempts to activate it.
+    /// Unlike <see cref="ElementBase.BringToFront()"/> (sibling Z-order), this raises the native HWND.
+    /// </summary>
+    public override void BringToFront()
+    {
+        if (!IsHandleCreated)
+            CreateHandle();
+
+        if (_hWnd == IntPtr.Zero)
+            return;
+
+        if (WindowState == FormWindowState.Minimized)
+            WindowState = FormWindowState.Normal;
+        else if (!Visible)
+            Show();
+
+        // Raise in the OS z-order even when SetForegroundWindow is restricted by Windows.
+        BringWindowToTop(_hWnd);
+        SetWindowPos(
+            _hWnd,
+            HWND_TOP,
+            0, 0, 0, 0,
+            (uint)(SetWindowPosFlags.SWP_NOMOVE | SetWindowPosFlags.SWP_NOSIZE));
+
+        ForceForegroundWindow(_hWnd);
+        Application.SetActiveForm(this);
+    }
+
+    /// <summary>
+    /// Activates the window and gives it keyboard focus.
+    /// </summary>
     public void Activate()
     {
-        if (!IsHandleCreated) return;
-        SetForegroundWindow(Handle);
-        SetFocus(Handle);
+        if (!IsHandleCreated)
+            return;
+
+        if (WindowState == FormWindowState.Minimized)
+            WindowState = FormWindowState.Normal;
+
+        ForceForegroundWindow(Handle);
+        Application.SetActiveForm(this);
+    }
+
+    /// <summary>
+    /// Windows often ignores bare <see cref="SetForegroundWindow"/> when another process owns input focus.
+    /// Temporarily attaching thread input is the usual reliable workaround.
+    /// </summary>
+    private void ForceForegroundWindow(IntPtr hWnd)
+    {
+        var foreground = GetForegroundWindow();
+        if (foreground == hWnd)
+        {
+            SetFocus(hWnd);
+            return;
+        }
+
+        var currentThreadId = GetCurrentThreadId();
+        var foregroundThreadId = foreground != IntPtr.Zero
+            ? (uint)GetWindowThreadProcessId(foreground, out _)
+            : 0u;
+        var targetThreadId = (uint)GetWindowThreadProcessId(hWnd, out _);
+
+        var attachedForeground = false;
+        var attachedTarget = false;
+
+        try
+        {
+            if (foregroundThreadId != 0 && foregroundThreadId != currentThreadId)
+                attachedForeground = AttachThreadInput(foregroundThreadId, currentThreadId, true);
+
+            if (targetThreadId != 0 && targetThreadId != currentThreadId && targetThreadId != foregroundThreadId)
+                attachedTarget = AttachThreadInput(targetThreadId, currentThreadId, true);
+
+            BringWindowToTop(hWnd);
+            SetForegroundWindow(hWnd);
+            SetFocus(hWnd);
+        }
+        finally
+        {
+            if (attachedTarget)
+                AttachThreadInput(targetThreadId, currentThreadId, false);
+            if (attachedForeground)
+                AttachThreadInput(foregroundThreadId, currentThreadId, false);
+        }
     }
 
     /// <summary>
@@ -686,26 +770,57 @@ private IntPtr _hWnd;
         get => base.Size;
         set
         {
-            if (base.Size == value)
+            var previous = base.Size;
+            // ElementBase applies MinimumSize/MaximumSize — always sync HWND to the constrained size,
+            // not the caller's unconstrained value (otherwise Max is ignored for the native frame).
+            base.Size = value;
+            if (base.Size == previous)
                 return;
 
-            base.Size = value;
-
-            // Update native window size if handle is created (avoid recursion from WM_SIZE)
             if (IsHandleCreated && !_updatingFromNative)
             {
-                SetWindowPos(Handle, IntPtr.Zero, 0, 0, (int)value.Width, (int)value.Height,
+                SetWindowPos(Handle, IntPtr.Zero, 0, 0, (int)base.Size.Width, (int)base.Size.Height,
                     SetWindowPosFlags.SWP_NOMOVE | SetWindowPosFlags.SWP_NOZORDER |
                     SetWindowPosFlags.SWP_NOACTIVATE);
             }
         }
     }
 
-    [Category("Behavior")]
-    public Button AcceptButton { get; set; }
+    private Button? _acceptButton;
+    private Button? _cancelButton;
 
+    /// <summary>
+    /// Button invoked when Enter is pressed. If the button has no <see cref="Button.DialogResult"/>,
+    /// it is set to <see cref="DialogResult.OK"/> so a click / Enter also closes a modal dialog
+    /// (WinForms-like designer convenience used by About/OK dialogs).
+    /// </summary>
     [Category("Behavior")]
-    public Button CancelButton { get; set; }
+    public Button? AcceptButton
+    {
+        get => _acceptButton;
+        set
+        {
+            _acceptButton = value;
+            if (value != null && value.DialogResult == DialogResult.None)
+                value.DialogResult = DialogResult.OK;
+        }
+    }
+
+    /// <summary>
+    /// Button invoked when Escape is pressed. If the button has no <see cref="Button.DialogResult"/>,
+    /// it is set to <see cref="DialogResult.Cancel"/>.
+    /// </summary>
+    [Category("Behavior")]
+    public Button? CancelButton
+    {
+        get => _cancelButton;
+        set
+        {
+            _cancelButton = value;
+            if (value != null && value.DialogResult == DialogResult.None)
+                value.DialogResult = DialogResult.Cancel;
+        }
+    }
 
     public void CreateHandle()
     {
@@ -1010,11 +1125,27 @@ private IntPtr _hWnd;
     /// method should be called from a thread that can safely run a message loop, such as the main UI thread.</remarks>
     public DialogResult ShowDialog()
     {
+        // If the caller used ShowDialog() without an owner, pin to the active top-level window
+        // so modality still disables the main UI (WinForms-like default).
+        if (_owner == null)
+        {
+            var active = Application.ActiveForm;
+            if (active != null && !ReferenceEquals(active, this) && active.IsHandleCreated)
+                Owner = active;
+        }
+
+        // Match ShowDialogAsync: disable the owner HWND so the user cannot activate/click through
+        // to the parent while this nested modal loop is running.
+        DisableModalOwner();
+
         // See the comment in Show() — Load and Shown both fire after WM_SHOWWINDOW's native show
         // sequence completes, deferred via BeginInvoke, so overlay dialogs opened from either handler
         // can actually render.
         if (!TryShowNativeWindow(modal: true))
+        {
+            RestoreModalOwnerBeforeDestroy();
             return DialogResult.None;
+        }
 
         // Splash / pre-Run modal dialogs need a UI SynchronizationContext so await continuations
         // (e.g. ShowDialogAsync from Load) resume on this message loop instead of a thread-pool thread.
@@ -1032,6 +1163,8 @@ private IntPtr _hWnd;
         {
             Application.ExitMessageLoop();
             _isModal = false;
+            // Safety net if WM_CLOSE did not run (e.g. handle never fully shown / early exit).
+            RestoreModalOwnerBeforeDestroy();
         }
 
         return DialogResult;
@@ -1118,9 +1251,31 @@ private IntPtr _hWnd;
         }
         finally
         {
-            if (previousActive != null)
+            // Owner re-enable happens in ShowDialog finally / WM_CLOSE; restore ActiveForm preference.
+            if (owner is { IsHandleCreated: true })
+                Application.SetActiveForm(owner);
+            else if (previousActive != null)
                 Application.SetActiveForm(previousActive);
         }
+    }
+
+    /// <summary>
+    /// Disables <see cref="Owner"/> for modality (same contract as <see cref="ShowDialogAsync"/>).
+    /// Restoration runs from <see cref="RestoreModalOwnerBeforeDestroy"/> before this HWND is destroyed.
+    /// </summary>
+    private void DisableModalOwner()
+    {
+        var owner = _owner;
+        if (owner is not { IsHandleCreated: true })
+            return;
+
+        // Already tracking this owner (e.g. ShowDialogAsync path, or nested call).
+        if (_modalOwnerWasDisabled && ReferenceEquals(_modalOwnerToRestore, owner))
+            return;
+
+        _modalOwnerToRestore = owner;
+        EnableWindow(owner.Handle, false);
+        _modalOwnerWasDisabled = true;
     }
 
     private static WindowBase? ResolveUiHost(WindowBase? owner)
@@ -1160,6 +1315,15 @@ private IntPtr _hWnd;
         ShowWindow(_hWnd, 5);
         ApplyNativeOwner();
         ApplyShowInTaskbarStyle();
+
+        // After EnableWindow(owner, false) Windows may leave activation elsewhere; force this
+        // dialog to the foreground so mouse/keyboard (AcceptButton) actually reach it.
+        if (modal)
+        {
+            EnableWindow(_hWnd, true);
+            ForceForegroundWindow(_hWnd);
+        }
+
         Application.SetActiveForm(this);
         return true;
     }
@@ -1259,7 +1423,6 @@ private IntPtr _hWnd;
 
         var tcs = new TaskCompletionSource<DialogResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         var previousActive = Application.ActiveForm;
-        var ownerDisabled = false;
         CancellationTokenRegistration registration = default;
 
         void Cleanup()
@@ -1268,10 +1431,13 @@ private IntPtr _hWnd;
             registration.Dispose();
             _isModal = false;
 
-            if (ownerDisabled && owner is { IsHandleCreated: true })
-                EnableWindow(owner.Handle, true);
+            // Owner should already have been re-enabled/activated in WM_CLOSE (before destroy).
+            // Keep a safety restore for early-failure paths that never reach WM_CLOSE.
+            RestoreModalOwnerBeforeDestroy();
 
-            if (previousActive != null)
+            if (owner is { IsHandleCreated: true })
+                Application.SetActiveForm(owner);
+            else if (previousActive != null)
                 Application.SetActiveForm(previousActive);
         }
 
@@ -1308,12 +1474,7 @@ private IntPtr _hWnd;
             {
                 Owner = owner;
                 Application.SetActiveForm(owner);
-
-                if (owner.IsHandleCreated)
-                {
-                    EnableWindow(owner.Handle, false);
-                    ownerDisabled = true;
-                }
+                DisableModalOwner();
             }
 
             if (!TryShowNativeWindow(modal: true))
@@ -1338,6 +1499,36 @@ private IntPtr _hWnd;
         }
 
         return tcs.Task;
+    }
+
+    /// <summary>
+    /// Re-enables and activates the modal owner while this dialog HWND still exists.
+    /// If the owner is still disabled when the dialog is destroyed, Windows cannot give it
+    /// activation and will raise some other top-level window instead (owner "vanishes").
+    /// </summary>
+    private void RestoreModalOwnerBeforeDestroy()
+    {
+        var owner = _modalOwnerToRestore;
+        if (owner == null)
+            return;
+
+        _modalOwnerToRestore = null;
+
+        if (!owner.IsHandleCreated)
+        {
+            _modalOwnerWasDisabled = false;
+            return;
+        }
+
+        if (_modalOwnerWasDisabled)
+        {
+            EnableWindow(owner.Handle, true);
+            _modalOwnerWasDisabled = false;
+        }
+
+        // Same-thread activation while the dialog HWND is still alive — the correct Win32 order.
+        SetActiveWindow(owner.Handle);
+        Application.SetActiveForm(owner);
     }
 
     private void ApplyNativeOwner()
@@ -1568,12 +1759,25 @@ private IntPtr _hWnd;
                         Y = work.Height
                     };
 
+                    // 0 on an axis means "unspecified" — keep the OS default for that axis.
                     if (MinimumSize.Width > 0 || MinimumSize.Height > 0)
+                    {
                         mmi.ptMinTrackSize = new POINT
                         {
-                            X = (int)MinimumSize.Width,
-                            Y = (int)MinimumSize.Height
+                            X = MinimumSize.Width > 0 ? (int)MinimumSize.Width : mmi.ptMinTrackSize.X,
+                            Y = MinimumSize.Height > 0 ? (int)MinimumSize.Height : mmi.ptMinTrackSize.Y
                         };
+                    }
+
+                    if (MaximumSize.Width > 0 || MaximumSize.Height > 0)
+                    {
+                        mmi.ptMaxTrackSize = new POINT
+                        {
+                            X = MaximumSize.Width > 0 ? (int)MaximumSize.Width : mmi.ptMaxTrackSize.X,
+                            Y = MaximumSize.Height > 0 ? (int)MaximumSize.Height : mmi.ptMaxTrackSize.Y
+                        };
+                    }
+
                     Marshal.StructureToPtr(mmi, lParam, true);
                     return IntPtr.Zero;
                 }
@@ -1919,6 +2123,8 @@ private IntPtr _hWnd;
                     }
 
                     _closeRequested = true;
+                    // Must run before DefWindowProc destroys this HWND (see RestoreModalOwnerBeforeDestroy).
+                    RestoreModalOwnerBeforeDestroy();
                     return DefWindowProc(hWnd, msg, wParam, lParam);
                 }
             case WindowMessage.WM_SHOWWINDOW:
@@ -1954,12 +2160,14 @@ private IntPtr _hWnd;
                     return DefWindowProc(hWnd, msg, wParam, lParam);
                 }
             case WindowMessage.WM_DESTROY:
+                // Capture before FormClosed handlers (e.g. ShowDialogAsync Cleanup) clear _isModal.
+                var wasModal = _isModal;
+
                 if (!_formClosed)
                 {
                     _formClosed = true;
                     Application.UnregisterForm(this);
                     OnFormClosed(new FormClosedEventArgs(CloseReason.UserClosing));
-                    FormClosed?.Invoke(this, new FormClosedEventArgs(CloseReason.UserClosing));
                 }
 
                 _closeRequested = false;
@@ -1968,7 +2176,7 @@ private IntPtr _hWnd;
                 // loop. A modal ShowDialog() dialog exits its own nested loop via _formClosed; if it
                 // also posted WM_QUIT here, that quit would be dequeued by the caller's next
                 // Application.Run(...) and terminate the program right after the dialog closed.
-                if (!_isModal && Application.OpenForms.Count == 0)
+                if (!wasModal && Application.OpenForms.Count == 0)
                     PostQuitMessage(0);
                 return IntPtr.Zero;
             case WindowMessage.WM_ERASEBKGND:

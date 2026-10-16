@@ -339,8 +339,18 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
     }
 
 
+    /// <summary>
+    /// True when the caller is not on the owning window's UI thread and marshaling is required.
+    /// </summary>
     [Browsable(false)]
-    public bool InvokeRequired;
+    public bool InvokeRequired
+    {
+        get
+        {
+            var window = this as WindowBase ?? GetParentWindow();
+            return window is { IsHandleCreated: true } && !window.CheckAccess();
+        }
+    }
 
     [Browsable(false)]
     public ElementCollection Controls { get; }
@@ -801,7 +811,11 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         element.Parent.InvalidateRenderTree();
     }
 
-    public void BringToFront()
+    /// <summary>
+    /// Moves this element to the highest Z-order among its siblings.
+    /// Top-level windows override this to also raise the native HWND.
+    /// </summary>
+    public virtual void BringToFront()
     {
         if (Parent == null)
             return;
@@ -818,21 +832,58 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
 
     public void BeginInvoke(Delegate method)
     {
+        ArgumentNullException.ThrowIfNull(method);
+
+        var window = this as WindowBase ?? GetParentWindow();
+        if (window is { IsHandleCreated: true } && !window.CheckAccess())
+        {
+            window.BeginInvoke(() => method.DynamicInvoke());
+            return;
+        }
+
         method.DynamicInvoke();
     }
 
     public void BeginInvoke(Delegate method, params object[] args)
     {
+        ArgumentNullException.ThrowIfNull(method);
+
+        var window = this as WindowBase ?? GetParentWindow();
+        if (window is { IsHandleCreated: true } && !window.CheckAccess())
+        {
+            window.BeginInvoke(() => method.DynamicInvoke(args));
+            return;
+        }
+
         method.DynamicInvoke(args);
     }
 
     public void Invoke(Delegate method)
     {
+        ArgumentNullException.ThrowIfNull(method);
+
+        var window = this as WindowBase ?? GetParentWindow();
+        if (window is { IsHandleCreated: true } && !window.CheckAccess())
+        {
+            // WindowBase.Invoke(Action) marshals synchronously onto the UI thread.
+            window.Invoke(() => method.DynamicInvoke());
+            return;
+        }
+
         method.DynamicInvoke();
     }
 
     public void Invoke(Delegate method, params object[] args)
     {
+        ArgumentNullException.ThrowIfNull(method);
+
+        var window = this as WindowBase ?? GetParentWindow();
+        if (window is { IsHandleCreated: true } && !window.CheckAccess())
+        {
+            window.Invoke(() => method.DynamicInvoke(args));
+            return;
+        }
+
         method.DynamicInvoke(args);
     }
 
@@ -1556,9 +1607,10 @@ public abstract partial class ElementBase : IElement, IArrangedElement, IDisposa
         }
     }
 
-    private bool _autoSize;
+    private bool _autoSize = true;
 
     [Category("Layout")]
+    [DefaultValue(true)]
     public virtual bool AutoSize
     {
         get => CommonProperties.GetAutoSize(this);

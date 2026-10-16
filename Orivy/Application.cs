@@ -569,8 +569,8 @@ public class Application
     /// falling back to the assembly version).
     /// </summary>
     public static string ProductVersion =>
-        GetEntryAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-        ?? Assembly.GetEntryAssembly()?.GetName().Version?.ToString()
+        GetEntryAttribute<AssemblyVersionAttribute>()?.Version 
+        ?? GetEntryAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
         ?? "1.0.0.0";
 
     /// <summary>

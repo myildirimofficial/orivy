@@ -787,13 +787,11 @@ public class ButtonGroup<TValue> : Container
         if (!ApplySelectionStyle)
             return;
 
-        var selectedBack = SelectedBackColor == SKColor.Empty ? ColorScheme.Primary : SelectedBackColor;
-        var selectedFore = SelectedForeColor == SKColor.Empty ? SKColors.White : SelectedForeColor;
-        var selectedBorder = SelectedBorderColor == SKColor.Empty ? selectedBack.Brightness(-0.16f) : SelectedBorderColor;
         var joined = Gap == 0;
 
         // When Gap is 0 the group applies segmented corner radii on Button.Radius.
         // Do not force a per-button Radius / drop shadow here or the segments look separated.
+        // ColorScheme / Selected* colors are read inside the lambdas so ThemeChanged replay stays live.
         button.ConfigureVisualStyles(styles =>
         {
             styles
@@ -818,6 +816,13 @@ public class ButtonGroup<TValue> : Container
                     .Scale(0.99f))
                 .OnChecked(rule =>
                 {
+                    var selectedBack = SelectedBackColor == SKColor.Empty ? ColorScheme.Primary : SelectedBackColor;
+                    var selectedFore = SelectedForeColor == SKColor.Empty
+                        ? selectedBack.Determine()
+                        : SelectedForeColor;
+                    var selectedBorder = SelectedBorderColor == SKColor.Empty
+                        ? selectedBack.Brightness(-0.16f)
+                        : SelectedBorderColor;
                     var checkedRule = rule
                         .Background(selectedBack)
                         .Foreground(selectedFore)

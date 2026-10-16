@@ -4,6 +4,7 @@ using SkiaSharp;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Text;
 
 namespace Orivy.Controls;
 
@@ -21,6 +22,8 @@ public class TextBox : ElementBase
     private const float CaretThickness = 1.15f;
     private const float CaretMinimumVisibleOpacity = 0.28f;
     private const float SelectionInsetY = 2f;
+    /// <summary>Spaces per tab stop when expanding <c>\t</c> for storage (!AcceptsTab) or paint/measure.</summary>
+    private const int TabSize = 4;
 
     private readonly List<TextLineLayout> _lines = new();
     private readonly SKPaint _textPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
@@ -216,7 +219,23 @@ public class TextBox : ElementBase
     public bool AcceptsTab
     {
         get => _acceptsTab;
-        set => _acceptsTab = value;
+        set
+        {
+            if (_acceptsTab == value)
+                return;
+
+            _acceptsTab = value;
+            // Turning tabs off must expand any stored \t the same way Text/paste already do.
+            var normalized = NormalizeTextForStorage(base.Text);
+            if (!string.Equals(base.Text, normalized, StringComparison.Ordinal))
+            {
+                _displayTextDirty = true;
+                base.Text = normalized;
+            }
+
+            InvalidateTextLayout();
+            Invalidate();
+        }
     }
 
     [Category("Behavior")]
@@ -1137,10 +1156,19 @@ public class TextBox : ElementBase
 
     private float MeasureTextWidth(string text, int start, int length)
     {
-        if (_layoutFont == null || length <= 0)
+        if (_layoutFont == null || length <= 0 || text == null)
             return 0f;
 
-        return _layoutFont.MeasureText(text.Substring(start, length));
+        if ((uint)start > (uint)text.Length)
+            return 0f;
+
+        var safeLength = Math.Min(length, text.Length - start);
+        if (safeLength <= 0)
+            return 0f;
+
+        // Skia treats \t as a near-zero glyph; expand to tab stops so wrap/caret widths match paint.
+        var segment = ExpandTabs(text, start, safeLength, TabSize);
+        return _layoutFont.MeasureText(segment);
     }
 
     private void UpdateScrollMetrics()
@@ -1386,7 +1414,10 @@ public class TextBox : ElementBase
         if (_layoutFont == null)
             return;
 
-        TextRenderer.DrawText(canvas, text, x, y, SKTextAlign.Left, _layoutFont, paint, new TextRenderOptions());
+        var drawText = text.IndexOf('\t') >= 0
+            ? ExpandTabs(text, 0, text.Length, TabSize)
+            : text;
+        TextRenderer.DrawText(canvas, drawText, x, y, SKTextAlign.Left, _layoutFont, paint, new TextRenderOptions());
     }
 
     private SKRect GetCaretRect()
@@ -1419,10 +1450,9 @@ public class TextBox : ElementBase
         if (_layoutFont == null || length <= 0 || string.IsNullOrEmpty(lineText))
             return 0f;
 
-        if (length >= lineText.Length)
-            return _layoutFont.MeasureText(lineText);
-
-        return _layoutFont.MeasureText(lineText.Substring(0, length));
+        var safeLength = Math.Min(length, lineText.Length);
+        var segment = ExpandTabs(lineText, 0, safeLength, TabSize);
+        return _layoutFont.MeasureText(segment);
     }
 
     private void DrawBlockCaret(SKCanvas canvas, SKRect caretRect)
@@ -1488,13 +1518,9 @@ public class TextBox : ElementBase
 
         float width;
         if (localIndex < line.Length)
-        {
-            width = _layoutFont.MeasureText(lineText.Substring(localIndex, 1));
-        }
+            width = MeasureLocalX(lineText, localIndex + 1) - MeasureLocalX(lineText, localIndex);
         else
-        {
             width = _layoutFont.MeasureText(" ");
-        }
 
         return Math.Max(6f * ScaleFactor, width);
     }
@@ -1641,14 +1667,9 @@ public class TextBox : ElementBase
 
     private string SanitizeInsertedText(string text)
     {
-        if (string.IsNullOrEmpty(text))
+        var normalized = NormalizeTextCore(text);
+        if (normalized.Length == 0)
             return string.Empty;
-
-        var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
-        if (!_multiline)
-            normalized = normalized.Replace('\n', ' ');
-        if (!_acceptsTab)
-            normalized = normalized.Replace("\t", "    ", StringComparison.Ordinal);
 
         if (_maxLength > 0)
         {
@@ -1665,17 +1686,110 @@ public class TextBox : ElementBase
 
     private string NormalizeTextForStorage(string? value)
     {
-        var normalized = string.IsNullOrEmpty(value)
-            ? string.Empty
-            : value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
-
-        if (!_multiline)
-            normalized = normalized.Replace('\n', ' ');
-
+        var normalized = NormalizeTextCore(value);
         if (_maxLength > 0 && normalized.Length > _maxLength)
             normalized = normalized[.._maxLength];
 
         return normalized;
+    }
+
+    /// <summary>
+    /// Shared Text/paste normalization: CRLF → LF, optional single-line flattening, expand tabs when
+    /// <see cref="AcceptsTab"/> is false, and strip other control characters Skia cannot lay out.
+    /// </summary>
+    private string NormalizeTextCore(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return string.Empty;
+
+        var normalized = value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        if (!_multiline)
+            normalized = normalized.Replace('\n', ' ');
+
+        if (!_acceptsTab)
+            normalized = normalized.Replace("\t", new string(' ', TabSize), StringComparison.Ordinal);
+
+        return StripUnsupportedControlCharacters(normalized, keepTab: _acceptsTab);
+    }
+
+    private static string StripUnsupportedControlCharacters(string text, bool keepTab)
+    {
+        var needsStrip = false;
+        for (var i = 0; i < text.Length; i++)
+        {
+            var ch = text[i];
+            if (ch == '\n' || (keepTab && ch == '\t'))
+                continue;
+            if (char.IsControl(ch))
+            {
+                needsStrip = true;
+                break;
+            }
+        }
+
+        if (!needsStrip)
+            return text;
+
+        var builder = new StringBuilder(text.Length);
+        for (var i = 0; i < text.Length; i++)
+        {
+            var ch = text[i];
+            if (ch == '\n' || (keepTab && ch == '\t'))
+            {
+                builder.Append(ch);
+                continue;
+            }
+
+            if (!char.IsControl(ch))
+                builder.Append(ch);
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool SegmentContainsTab(string text, int start, int length)
+    {
+        var end = start + length;
+        for (var i = start; i < end; i++)
+        {
+            if (text[i] == '\t')
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Expands <c>\t</c> to spaces on tab stops counted from the start of the segment (line).</summary>
+    private static string ExpandTabs(string text, int start, int length, int tabSize)
+    {
+        if (length <= 0)
+            return string.Empty;
+
+        if (!SegmentContainsTab(text, start, length))
+            return text.Substring(start, length);
+
+        var builder = new StringBuilder(length + tabSize);
+        var column = 0;
+        var end = start + length;
+        for (var i = start; i < end; i++)
+        {
+            var ch = text[i];
+            if (ch == '\t')
+            {
+                var spaces = tabSize - (column % tabSize);
+                if (spaces <= 0)
+                    spaces = tabSize;
+                builder.Append(' ', spaces);
+                column += spaces;
+            }
+            else
+            {
+                builder.Append(ch);
+                column++;
+            }
+        }
+
+        return builder.ToString();
     }
 
     private void SelectWordAt(int index)
@@ -1799,7 +1913,17 @@ public class TextBox : ElementBase
             return string.Empty;
 
         var text = GetDisplayText();
-        return text.Substring(line.Start, line.Length);
+        if ((uint)line.Start > (uint)text.Length)
+        {
+            InvalidateTextLayout();
+            return string.Empty;
+        }
+
+        var safeLength = Math.Min(line.Length, text.Length - line.Start);
+        if (safeLength <= 0)
+            return string.Empty;
+
+        return text.Substring(line.Start, safeLength);
     }
 
     private void SetSelectionCore(int anchor, int caret, bool preservePreferredCaretX, bool ensureVisible)

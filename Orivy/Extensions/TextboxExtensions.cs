@@ -59,9 +59,18 @@ public static class TextBoxBaseExtensions
     /// <param name="action">The action</param>
     public static void RunInUIThread(this ElementBase target, Action action)
     {
-        if (target.InvokeRequired)
-            target.Invoke(action);
-        else
-            action();
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(action);
+
+        // ElementBase.InvokeRequired / Invoke do not marshal by themselves; route through the
+        // owning WindowBase so background log/network threads cannot race TextBox layout state.
+        var window = target as WindowBase ?? target.GetParentWindow();
+        if (window is { IsHandleCreated: true } && !window.CheckAccess())
+        {
+            window.Invoke(action);
+            return;
+        }
+
+        action();
     }
 }

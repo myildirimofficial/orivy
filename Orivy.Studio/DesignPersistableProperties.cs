@@ -76,6 +76,8 @@ internal static class DesignPersistableProperties
             return true;
         if (type == typeof(SKColor) || type == typeof(SKSize) || type == typeof(SKPoint))
             return true;
+        if (type == typeof(SKFont) || type == typeof(SKTypeface))
+            return true;
         if (type == typeof(Thickness) || type == typeof(Radius))
             return true;
         if (type == typeof(int) || type == typeof(float) || type == typeof(double)
@@ -296,6 +298,9 @@ internal static class DesignPersistableProperties
         if (a is Radius ra && b is Radius rb)
             return NearlyEqual(ra.TopLeft, rb.TopLeft) && NearlyEqual(ra.TopRight, rb.TopRight)
                 && NearlyEqual(ra.BottomLeft, rb.BottomLeft) && NearlyEqual(ra.BottomRight, rb.BottomRight);
+
+        if (a is SKFont fa && b is SKFont fb)
+            return fa.FontEquals(fb);
 
         return Equals(a, b);
     }
